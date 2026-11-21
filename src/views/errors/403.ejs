@@ -1,0 +1,17 @@
+<section class="section error-page">
+  <div class="container stack">
+    <p class="error-page__code">403</p>
+    <h1>Недостаточно прав</h1>
+    <p class="error-page__text">
+      У вашей роли нет доступа к этому разделу. Вернитесь в дашборд или попросите администратора выдать права.
+    </p>
+    <div class="cluster">
+      <% if (locals.currentUser) { %>
+      <a class="btn btn--primary" href="/app/dashboard">В дашборд</a>
+      <% } else { %>
+      <a class="btn btn--primary" href="/login">Войти</a>
+      <% } %>
+      <a class="btn btn--ghost" href="/">На главную</a>
+    </div>
+  </div>
+</section>

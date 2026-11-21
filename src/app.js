@@ -11,6 +11,17 @@ import { requestId } from './middleware/requestId.js';
 import { errorHandler, notFound } from './middleware/errors.js';
 import publicRoutes from './routes/public.routes.js';
 import { notFoundPage } from './controllers/public.controller.js';
+import { can } from './config/permissions.js';
+import { createPgSessionStore, createSessionMiddleware } from './lib/session.js';
+import { csrfProtection } from './middleware/csrf.js';
+import { requireAuth } from './middleware/auth.js';
+import { createUsersRepository } from './repositories/users.repo.js';
+import { createAuditRepository } from './repositories/audit.repo.js';
+import { createAuthService } from './services/auth.service.js';
+import { createAuditService } from './services/audit.service.js';
+import { createAuthController } from './controllers/auth.controller.js';
+import { createAuthRouter } from './routes/auth.routes.js';
+import { createAppRouter } from './routes/app.routes.js';
 
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const viewsDir = fileURLToPath(new URL('./views', import.meta.url));
@@ -18,14 +29,25 @@ const publicDir = fileURLToPath(new URL('../public', import.meta.url));
 
 /**
  * Builds the Express application. The database is injected rather than imported so tests can run without a real
- * connection and later tasks can add a session store without touching this factory's callers.
- * @param {{ db: { query: (text: string, params?: unknown[]) => Promise<unknown> } }} deps
+ * connection. `db` is the shared PostgreSQL pool in production; it also backs the default session store, which keeps
+ * integration tests on the test database. Tests that need no sessions pass a `MemoryStore` explicitly.
+ * @param {{
+ *   db: { query: (text: string, params?: unknown[]) => Promise<unknown> } & Partial<import('pg').Pool>,
+ *   sessionStore?: import('express-session').Store,
+ * }} deps
  * @returns {import('express').Express}
  */
-export function createApp({ db } = {}) {
+export function createApp({ db, sessionStore } = {}) {
   if (!db || typeof db.query !== 'function') {
     throw new TypeError('createApp requires a db object with a query(text, params) method');
   }
+
+  const usersRepository = createUsersRepository(db);
+  const auditRepository = createAuditRepository(db);
+  const authService = createAuthService({ usersRepository });
+  const auditService = createAuditService({ auditRepository });
+  const authController = createAuthController({ authService, auditService });
+  const store = sessionStore ?? createPgSessionStore(db);
 
   const app = express();
   app.set('trust proxy', 1);
@@ -76,7 +98,19 @@ export function createApp({ db } = {}) {
   // Fonts, the single stylesheet and SVG assets live here. Fingerprinted React assets will get immutable caching.
   app.use(express.static(publicDir));
 
+  // Session → CSRF → locals → routes is the required order: the token lives in the session, the templates read the
+  // token and the current user, and only then can a route guard redirect or render.
+  app.use(createSessionMiddleware({ store }));
+  app.use(csrfProtection);
+  app.use((req, res, next) => {
+    res.locals.currentUser = req.session?.user ?? null;
+    res.locals.can = (permission) => can(req.session?.user?.role, permission);
+    next();
+  });
+
   app.use('/', publicRoutes);
+  app.use(createAuthRouter({ authController }));
+  app.use('/app', createAppRouter({ requireAuth }));
 
   app.get('/health', async (req, res) => {
     res.set('Cache-Control', 'no-store');

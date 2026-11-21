@@ -1,0 +1,74 @@
+<section class="section">
+  <div class="container">
+    <div class="grid grid--2">
+      <div class="card card--feature stack">
+        <div class="stack stack--sm">
+          <p class="eyebrow">Демо-стенд</p>
+          <h1>Вход в «Метрику»</h1>
+          <p class="field__hint">Введите рабочий email и пароль. Демо-аккаунты перечислены справа.</p>
+        </div>
+
+        <% if (error) { %>
+        <p class="field__error" id="login-error" role="alert"><%= error %></p>
+        <% } %>
+
+        <form class="stack" method="post" action="/login">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <input type="hidden" name="next" value="<%= next %>">
+
+          <div class="field">
+            <label class="field__label" for="email">Email</label>
+            <input
+              class="input"
+              id="email"
+              name="email"
+              type="email"
+              inputmode="email"
+              autocomplete="username"
+              placeholder="admin@metrika.by"
+              value="<%= email %>"
+              required
+              autofocus
+              <% if (error) { %>aria-invalid="true" aria-describedby="login-error"<% } %>
+            >
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="password">Пароль</label>
+            <input
+              class="input"
+              id="password"
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              required
+              <% if (error) { %>aria-invalid="true" aria-describedby="login-error"<% } %>
+            >
+          </div>
+
+          <div class="cluster">
+            <button class="btn btn--primary" type="submit">Войти</button>
+            <a class="btn btn--ghost" href="/">На главную</a>
+          </div>
+        </form>
+      </div>
+
+      <aside class="card card--flat stack">
+        <div class="stack stack--sm">
+          <h2 class="card__title">Три роли демо-стенда</h2>
+          <p class="field__hint">
+            «Зёрна» — вымышленный интернет-магазин кофе из Минска. Данные в BYN, период — последние 14 месяцев.
+          </p>
+        </div>
+
+        <ul class="stack stack--sm">
+          <li><strong>admin@metrika.by</strong> — администратор: пользователи, аудит, все настройки.</li>
+          <li><strong>analyst@metrika.by</strong> — маркетолог-аналитик: каналы, импорт, цели, сценарии.</li>
+          <li><strong>viewer@metrika.by</strong> — наблюдатель: только просмотр и экспорт.</li>
+        </ul>
+
+        <p class="field__hint">Пароль для всех трёх аккаунтов указан в README проекта.</p>
+      </aside>
+    </div>
+  </div>
+</section>
