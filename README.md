@@ -67,8 +67,10 @@ ADMIN_DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres
 
 ### Если PostgreSQL использует peer-аутентификацию
 
-`postgres:///metrika_dev` **не** включает peer-аутентификацию в node-postgres: драйвер в этом случае идёт по TCP
-на `localhost` от имени пользователя ОС. Рабочий путь — отдельная роль с паролем:
+Вариантов подключения три.
+
+**a. Отдельная роль с паролем по TCP (рекомендуется).** Этот путь не зависит от peer-аутентификации, но требует,
+чтобы `pg_hba.conf` разрешал пароль для TCP-подключений (`scram-sha-256`, `md5` или `trust`). Создайте роль и базы:
 
 ```bash
 # если текущая роль ОС не суперпользователь, все три команды запускаются от служебной роли:
@@ -89,22 +91,36 @@ ADMIN_DATABASE_URL=postgres://metrika:<пароль>@localhost:5432/postgres
 ```
 
 Если вы создали обе базы вручную, `npm run db:setup` только подтвердит их наличие. Если оставили эту работу
-скрипту, роль из `ADMIN_DATABASE_URL` должна иметь `CREATEDB`. На стенде, где TCP к PostgreSQL закрыт, создайте
-базы через `createdb` и пропустите `db:setup`.
+скрипту, роль из `ADMIN_DATABASE_URL` должна иметь `CREATEDB`.
 
-Для psql по Unix-сокету (когда TCP закрыт) можно вообще не задавать URL, а передать окружение:
+**b. Unix-сокет.** Если TCP закрыт или сервер настроен на peer-аутентификацию, можно подключиться через сокет.
+Путь к сокету задаётся параметром `host` в URL или переменной `PGHOST`. В примере ниже роль `metrika`; при
+peer-аутентификации она должна совпадать с именем пользователя ОС, от которого запущено приложение:
 
-```bash
-export PGHOST=/var/run/postgresql
-export PGUSER=metrika
-export PGPASSWORD='<пароль>'
-psql -d postgres
+```dotenv
+DATABASE_URL=postgres://metrika@/metrika_dev?host=/var/run/postgresql
 ```
 
-`PGHOST`/`PGUSER`/`PGPASSWORD` действуют только на утилиты, запущенные без строки подключения: если `DATABASE_URL`
-задан, node-postgres использует URL и переменные `PG*` игнорирует. Приложению `DATABASE_URL` обязателен; для
-подключения именно через сокет используйте URL с путём в параметре `host`:
-`postgres://metrika@/metrika_dev?host=/var/run/postgresql`.
+```bash
+export PGHOST=/var/run/postgresql   # host в URL можно не указывать: postgres:///metrika_dev
+```
+
+`PGHOST`/`PGUSER`/`PGPASSWORD` заполняют **только незаданные** поля подключения; явно указанное в URL поле имеет
+приоритет. Поэтому `postgres:///metrika_dev` сам по себе оставляет host незаданным и означает TCP `localhost`, а с
+экспортированным `PGHOST` — Unix-сокет.
+
+При peer-аутентификации PostgreSQL игнорирует пароль и требует, чтобы роль совпадала с пользователем ОС. Запускайте
+приложение и psql от этого пользователя; `PGUSER`/`PGPASSWORD` здесь не помогут:
+
+```bash
+psql -d metrika_dev
+```
+
+Административные команды (`createuser`, `createdb`) выполняются от роли с правом `CREATEDB`. Если текущая роль ОС
+не суперпользователь, используйте вариант с `sudo -u postgres` из пункта «a».
+
+**c. Docker или роль `postgres` по умолчанию.** Если стенд запущен в Docker или локально с ролью `postgres` и
+паролем `postgres`, оставьте URL из `.env.example` без изменений — это самый простой путь.
 
 Также задайте `SESSION_SECRET` (не короче 32 символов). Кроссплатформенный вариант, работает и в Windows:
 
@@ -220,7 +236,7 @@ docs/
 | Симптом | Причина и действие |
 |---|---|
 | `database "metrika_dev" does not exist` | базы ещё нет: выполните `npm run db:setup` |
-| `password authentication failed for user ...` | неверный URL, пароль или `pg_hba.conf`. Проверьте `psql "$DATABASE_URL"`. Для peer-auth не убирайте пароль из URL: создайте роль с паролем (см. «Если PostgreSQL использует peer-аутентификацию») или подключайтесь к сокету через `PGHOST` в psql |
+| `password authentication failed for user ...` | неверный URL, пароль или `pg_hba.conf`. Проверьте `psql "$DATABASE_URL"`. При peer-аутентификации пароль игнорируется, а роль должна совпадать с пользователем ОС: подключайтесь к сокету (`?host=/var/run/postgresql` или `PGHOST`) от нужного пользователя либо создайте роль с паролем и разрешите password auth по TCP (см. «Если PostgreSQL использует peer-аутентификацию») |
 | `db:setup failed: ... permission denied to create database` | у роли в `ADMIN_DATABASE_URL` нет `CREATEDB`. Дайте право или создайте базы вручную через `createdb` |
 | `TEST_DATABASE_URL is not set` | скопируйте `.env.example` в `.env` и заполните тестовую базу |
 | `EADDRINUSE: address already in use :::3000` | порт занят: `PORT=3001 npm run dev` и `APP_URL=http://localhost:3001` (PowerShell: `$env:PORT=3001`) |
