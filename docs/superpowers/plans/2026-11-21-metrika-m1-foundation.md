@@ -118,7 +118,7 @@ COOKIE_SECURE=false
 LOG_LEVEL=info
 ```
 Локальный `.env` — те же ключи, реальные значения:
-`DATABASE_URL=postgres://dimass@localhost:5432/metrika_dev`, `TEST_DATABASE_URL=postgres://dimass@localhost:5432/metrika_test`,
+`DATABASE_URL=postgres://postgres:postgres@localhost:5432/metrika_dev`, `TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/metrika_test`,
 `SESSION_SECRET` из `openssl rand -hex 32`. Создать БД: `createdb metrika_dev; createdb metrika_test`.
 Windows-инструкция появится в M6; здесь достаточно локального Linux-стенда.
 
@@ -464,7 +464,7 @@ Expected: 3 passed.
 - [ ] **Step 7: Применить миграции к dev-БД и проверить вручную**
 
 Run: `npm run migrate` → `applied 001_init.sql`; затем
-`psql postgres://dimass@localhost:5432/metrika_dev -c '\dt'` → 15 таблиц.
+`psql postgres://postgres:postgres@localhost:5432/metrika_dev -c '\dt'` → 15 таблиц.
 Expected: команда завершается с кодом 0.
 
 - [ ] **Step 8: Коммит**
@@ -603,15 +603,15 @@ npm pack @fontsource-variable/inter --pack-destination /tmp/fonts-inter
 npm pack @fontsource-variable/inter-tight --pack-destination /tmp/fonts-inter-tight
 tar -xzf /tmp/fonts-inter/*.tgz -C /tmp/fonts-inter
 tar -xzf /tmp/fonts-inter-tight/*.tgz -C /tmp/fonts-inter-tight
-mkdir -p /home/dimass/opencode/10/public/fonts
+mkdir -p public/fonts
 cp /tmp/fonts-inter/package/files/inter-latin-wght-normal.woff2 \
    /tmp/fonts-inter/package/files/inter-cyrillic-wght-normal.woff2 \
-   /home/dimass/opencode/10/public/fonts/
+   public/fonts/
 cp /tmp/fonts-inter-tight/package/files/inter-tight-latin-wght-normal.woff2 \
    /tmp/fonts-inter-tight/package/files/inter-tight-cyrillic-wght-normal.woff2 \
-   /home/dimass/opencode/10/public/fonts/
-cp /tmp/fonts-inter/package/LICENSE /home/dimass/opencode/10/public/fonts/LICENSE-inter.txt
-cp /tmp/fonts-inter-tight/package/LICENSE /home/dimass/opencode/10/public/fonts/LICENSE-inter-tight.txt
+   public/fonts/
+cp /tmp/fonts-inter/package/LICENSE public/fonts/LICENSE-inter.txt
+cp /tmp/fonts-inter-tight/package/LICENSE public/fonts/LICENSE-inter-tight.txt
 ```
 Имена файлов уточнить по факту в `package/files/` (могут содержать `wght`).
 Шрифт НБРБ уже скачан: скопировать `/tmp/nbrb/nbrb.woff2` и `/tmp/nbrb/nbrb.ttf` в `public/fonts/`.
@@ -980,10 +980,11 @@ git commit -m "feat: add authenticated app shell with data anchor and rbac scree
 ### Task 8: E2E-смоук, README, отчёт этапа
 
 **Files:**
-- Create: `README.md`, `docs/screenshots/m1/*.png`, `docs/screenshots/m1/README.md`, `IMPROVEMENTS.md`
-- Modify: `.gitignore` при необходимости
+- Create: `README.md`, `db/setup.js`, `docs/screenshots/m1/*.png`, `docs/screenshots/m1/README.md`, `IMPROVEMENTS.md`
+- Modify: `package.json` (script `db:setup`), `.gitignore` при необходимости
 
-**Interfaces:** не добавляет кода.
+**Interfaces:** `db/setup.js` читает `ADMIN_DATABASE_URL`, `DATABASE_URL`, `TEST_DATABASE_URL`; создаёт обе БД
+идемпотентно; код выхода 1 с понятным сообщением, если роль не может создавать БД.
 
 - [ ] **Step 1: Запустить полный прогон**
 
@@ -1013,22 +1014,45 @@ Expected: все тесты зелёные, сервер на 3000.
 Сохранить в `docs/screenshots/m1/`: `landing-desktop.png`, `landing-mobile.png`, `login.png`,
 `dashboard-admin.png`, `admin-users.png`, `forbidden-viewer.png`.
 
-- [ ] **Step 4: Написать `README.md`**
+- [ ] **Step 4: Сделать запуск переносимым**
 
-Секции: что это, стек, скриншот, быстрый старт (Node 24, PostgreSQL 18, `createdb`, `.env`, migrate, seed, dev),
-демо-аккаунты и пароль, скрипты, структура, ссылки на спеки, статус этапов (M1 готов, дальше по дорожной карте),
-лицензия данных (демо, вымышленные).
+`db/setup.js`:
+- читает `ADMIN_DATABASE_URL` (по умолчанию `postgres://postgres:postgres@localhost:5432/postgres`),
+  `DATABASE_URL`, `TEST_DATABASE_URL`;
+- подключается к admin-БД, проверяет `pg_database`, выполняет `CREATE DATABASE "<name>"` только для отсутствующих;
+- имена БД берутся из URL, ничего не хардкодится; экранирование имени — через `pg` identifier (никакой конкатенации
+  пользовательского ввода в SQL);
+- повторный запуск печатает «already exists» и завершается с кодом 0;
+- если роль не имеет права создавать БД — код 1 и подсказка про `ADMIN_DATABASE_URL`.
+Добавить в `package.json`: `"db:setup": "node db/setup.js"`.
 
-- [ ] **Step 5: Записать улучшения**
+Проверка переносимости на «чистом» стенде:
+```bash
+createdb metrika_scratch && dropdb metrika_scratch   # убедиться, что роль может создавать БД
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/metrika_scratch \
+TEST_DATABASE_URL=$DATABASE_URL ADMIN_DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres \
+npm run db:setup
+```
+Затем один раз `npm run db:setup`, `npm run migrate`, `npm run seed` на обычных URL и убедиться, что всё работает
+без ручных `psql`-команд и без имени конкретного пользователя в коде.
+
+- [ ] **Step 5: Написать `README.md`**
+
+Секции: что это, стек, скриншот, быстрый старт с нуля (Node 24, PostgreSQL 18 или Docker, `cp .env.example .env`,
+`npm ci`, `npm run db:setup`, `npm run migrate`, `npm run seed`, `npm run dev`), демо-аккаунты и пароль, скрипты,
+структура, ссылки на спеки, статус этапов, лицензия данных (демо, вымышленные). Никаких локальных путей и имён
+пользователей; для Windows — отдельная короткая врезка (в M6 станет полной инструкцией).
+
+- [ ] **Step 6: Записать улучшения**
 
 `IMPROVEMENTS.md`: OG-картинка в PNG (сейчас SVG), интеграционные тесты последовательные (fileParallelism false),
 заглушки разделов до M2–M5.
 
-- [ ] **Step 6: Финальный коммит этапа**
+- [ ] **Step 7: Финальный коммит этапа**
 
 ```bash
-git add README.md IMPROVEMENTS.md docs/screenshots/m1
-git commit -m "docs: add m1 readme, screenshots and verification log"
+git add README.md IMPROVEMENTS.md db/setup.js package.json docs/screenshots/m1
+git commit -m "docs: add m1 readme, screenshots and portable database bootstrap"
 ```
 
 ---
