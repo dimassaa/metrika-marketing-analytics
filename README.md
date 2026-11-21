@@ -41,7 +41,8 @@ TypeScript не используется. Второго CSS-файла, CSS-ф�
 
 ## Быстрый старт с чистого клона
 
-Нужны Node.js, npm и запущенный PostgreSQL 18. Роль БД должна уметь создавать базы (или базы создаются вручную).
+Нужны Node.js (рекомендуется 24 LTS, минимальная поддерживаемая версия — 22), npm и запущенный PostgreSQL 18.
+Роль БД должна уметь создавать базы (или базы создаются вручную).
 
 ```bash
 git clone <URL-репозитория> metrika
@@ -59,19 +60,59 @@ ADMIN_DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres
 ```
 
 - Значения по умолчанию рассчитаны на локальный PostgreSQL или Docker с ролью `postgres` и паролем `postgres`.
-- Если ваш PostgreSQL использует **peer/trust-аутентификацию** (типично для Linux-пакета), пароль не нужен:
-  укажите роль и сокет, например `postgres:///metrika_dev` для текущего пользователя ОС или
-  `postgres:///postgres` для служебной роли. Имя роли должно существовать в PostgreSQL.
 - Если используется **пароль**, оставьте формат `postgres://пользователь:пароль@localhost:5432/имя_базы`.
   Спецсимволы в пароле кодируются процентным экранированием.
 - `ADMIN_DATABASE_URL` нужен только скрипту `db:setup`: это подключение к служебной базе `postgres` от роли,
-  у которой есть право `CREATEDB`.
+  у которой есть право `CREATEDB` (если базы уже созданы вручную, право не требуется).
 
-Также задайте `SESSION_SECRET` (не короче 32 символов):
+### Если PostgreSQL использует peer-аутентификацию
+
+`postgres:///metrika_dev` **не** включает peer-аутентификацию в node-postgres: драйвер в этом случае идёт по TCP
+на `localhost` от имени пользователя ОС. Рабочий путь — отдельная роль с паролем:
 
 ```bash
-openssl rand -hex 32
+# если текущая роль ОС не суперпользователь, все три команды запускаются от служебной роли:
+# sudo -u postgres createuser --pwprompt metrika
+# sudo -u postgres createdb --owner=metrika metrika_dev
+# sudo -u postgres createdb --owner=metrika metrika_test
+createuser --pwprompt metrika
+createdb --owner=metrika metrika_dev
+createdb --owner=metrika metrika_test
 ```
+
+Затем пропишите эту роль в `.env`:
+
+```dotenv
+DATABASE_URL=postgres://metrika:<пароль>@localhost:5432/metrika_dev
+TEST_DATABASE_URL=postgres://metrika:<пароль>@localhost:5432/metrika_test
+ADMIN_DATABASE_URL=postgres://metrika:<пароль>@localhost:5432/postgres
+```
+
+Если вы создали обе базы вручную, `npm run db:setup` только подтвердит их наличие. Если оставили эту работу
+скрипту, роль из `ADMIN_DATABASE_URL` должна иметь `CREATEDB`. На стенде, где TCP к PostgreSQL закрыт, создайте
+базы через `createdb` и пропустите `db:setup`.
+
+Для psql по Unix-сокету (когда TCP закрыт) можно вообще не задавать URL, а передать окружение:
+
+```bash
+export PGHOST=/var/run/postgresql
+export PGUSER=metrika
+export PGPASSWORD='<пароль>'
+psql -d postgres
+```
+
+`PGHOST`/`PGUSER`/`PGPASSWORD` действуют только на утилиты, запущенные без строки подключения: если `DATABASE_URL`
+задан, node-postgres использует URL и переменные `PG*` игнорирует. Приложению `DATABASE_URL` обязателен; для
+подключения именно через сокет используйте URL с путём в параметре `host`:
+`postgres://metrika@/metrika_dev?host=/var/run/postgresql`.
+
+Также задайте `SESSION_SECRET` (не короче 32 символов). Кроссплатформенный вариант, работает и в Windows:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+`openssl rand -hex 32` даёт тот же результат, если он установлен.
 
 Для локальной разработки оставьте `APP_URL=http://localhost:3000` и `COOKIE_SECURE=false`.
 
@@ -85,18 +126,26 @@ npm run dev          # http://localhost:3000
 ```
 
 `db:setup` создаёт только пустые базы. Схему даёт `migrate`, данные — `seed`. Пароль из сида не логируется.
+Повторный `npm run seed` очищает таблицу `sessions`, поэтому всех, кто уже вошёл на стенд, разлогинит: запускайте
+сид до входа или предупредите пользователей.
 
-Проверка: `http://localhost:3000/health` возвращает `{"status":"ok","db":"up"}`.
+Проверка: `http://localhost:3000/health` возвращает `{"status":"ok","db":"up","version":"0.1.0"}`.
 
 ## Демо-аккаунты
 
-| Email | Роль | Что доступно |
+| Email | Роль | Права роли |
 |---|---|---|
-| `admin@metrika.by` | Администратор | всё, включая пользователей и аудит |
-| `analyst@metrika.by` | Аналитик | каналы, кампании, импорт, цели, сценарии |
-| `viewer@metrika.by` | Наблюдатель | просмотр и экспорт, без импорта и администрирования |
+| `admin@metrika.by` | Администратор | все права, включая управление пользователями и просмотр аудита |
+| `analyst@metrika.by` | Аналитик | просмотр + управление каналами, кампаниями, целями, сценариями, алертами и импорт |
+| `viewer@metrika.by` | Наблюдатель | просмотр всех разделов + право экспорта |
 
 Пароль всех трёх аккаунтов: **`Metrika2026!`**
+
+**Что уже работает в M1:** лендинг, вход и выход, дашборд с якорем данных и честными пустыми KPI, read-only
+список пользователей для администратора, RBAC-страница 403, страницы 404/500, `/health`. Разделы каналов,
+кампаний, когорт, атрибуции, сценариев, алертов, целей, импорта, аудита и профиля пока показывают заглушку «Раздел
+появится на следующем этапе»: их интерфейсы и маршруты экспорта появятся в M2–M5, расчёт метрик — в M3–M4. Права
+роли при этом проверяются уже сейчас: прямой URL без нужного права возвращает 403.
 
 > Это демонстрационный стенд с вымышленными данными. Пароль опубликован намеренно и для production не годится:
 > перед любым публичным запуском смените пароли, `SESSION_SECRET`, включите `COOKIE_SECURE=true` и HTTPS.
@@ -171,7 +220,7 @@ docs/
 | Симптом | Причина и действие |
 |---|---|
 | `database "metrika_dev" does not exist` | базы ещё нет: выполните `npm run db:setup` |
-| `password authentication failed for user ...` | неверный URL, пароль или `pg_hba.conf`. Проверьте `psql "$DATABASE_URL"`; для peer-auth уберите пароль из URL |
+| `password authentication failed for user ...` | неверный URL, пароль или `pg_hba.conf`. Проверьте `psql "$DATABASE_URL"`. Для peer-auth не убирайте пароль из URL: создайте роль с паролем (см. «Если PostgreSQL использует peer-аутентификацию») или подключайтесь к сокету через `PGHOST` в psql |
 | `db:setup failed: ... permission denied to create database` | у роли в `ADMIN_DATABASE_URL` нет `CREATEDB`. Дайте право или создайте базы вручную через `createdb` |
 | `TEST_DATABASE_URL is not set` | скопируйте `.env.example` в `.env` и заполните тестовую базу |
 | `EADDRINUSE: address already in use :::3000` | порт занят: `PORT=3001 npm run dev` и `APP_URL=http://localhost:3001` (PowerShell: `$env:PORT=3001`) |

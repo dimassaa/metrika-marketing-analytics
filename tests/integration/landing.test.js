@@ -28,6 +28,16 @@ function extractJsonLd(html) {
   return match ? JSON.parse(match[1]) : null;
 }
 
+/**
+ * Pulls the error-page section out of a rendered page. The shared header and footer also link to `/` and `/login`,
+ * so asserting against the whole document would pass even if the recovery actions were deleted.
+ * @param {string} html
+ * @returns {string}
+ */
+function extractErrorSection(html) {
+  return html.match(/<section class="section error-page">[\s\S]*?<\/section>/)?.[0] ?? '';
+}
+
 describe('public landing', () => {
   it('renders one Russian SEO page without touching the database', async () => {
     const res = await request(app).get('/');
@@ -94,10 +104,11 @@ describe('public landing', () => {
     expect(res.status).toBe(404);
     expect(res.headers['content-type']).toMatch(/text\/html/);
     expect(res.text).toContain('Страница не найдена');
-    // The brand header already links to `/` and `/login`, so a bare href check passes even when the recovery
-    // actions are missing. Assert the anchor text that only the error page provides.
-    expect(res.text).toMatch(/<a[^>]+href="\/"[^>]*>На главную<\/a>/);
-    expect(res.text).toMatch(/<a[^>]+href="\/login"[^>]*>Войти<\/a>/);
+    // Scope the recovery-link assertions to the error section itself; header/footer links must not satisfy them.
+    const errorSection = extractErrorSection(res.text);
+    expect(errorSection).not.toBe('');
+    expect(errorSection).toMatch(/<a[^>]+href="\/"[^>]*>На главную<\/a>/);
+    expect(errorSection).toMatch(/<a[^>]+href="\/login"[^>]*>Войти<\/a>/);
     expect(res.text.match(/<h1[\s>]/g)).toHaveLength(1);
     expect(res.text).toMatch(/<meta name="robots" content="noindex/);
   });

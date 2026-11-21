@@ -1,8 +1,9 @@
 # M1 — журнал браузерной проверки
 
-Дата прогона: 21.11.2026. Стенд: `http://localhost:3000`, PostgreSQL 18, сид с якорем данных **20.11.2026**.
-Браузер: Chromium через `agent-browser` (headless), сессия `metrika-m1-task8`. Все переходы по ссылкам и кнопкам
-сделаны реальными кликами; прямые URL открывались только там, где проверялся серверный RBAC вне навигации.
+Дата прогона: 21.11.2026. Стенд: `http://localhost:3000`, PostgreSQL 18. Якорь данных — **вчерашняя дата на
+момент сида**, а не фиксированная константа: в этом прогоне получилось **20.11.2026**. Браузер: Chromium через
+`agent-browser` (headless), сессия `metrika-m1-task8`. Все переходы по ссылкам и кнопкам сделаны реальными
+кликами; прямые URL открывались только там, где проверялся серверный RBAC вне навигации.
 
 ## Как воспроизвести
 
@@ -10,7 +11,7 @@
 # 1. Чистая база и данные
 npm run db:setup          # создаёт БД из DATABASE_URL / TEST_DATABASE_URL
 npm run migrate
-npm run seed
+npm run seed              # якорь = «вчера» на момент запуска; очищает sessions и разлогинивает всех
 
 # 2. Приложение
 npm run dev               # http://localhost:3000, /health → 200
@@ -31,7 +32,7 @@ agent-browser --session metrika-m1-task8 open http://localhost:3000/
 | 3 | Клик «Войти» в шапке → `/login` | форма с `_csrf`, `autocomplete`, `autofocus`; скриншот входа | ✅ |
 | 4 | Ввод `admin@metrika.by` + неверный пароль, клик «Войти» | `POST /login` → 401, один общий текст «Неверный email или пароль» (`role="alert"`), без редиректа, пароль не сохраняется | ✅ |
 | 5 | Ввод верного пароля, клик «Войти» | 302 → `/app/dashboard`; cookie `metrika.sid` | ✅ |
-| 6 | Дашборд admin | «Данные по 20.11.2026»; четыре KPI «—»; пустое состояние «Данных пока нет»; в тексте нет `NaN`; роль «Администратор»; `scrollWidth === 1440` | ✅ |
+| 6 | Дашборд admin | «Данные по 20.11.2026» (вчера на момент сида; при повторном сиде дата сдвинется); четыре KPI «—»; пустое состояние «Данных пока нет»; в тексте нет `NaN`; роль «Администратор»; `scrollWidth === 1440` | ✅ |
 | 7 | Клик «Пользователи» в сайдбаре | `/app/admin/users`; 3 строки (`admin@`, `analyst@`, `viewer@`), русские роли «Администратор / Аналитик / Наблюдатель», статус «Активен» | ✅ |
 | 8 | Клик «Выйти» | `POST /logout` → `/login`; повторный `/app/dashboard` недоступен без входа | ✅ |
 | 9 | Вход `analyst@metrika.by` | в навигации есть «Импорт», нет «Пользователи» и «Аудит»; роль «Аналитик» | ✅ |
@@ -63,6 +64,22 @@ agent-browser --session metrika-m1-task8 errors
 | `dashboard-admin.png` | дашборд admin с якорем и пустыми KPI |
 | `admin-users.png` | список пользователей, 3 строки |
 | `forbidden-viewer.png` | styled 403 для viewer на `/app/import` |
+
+Команды снятия (после соответствующего клика/ввода, не вместо него):
+
+```bash
+agent-browser --session metrika-m1-task8 set viewport 1440 1000
+agent-browser --session metrika-m1-task8 screenshot docs/screenshots/m1/landing-desktop.png
+
+agent-browser --session metrika-m1-task8 set viewport 390 844
+agent-browser --session metrika-m1-task8 screenshot docs/screenshots/m1/landing-mobile.png
+
+agent-browser --session metrika-m1-task8 set viewport 1440 1000
+agent-browser --session metrika-m1-task8 screenshot docs/screenshots/m1/login.png
+agent-browser --session metrika-m1-task8 screenshot docs/screenshots/m1/dashboard-admin.png
+agent-browser --session metrika-m1-task8 screenshot docs/screenshots/m1/admin-users.png
+agent-browser --session metrika-m1-task8 screenshot docs/screenshots/m1/forbidden-viewer.png
+```
 
 Скриншоты сняты после реальных действий, а не как единственная проверка: каждому снимку предшествовал клик или
 ввод, а состояние подтверждено DOM-проверкой через `agent-browser eval`.

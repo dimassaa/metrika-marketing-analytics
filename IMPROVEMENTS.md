@@ -38,6 +38,10 @@ Non-critical findings recorded during implementation. Priority is decided by the
   log volume, but the log shape should be decided together with the observability work, not now.
 - `/health` reports only `status`, `db` and `version`. If deployment ever needs partial degradation (DB up but a
   dependency down), the response shape has to grow; nothing today requires it.
+- **`express.static` uses the default caching policy.** CSS, fonts and SVG have no explicit long-lived caching, while
+  authenticated pages already send `no-store`. Decide the policy together with the M4 Vite asset fingerprinting:
+  immutable `Cache-Control` for hashed assets, revalidation for `app.css`, and keep private responses unfetchable
+  from shared caches.
 
 ## Seed and demo data
 
@@ -50,6 +54,12 @@ Non-critical findings recorded during implementation. Priority is decided by the
 - **Several seed comments overclaim behaviour**: "byte-for-byte", "documented in README", "spend from the start" and
   the "30-day window" wording do not match what the generator or the docs actually do. Fix the comments with the next
   seed change; a misleading comment is worse than none.
+- **`seed()` without `anchorDate` resolves "yesterday" per call.** Two runs that straddle Minsk midnight produce
+  different datasets even with the same PRNG seed. Tests are effectively immune, but a cron or a demo reset should
+  pass `anchorDate` explicitly so the anchor and the generated window cannot disagree.
+- **`src/lib/dates.js` has no unit tests.** The seed test covers `minskYesterday` and day bounds indirectly. Add a
+  focused test for month ends, an ISO week across a year boundary, `formatDateRu`, and the Minsk offset around DST
+  (Belarus has no DST now, but the helper must not silently rely on that).
 
 ## App shell
 
@@ -78,12 +88,25 @@ Non-critical findings recorded during implementation. Priority is decided by the
   `alerts`, `goals`, `import`, `audit`, `profile`). The honest «Раздел появится на следующем этапе» page is correct
   for M1, but the sidebar presents every visible item as available. In M2, mark not-yet-built items (or add a «скоро»
   label), so a demo visitor does not click through a wall of identical stubs.
+- **The roster table relies on horizontal scroll inside `.table-wrap` at mobile width.** There is no column priority
+  or card fallback; for three rows in M1 it is acceptable, but the pattern will not scale to a real user list.
+- **The demo admin's full name is literally «Администратор»**, so the sidebar footer reads «Администратор /
+  Администратор» and the roster repeats the role as a name. This is seed data, not an auth bug: give the demo person
+  a name (the role already comes from `roleLabel`).
+- **The sidebar scrolls on short viewports** (e.g. 1280×577) while identity and logout stay pinned; a nav group can
+  disappear below the fold. At the normal 900 px height everything fits, so this is a demo-hardware concern rather
+  than a layout bug; add a compact mode if small laptops are part of the defence setup.
+- **`roleLabel` returns the raw role code for an unknown role** instead of throwing. The DB CHECK makes that
+  unreachable today, but a corrupted session would render an English code in the Russian UI. Decide fail-soft vs
+  fail-fast when a fourth role appears, rather than inheriting the current fallback by accident.
 
 ## Errors and access
 
-- **403/404/500 render inside the public layout**, so a signed-in visitor sees the landing header with «Войти» and
-  landing anchors («Возможности», «Как считаем», «Безопасность») on an error page. The error content itself is
-  correct; the shared header needs an authenticated variant once the public partials can be touched.
+- **404 and 500 render inside the public layout, and so does the 403 from `requirePermission`; other 4xx AppErrors —
+  including the CSRF 403 from the central handler — are still `text/plain`.** A signed-in visitor therefore sees the
+  landing header with «Войти» on the styled error pages, while a CSRF failure loses the design entirely. Render every
+  page 4xx through `errors/403`/`errors/404` once the public partials get an authenticated variant, so the response
+  shape does not depend on which middleware rejected the request.
 - **404 copy assumes a signed-in visitor** («Вернитесь в дашборд…»). Anonymous visitors get the same sentence and
   only later see «На главную»/«Войти»; branch the copy with the same `currentUser` check that picks the links.
 
@@ -100,6 +123,15 @@ Non-critical findings recorded during implementation. Priority is decided by the
   variable (`TRUST_PROXY`) and document the expected topology.
 - **A repeated `next` field in the login body produces 400** instead of a safe redirect: the array fails `z.string()`
   even when the credentials are correct. Normalize arrays to the dashboard fallback before Zod parses the form.
+- **A live session outlives deactivation and role changes.** `requireAuth` trusts `req.session.user`, so a user
+  deactivated by an admin keeps access until the 8 h session expires. M1 has no mutation endpoint, so the gap is
+  unreachable now. M2 must delete the user's `sessions` rows on deactivation or role change and prove the old cookie
+  stops working; the ruling is already recorded in the M1 ledger.
+- **A `GET /login` creates a session row** just to carry the CSRF token. `connect-pg-simple` prunes expired rows, but
+  anonymous traffic still writes to `sessions`; watch the table under load or issue a stateless signed token.
+- **Failed login attempts are not written to `audit_log`.** Only `auth.login` success and `auth.logout` are recorded,
+  as the M1 brief requires. If the audit screen must show brute-force attempts, add `auth.login_failed` with IP and a
+  normalized e-mail (never the password) and a retention rule.
 
 ## Code quality
 
@@ -113,6 +145,10 @@ Non-critical findings recorded during implementation. Priority is decided by the
   day is dropped; add one to `src/lib/format.js` when that module lands and show date + time for the roster.
 - **`formatAnchorRu` is a thin alias of `formatDateRu`.** It currently only names the intent; keep it if the anchor
   later needs its own format, otherwise inline `formatDateRu` and remove the wrapper.
+- **BIGINT arrives as a string from `pg`.** User ids are deliberately kept as strings today, which is safe. Money
+  (`*_cents`) and aggregate sums will need an explicit per-field policy before M3: map identifiers as strings, map
+  cents only after proving the value is within `Number.MAX_SAFE_INTEGER`, and never apply `Number()` blindly or let
+  raw strings reach templates.
 
 ## Tests
 
