@@ -16,6 +16,7 @@ import { createPgSessionStore, createSessionMiddleware } from './lib/session.js'
 import { csrfProtection } from './middleware/csrf.js';
 import { requireAuth } from './middleware/auth.js';
 import { createUsersRepository } from './repositories/users.repo.js';
+import { createReferenceRepository } from './repositories/reference.repo.js';
 import { createAuditRepository } from './repositories/audit.repo.js';
 import { createAuthService } from './services/auth.service.js';
 import { createAuditService } from './services/audit.service.js';
@@ -43,6 +44,7 @@ export function createApp({ db, sessionStore } = {}) {
   }
 
   const usersRepository = createUsersRepository(db);
+  const referenceRepository = createReferenceRepository(db);
   const auditRepository = createAuditRepository(db);
   const authService = createAuthService({ usersRepository });
   const auditService = createAuditService({ auditRepository });
@@ -110,7 +112,7 @@ export function createApp({ db, sessionStore } = {}) {
 
   app.use('/', publicRoutes);
   app.use(createAuthRouter({ authController }));
-  app.use('/app', createAppRouter({ requireAuth }));
+  app.use('/app', createAppRouter({ requireAuth, usersRepository, referenceRepository }));
 
   app.get('/health', async (req, res) => {
     res.set('Cache-Control', 'no-store');

@@ -1,0 +1,20 @@
+<section class="section error-page">
+  <div class="container stack">
+    <p class="error-page__code">500</p>
+    <h1>Что-то сломалось</h1>
+    <p class="error-page__text">
+      Мы не смогли показать страницу. Попробуйте обновить её через минуту — если ошибка повторится, сообщите
+      администратору стенда.
+    </p>
+    <div class="cluster">
+      <% if (locals.currentUser) { %>
+      <a class="btn btn--primary" href="/app/dashboard">В дашборд</a>
+      <a class="btn btn--ghost" href="/">На главную</a>
+      <% } else { %>
+      <a class="btn btn--primary" href="/">На главную</a>
+      <a class="btn btn--ghost" href="/login">Войти</a>
+      <% } %>
+    </div>
+    <p class="field__hint">Код ошибки: 500. Технические детали записаны в журнал сервера.</p>
+  </div>
+</section>

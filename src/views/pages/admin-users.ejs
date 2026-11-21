@@ -1,0 +1,40 @@
+<section class="app-section">
+  <div class="stack stack--lg">
+    <div class="stack stack--sm">
+      <h2>Команда стенда</h2>
+      <p class="u-muted">
+        Всего пользователей: <%= users.length %>. Роли проверяются на сервере. Создание и блокировка аккаунтов
+        появятся на следующем этапе — сейчас таблица доступна только для чтения.
+      </p>
+    </div>
+
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">Email</th>
+            <th scope="col">Имя</th>
+            <th scope="col">Роль</th>
+            <th scope="col">Статус</th>
+            <th scope="col">Последний вход</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% users.forEach((user) => { %>
+          <tr>
+            <td><%= user.email %></td>
+            <td><%= user.fullName %></td>
+            <td><%= user.roleLabel %></td>
+            <td>
+              <span class="badge <%= user.isActive ? 'badge--healthy' : 'badge--neutral' %>">
+                <%= user.isActive ? 'Активен' : 'Заблокирован' %>
+              </span>
+            </td>
+            <td class="u-numeric"><%= user.lastLoginLabel %></td>
+          </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>

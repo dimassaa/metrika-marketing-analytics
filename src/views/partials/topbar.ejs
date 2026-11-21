@@ -1,0 +1,24 @@
+<header class="app-topbar">
+  <div class="app-topbar__inner">
+    <div class="app-topbar__heading">
+      <p class="app-topbar__company">Зёрна · демо</p>
+      <h1 class="app-topbar__title"><%= pageTitle %></h1>
+    </div>
+
+    <div class="app-topbar__tools">
+      <p class="app-topbar__anchor">Данные по <%= dataAnchor %></p>
+
+      <%# Period switching arrives with the metrics engine; the control is visible but disabled so the layout is final. %>
+      <label class="app-topbar__period">
+        <span class="u-visually-hidden">Период расчётов</span>
+        <select class="select app-topbar__select" disabled>
+          <option>30 дней</option>
+          <option>90 дней</option>
+          <option>180 дней</option>
+        </select>
+      </label>
+
+      <a class="app-avatar" href="/app/profile" aria-label="Профиль: <%= currentUser.fullName %>"><%= initials %></a>
+    </div>
+  </div>
+</header>

@@ -1,28 +1,59 @@
 import { Router } from 'express';
 import { requirePermission } from '../middleware/auth.js';
+import { createAppController } from '../controllers/app.controller.js';
+import { createAdminController } from '../controllers/admin.controller.js';
 
 /**
- * Minimal authenticated seam for milestone 1. Task 7 replaces these handlers with the real EJS app shell and adds
- * the remaining sections; until then they exist so the auth and permission guards can be exercised end to end.
- * @param {{ requireAuth: import('express').RequestHandler }} deps
+ * Sections that exist in the sidebar but render the honest «Раздел появится на следующем этапе» placeholder until
+ * their milestone. Profile is guarded by `requireAuth` only: every signed-in role owns their own profile page.
+ */
+const PLACEHOLDER_SECTIONS = [
+  { slug: 'channels', title: 'Каналы' },
+  { slug: 'campaigns', title: 'Кампании' },
+  { slug: 'cohorts', title: 'Когорты' },
+  { slug: 'attribution', title: 'Атрибуция' },
+  { slug: 'scenarios', title: 'Сценарии' },
+  { slug: 'alerts', title: 'Алерты' },
+  { slug: 'goals', title: 'Цели' },
+  { slug: 'profile', title: 'Профиль' },
+];
+
+/**
+ * Authenticated application routes. Every handler sits behind `requireAuth`; anything beyond "any signed-in user"
+ * is enforced by `requirePermission` on the server, because a hidden sidebar link is presentation, not access control.
+ * @param {{
+ *   requireAuth: import('express').RequestHandler,
+ *   usersRepository: ReturnType<typeof import('../repositories/users.repo.js').createUsersRepository>,
+ *   referenceRepository: ReturnType<typeof import('../repositories/reference.repo.js').createReferenceRepository>,
+ * }} deps
  * @returns {import('express').Router}
  */
-export function createAppRouter({ requireAuth }) {
+export function createAppRouter({ requireAuth, usersRepository, referenceRepository }) {
+  const appController = createAppController({ referenceRepository });
+  const adminController = createAdminController({ usersRepository, referenceRepository });
   const router = Router();
 
   router.get('/', requireAuth, (req, res) => {
     res.redirect('/app/dashboard');
   });
 
-  router.get('/dashboard', requireAuth, (req, res) => {
-    res.type('text/plain; charset=utf-8').send('Дашборд');
-  });
+  router.get('/dashboard', requireAuth, appController.dashboard);
 
-  // Admin-only probe for the permission guard. It returns plain text on purpose: the real table arrives in Task 7,
-  // while the 403 rendering path is already honest and testable here.
-  router.get('/admin/users', requireAuth, requirePermission('users:manage'), (req, res) => {
-    res.type('text/plain; charset=utf-8').send('Пользователи');
-  });
+  for (const { slug, title } of PLACEHOLDER_SECTIONS) {
+    router.get(`/${slug}`, requireAuth, appController.comingSoon({ title, activeNav: slug }));
+  }
+
+  // Import writes history and audit exposes the whole team's actions, so both need a permission, not just a login.
+  router.get('/import', requireAuth, requirePermission('import:run'), appController.comingSoon({
+    title: 'Импорт',
+    activeNav: 'import',
+  }));
+  router.get('/audit', requireAuth, requirePermission('audit:view'), appController.comingSoon({
+    title: 'Аудит',
+    activeNav: 'audit',
+  }));
+
+  router.get('/admin/users', requireAuth, requirePermission('users:manage'), adminController.users);
 
   return router;
 }

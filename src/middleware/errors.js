@@ -1,5 +1,13 @@
 import { logger } from '../lib/logger.js';
 import { AppError } from '../lib/errors.js';
+import { buildSeo } from '../lib/seo.js';
+
+const SERVER_ERROR_SEO = buildSeo({
+  title: 'Ошибка сервера — Метрика',
+  description: 'Внутренняя ошибка. Попробуйте обновить страницу или вернитесь на главную.',
+  path: '/',
+  noindex: true,
+});
 
 function isApiRequest(req) {
   return req.path === '/api' || req.path.startsWith('/api/');
@@ -24,8 +32,8 @@ function fallbackMessage(statusCode) {
 }
 
 /**
- * Terminal 404 handler. API clients get JSON, page requests get plain text until the `errors/404.ejs` template
- * exists (Task 7), so the status code is correct from day one.
+ * Terminal 404 handler. Page requests normally get the designed `errors/404` page from `notFoundPage` earlier in the
+ * stack; this fallback keeps the JSON contract for `/api` and a correct status for anything that skips the page path.
  */
 export function notFound(req, res) {
   if (isApiRequest(req)) {
@@ -57,5 +65,18 @@ export function errorHandler(err, req, res, next) {
     res.status(statusCode).json({ error: { code, message } });
     return;
   }
+
+  // Operational 4xx failures keep the short text contract; a 500 gets the designed page because it is the only
+  // failure a person is likely to see while using the app. Rendering needs no database, so it also works when the
+  // original failure was the database itself.
+  if (statusCode >= 500) {
+    res.status(statusCode).render('errors/500', {
+      layout: 'layouts/public',
+      seo: SERVER_ERROR_SEO,
+      year: new Date().getFullYear(),
+    });
+    return;
+  }
+
   res.status(statusCode).type('text/plain; charset=utf-8').send(message);
 }
