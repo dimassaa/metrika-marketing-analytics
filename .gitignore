@@ -1,0 +1,22 @@
+# dependencies
+node_modules/
+
+# environment
+.env
+.env.*
+!.env.example
+
+# build output
+public/assets/
+coverage/
+
+# logs and local state
+*.log
+.DS_Store
+tmp/
+
+# local course materials (not part of the product)
+бланк.docx
+Design.md
+DESIGN (3).md
+О чем не знают вайбкодеры.md
