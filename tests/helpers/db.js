@@ -48,13 +48,7 @@ export function getTestPool() {
     throw new Error('TEST_DATABASE_URL is not set');
   }
   if (!testPool) {
-    // Error text is part of the test contract (`/violates/`), and this host initialised PostgreSQL with
-    // ru_RU.UTF-8. Pinning lc_messages per session keeps assertions identical on every developer machine.
-    testPool = new pg.Pool({
-      connectionString: env.testDatabaseUrl,
-      max: 4,
-      options: '-c lc_messages=C',
-    });
+    testPool = new pg.Pool({ connectionString: env.testDatabaseUrl, max: 4 });
     testPool.on('error', (error) => {
       logger.error({ err: error }, 'idle test database client failed');
     });

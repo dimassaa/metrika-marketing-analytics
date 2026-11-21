@@ -21,6 +21,19 @@ const EXPECTED_TABLES = [
   'users',
 ];
 
+/**
+ * Asserts that `promise` rejects with the given PostgreSQL SQLSTATE.
+ *
+ * SQLSTATE codes are stable across server locales, unlike message text: the same CHECK violation reads
+ * "violates check constraint" in English and «нарушает ограничение-проверку» when the server runs with
+ * ru_RU.UTF-8, so message matching would only pass on some machines.
+ * @param {Promise<unknown>} promise Query expected to fail.
+ * @param {string} code Expected SQLSTATE, e.g. '23514' for a CHECK violation or '23503' for an FK violation.
+ */
+async function expectSqlState(promise, code) {
+  await expect(promise).rejects.toMatchObject({ code });
+}
+
 describe('migrations', () => {
   let pool;
 
@@ -71,26 +84,45 @@ describe('migrations', () => {
       [`cust_${suffix}`, channelId],
     );
 
-    // An order cannot report more margin than revenue.
-    await expect(
+    // An order cannot report more margin than revenue: CHECK violation.
+    await expectSqlState(
       pool.query(
         `INSERT INTO orders (external_id, customer_id, campaign_id, occurred_at, revenue_cents, margin_cents)
          VALUES ($1, $2, $3, '2026-01-03T12:00:00Z', 1000, 2000)`,
         [`order_bad_margin_${suffix}`, customer.rows[0].id, campaign.rows[0].id],
       ),
-    ).rejects.toThrow(/violates/);
+      '23514',
+    );
 
-    // Historical channel data is protected: a channel with campaigns cannot be deleted.
-    await expect(pool.query('DELETE FROM channels WHERE id = $1', [channelId])).rejects.toThrow(/violates/);
+    // Historical channel data is protected: deleting a channel with campaigns raises restrict_violation.
+    // ON DELETE RESTRICT reports 23001; 23503 (foreign_key_violation) is reserved for NO ACTION.
+    await expectSqlState(pool.query('DELETE FROM channels WHERE id = $1', [channelId]), '23001');
 
-    // The role list is closed; 'owner' is not a valid role.
-    await expect(
+    // A campaign cannot point at a channel that does not exist: foreign_key_violation.
+    await expectSqlState(
+      pool.query(
+        `INSERT INTO campaigns (channel_id, code, name, started_on)
+         VALUES (999999999, $1, 'Кампания-сирота', '2026-01-01')`,
+        [`orphan_campaign_${suffix}`],
+      ),
+      '23503',
+    );
+
+    // Channel codes are unique: unique_violation.
+    await expectSqlState(
+      pool.query(`INSERT INTO channels (code, name) VALUES ($1, 'Дубль')`, [`test_channel_${suffix}`]),
+      '23505',
+    );
+
+    // The role list is closed; 'owner' is not a valid role, so the CHECK rejects it.
+    await expectSqlState(
       pool.query(
         `INSERT INTO users (email, password_hash, full_name, role)
          VALUES ($1, 'hash', 'Владелец', 'owner')`,
         [`owner-${suffix}@metrika.by`],
       ),
-    ).rejects.toThrow(/violates/);
+      '23514',
+    );
 
     // pg returns int8/bigint columns as strings to avoid precision loss; money columns rely on the same mapping.
     expect(user.rows[0].id).toMatch(/^\d+$/);
