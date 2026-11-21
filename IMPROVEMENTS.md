@@ -13,12 +13,43 @@ Non-critical findings recorded during implementation. Priority is decided by the
 - **`express-ejs-layouts@^4` from the plan does not exist on npm** (latest is 2.5.1), so 2.5.1 is installed.
   The plan text needs correcting before Tasks 4–5 use layouts, otherwise the next implementer hits the same wall.
 
+## Design system
+
+- **`--shadow-subtle` is unused and `--shadow-preview` only serves the landing preview.** Shipped shadows should be
+  the ones components actually use; either apply them in M2 or remove them so the token list stays honest.
+- **Public components use unprefixed global class names** (`.card`, `.btn`, `.field`, `.table`, `.badge`), while the
+  app shell namespaces its own as `app-*`. Nothing collides today, but a public variant of `.card` will change app
+  screens too. Scope public classes under a wrapper or namespace them before the M4 React islands add more classnames.
+
+## Public landing
+
+- **The mobile header hides the anchor navigation** (`.site-nav { display: none }`) and leaves only the brand and
+  «Войти». Add a compact disclosure or a shortened menu with «Возможности / Как считаем / Безопасность» so the
+  landing does not lose its in-page navigation at 390 px.
+- **The landing promises encrypted backups with a 7-day retention** («pg_dump + AES-256-GCM, 7 дней»), but backup
+  tooling belongs to M6. Keep the copy only if it is labelled as a planned capability; otherwise reword it until the
+  scripts exist, so the demo does not describe a feature that cannot be shown.
+- **The Open Graph image is SVG** (`public/img/og-cover.svg`). Several social crawlers reject SVG for `og:image`.
+  Render a 1200×630 PNG for the meta tag in M6 and keep the SVG as the editable source.
+
 ## Runtime
 
 - `pino-http` logs the full response header set, including CSP, on every request. Trimming the serializers would cut
   log volume, but the log shape should be decided together with the observability work, not now.
 - `/health` reports only `status`, `db` and `version`. If deployment ever needs partial degradation (DB up but a
   dependency down), the response shape has to grow; nothing today requires it.
+
+## Seed and demo data
+
+- **The touchpoint mix is 78.2 %, not the brief's 70 %.** The 70 % rule is applied to extra touches while the first
+  touch is forced to the acquisition channel, which lifts the overall share. Either retune the generator or record
+  the interpretation explicitly in the seed spec; a reviewer comparing the two numbers will otherwise read it as a bug.
+- **The determinism test ignores `daily_stats` values.** It compares row counts and `sum(revenue_cents)`, so a change
+  in impressions, clicks, leads or spend would still pass. Add a checksum over those columns (or a content hash of the
+  daily rows) to the idempotency assertion.
+- **Several seed comments overclaim behaviour**: "byte-for-byte", "documented in README", "spend from the start" and
+  the "30-day window" wording do not match what the generator or the docs actually do. Fix the comments with the next
+  seed change; a misleading comment is worse than none.
 
 ## App shell
 
@@ -43,6 +74,10 @@ Non-critical findings recorded during implementation. Priority is decided by the
 - **The dashboard empty state needs two distinct states in M2/M3.** «Данных пока нет» is correct for an empty stand,
   but a seeded stand with no metrics engine should say «метрики ещё не рассчитаны». The current copy blurs both;
   split it when `isEmpty` becomes a real data check.
+- **Ten `/app` routes are placeholders until M2–M5** (`channels`, `campaigns`, `cohorts`, `attribution`, `scenarios`,
+  `alerts`, `goals`, `import`, `audit`, `profile`). The honest «Раздел появится на следующем этапе» page is correct
+  for M1, but the sidebar presents every visible item as available. In M2, mark not-yet-built items (or add a «скоро»
+  label), so a demo visitor does not click through a wall of identical stubs.
 
 ## Errors and access
 
@@ -51,6 +86,26 @@ Non-critical findings recorded during implementation. Priority is decided by the
   correct; the shared header needs an authenticated variant once the public partials can be touched.
 - **404 copy assumes a signed-in visitor** («Вернитесь в дашборд…»). Anonymous visitors get the same sentence and
   only later see «На главную»/«Войти»; branch the copy with the same `currentUser` check that picks the links.
+
+## Auth and sessions
+
+- **A failed audit insert turns a successful login or logout into a 500 after the state change.** The session is
+  already rotated/destroyed, but the user sees an error. Treat audit as best-effort: log the failure and keep the
+  auth result, or include the audit row in the same transaction where the storage allows it.
+- **The login limiter lives in process memory.** A multi-instance deployment would give each instance its own quota;
+  move the store to PostgreSQL/Redis before scaling out. The `ip + email` key also lets one address spray many
+  accounts, so M6 needs a second per-IP bucket.
+- **`trust proxy: 1` is unconditional.** Behind a reverse proxy it is right, but a directly reachable instance lets a
+  client spoof `X-Forwarded-For` and poison the limiter key and the audit IP. Make the hop count an environment
+  variable (`TRUST_PROXY`) and document the expected topology.
+- **A repeated `next` field in the login body produces 400** instead of a safe redirect: the array fails `z.string()`
+  even when the credentials are correct. Normalize arrays to the dashboard fallback before Zod parses the form.
+
+## Code quality
+
+- **The same API-vs-page check exists in three places** (`auth` and `errors` middlewares plus inline in `app.js`).
+  The copies can drift as `/api` grows. Move the predicate to a small `src/lib/http.js` with a unit test the next time
+  one of those files changes.
 
 ## Data formatting
 
@@ -67,3 +122,7 @@ Non-critical findings recorded during implementation. Priority is decided by the
 - **The rbac empty-state test is order-dependent.** It truncates `daily_stats, touchpoints, orders, customers` and
   never reseeds, so any later test in the same file that needs statistics would fail. Move it to its own file with a
   `beforeAll` seed or reseed in a `finally`; Vitest's `fileParallelism: false` only hides the problem across files.
+- **Session-id rotation on login and rejection of an unsafe `next` are verified only indirectly.** The auth tests
+  assert the redirect and the external target, but not that the cookie value changed across login or that `//evil`,
+  `\evil` and CR/LF targets fall back. Add both assertions with the first auth change; they guard a security property
+  that a refactor can silently break.

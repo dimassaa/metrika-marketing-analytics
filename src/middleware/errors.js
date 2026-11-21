@@ -32,8 +32,9 @@ function fallbackMessage(statusCode) {
 }
 
 /**
- * Terminal 404 handler. Page requests normally get the designed `errors/404` page from `notFoundPage` earlier in the
- * stack; this fallback keeps the JSON contract for `/api` and a correct status for anything that skips the page path.
+ * Terminal 404 handler and last-resort fallback. Page requests reach the designed `errors/404` page through
+ * `notFoundPage` before this middleware; only `/api` and a request that somehow bypassed the page handler land here.
+ * They keep the JSON contract (or a plain status text), so a 404 is never an unhandled Express default page.
  */
 export function notFound(req, res) {
   if (isApiRequest(req)) {

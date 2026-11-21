@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../../src/app.js';
+import { env } from '../../src/config/env.js';
+
+// Absolute URLs in canonical/OG/sitemap come from APP_URL. Deriving them here keeps the test portable: a stand that
+// runs on another host or port must not fail because of a hardcoded localhost.
+const HOME_URL = new URL('/', env.appUrl).toString();
 
 // The landing is static content: it must render even when PostgreSQL is unavailable. Any query is a bug, so the
 // fake client throws instead of returning rows and the failure is impossible to miss.
@@ -39,7 +44,11 @@ describe('public landing', () => {
     const description = res.text.match(/<meta name="description" content="([^"]*)"/)?.[1] ?? '';
     expect(description.length).toBeLessThanOrEqual(160);
 
-    expect(res.text).toContain('<link rel="canonical" href="http://localhost:3000/">');
+    expect(res.text).toContain(`<link rel="canonical" href="${HOME_URL}">`);
+    expect(res.text).toContain(`<meta property="og:url" content="${HOME_URL}">`);
+    expect(res.text).toContain(
+      `<meta property="og:image" content="${new URL('/img/og-cover.svg', env.appUrl).toString()}">`,
+    );
     expect(res.text).toMatch(/<meta name="robots" content="index, follow">/);
 
     const jsonLd = extractJsonLd(res.text);
@@ -76,7 +85,7 @@ describe('public landing', () => {
 
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toMatch(/xml/);
-    expect(res.text).toContain('<loc>http://localhost:3000/</loc>');
+    expect(res.text).toContain(`<loc>${HOME_URL}</loc>`);
   });
 
   it('answers unknown pages with an HTML 404 view, not JSON', async () => {
@@ -85,8 +94,10 @@ describe('public landing', () => {
     expect(res.status).toBe(404);
     expect(res.headers['content-type']).toMatch(/text\/html/);
     expect(res.text).toContain('Страница не найдена');
-    expect(res.text).toContain('href="/"');
-    expect(res.text).toContain('href="/login"');
+    // The brand header already links to `/` and `/login`, so a bare href check passes even when the recovery
+    // actions are missing. Assert the anchor text that only the error page provides.
+    expect(res.text).toMatch(/<a[^>]+href="\/"[^>]*>На главную<\/a>/);
+    expect(res.text).toMatch(/<a[^>]+href="\/login"[^>]*>Войти<\/a>/);
     expect(res.text.match(/<h1[\s>]/g)).toHaveLength(1);
     expect(res.text).toMatch(/<meta name="robots" content="noindex/);
   });
