@@ -1,0 +1,1013 @@
+/* ==========================================================================
+   Метрика — design system
+   Seline-inspired: warm stone canvas, hairline structure, one cyan accent.
+   This is the only stylesheet in the project. See AGENTS.md §6 and DESIGN (3).md.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. Fonts — committed binaries, served locally (no CDN, works offline).
+   Inter and Inter Tight are variable fonts split by subset; the browser
+   downloads only the subset each page actually needs.
+   -------------------------------------------------------------------------- */
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/inter-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/inter-cyrillic-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+@font-face {
+  font-family: 'Inter Tight';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('/fonts/inter-tight-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter Tight';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('/fonts/inter-tight-cyrillic-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+/* NBRB symbol font. The currency sign is a ligature over "BYN" (U+42, U+59,
+   U+4E) plus the private-use glyph U+E901, so plain text "BYN" inside
+   .byn renders as the official sign. */
+@font-face {
+  font-family: 'nbrb';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url('/fonts/nbrb.woff2') format('woff2'),
+    url('/fonts/nbrb.ttf') format('truetype');
+  unicode-range: U+E901, U+42, U+59, U+4E;
+}
+
+/* --------------------------------------------------------------------------
+   2. Tokens — single source for colors, type, spacing, shape and elevation.
+   Components below reference tokens only; raw colors live here and nowhere
+   else (except transparent / rgba elevation shadows).
+   -------------------------------------------------------------------------- */
+
+:root {
+  /* Surfaces and neutrals */
+  --color-stone-canvas: #fafaf9;
+  --color-pure-white: #ffffff;
+  --color-stone-border: #e8e6e5;
+  --color-stone-muted: #d6d3d1;
+  --color-ash-gray: #a8a29e;
+  --color-warm-gray: #78716c;
+  --color-ink-black: #0c0a09;
+  --color-soot: #1c1917;
+  --color-sky-wash: #c1e1f7;
+  --color-cyan-signal: #3ba6f1;
+  --color-cyan-edge: #3398e1;
+
+  /* Data status — dots, text and thin bars only, never button fills */
+  --color-status-healthy: #2f7d5f;
+  --color-status-watch: #a16207;
+  --color-status-risk: #b91c1c;
+
+  /* Type */
+  --font-body: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI',
+    Roboto, Arial, sans-serif;
+  --font-display: 'Inter Tight', 'Inter', ui-sans-serif, system-ui,
+    -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  --font-byn: 'nbrb', 'Inter', sans-serif;
+
+  /* Spacing — 4px grid, used for grouping (8/12/16) and separation (32/48/96) */
+  --spacing-4: 4px;
+  --spacing-8: 8px;
+  --spacing-12: 12px;
+  --spacing-16: 16px;
+  --spacing-24: 24px;
+  --spacing-32: 32px;
+  --spacing-40: 40px;
+  --spacing-48: 48px;
+  --spacing-64: 64px;
+  --spacing-80: 80px;
+  --spacing-96: 96px;
+
+  /* Shape */
+  --radius-icon: 4px;
+  --radius-input: 6px;
+  --radius-cards: 10px;
+  --radius-feature: 16px;
+  --radius-pill: 9999px;
+
+  /* Elevation — borders are the structure; shadows only lift popovers/previews */
+  --shadow-subtle: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.05);
+  --shadow-preview: 0 12px 45px rgba(17, 12, 46, 0.12);
+
+  /* Layout */
+  --page-max: 1200px;
+  --section-gap: 96px;
+}
+
+/* --------------------------------------------------------------------------
+   3. Reset — minimal and predictable; no framework, no normalize.css.
+   -------------------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p,
+figure,
+blockquote,
+dl,
+dd {
+  margin: 0;
+}
+
+ul,
+ol {
+  margin: 0 0 var(--spacing-12);
+  padding-left: var(--spacing-24);
+}
+
+img,
+svg,
+video {
+  display: block;
+  max-width: 100%;
+}
+
+img,
+video {
+  height: auto;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+}
+
+table {
+  border-collapse: collapse;
+}
+
+fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* --------------------------------------------------------------------------
+   4. Base typography
+   -------------------------------------------------------------------------- */
+
+body {
+  min-height: 100vh;
+  background-color: var(--color-stone-canvas);
+  color: var(--color-warm-gray);
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.64;
+  letter-spacing: 0.004em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin-bottom: var(--spacing-12);
+  color: var(--color-ink-black);
+  font-family: var(--font-display);
+  font-weight: 400;
+  line-height: 1.2;
+}
+
+h1 {
+  font-size: 52px;
+  line-height: 1.12;
+  letter-spacing: -0.021em;
+}
+
+h2 {
+  font-size: 32px;
+  line-height: 1.25;
+  letter-spacing: -0.025em;
+}
+
+h3 {
+  font-size: 20px;
+  line-height: 1.2;
+  letter-spacing: -0.017em;
+}
+
+h4 {
+  font-size: 16px;
+  line-height: 1.4;
+  letter-spacing: -0.008em;
+}
+
+h5,
+h6 {
+  font-size: 14px;
+  line-height: 1.4;
+  letter-spacing: -0.004em;
+}
+
+p {
+  margin-bottom: var(--spacing-12);
+}
+
+p:last-child,
+ul:last-child,
+ol:last-child {
+  margin-bottom: 0;
+}
+
+a {
+  color: var(--color-ink-black);
+  text-decoration-color: var(--color-stone-muted);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  transition: color 120ms ease, text-decoration-color 120ms ease;
+}
+
+a:hover {
+  color: var(--color-cyan-edge);
+  text-decoration-color: currentColor;
+}
+
+strong,
+b {
+  color: var(--color-ink-black);
+  font-weight: 500;
+}
+
+small {
+  font-size: 12px;
+}
+
+code,
+kbd,
+samp,
+pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.95em;
+}
+
+hr {
+  height: 0;
+  margin: var(--spacing-24) 0;
+  border: 0;
+  border-top: 1px solid var(--color-stone-border);
+}
+
+::selection {
+  background-color: var(--color-sky-wash);
+  color: var(--color-ink-black);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-cyan-signal);
+  outline-offset: 2px;
+}
+
+/* Keep pointer interaction quiet, but never remove a visible keyboard focus. */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* --------------------------------------------------------------------------
+   5. Layout primitives
+   -------------------------------------------------------------------------- */
+
+.container {
+  width: 100%;
+  max-width: var(--page-max);
+  margin-inline: auto;
+  padding-inline: var(--spacing-24);
+}
+
+.section {
+  padding-block: var(--section-gap);
+}
+
+.section--tight {
+  padding-block: var(--spacing-48);
+}
+
+.section--flush {
+  padding-block: 0;
+}
+
+/* Auto-fitting grid for card collections; explicit variants when a screen
+   needs a fixed editorial rhythm (2/3/4 columns). */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--spacing-24);
+}
+
+.grid--2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.grid--3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.grid--4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--stack-gap, var(--spacing-16));
+}
+
+.stack--sm {
+  --stack-gap: var(--spacing-8);
+}
+
+.stack--lg {
+  --stack-gap: var(--spacing-24);
+}
+
+.cluster {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cluster-gap, var(--spacing-8));
+}
+
+/* --------------------------------------------------------------------------
+   6. Components
+   -------------------------------------------------------------------------- */
+
+/* Card — flat white surface, hairline first, shadow as a whisper. */
+.card {
+  padding: var(--spacing-24);
+  border: 1px solid var(--color-stone-border);
+  border-radius: var(--radius-cards);
+  background-color: var(--color-pure-white);
+  box-shadow: var(--shadow-card);
+}
+
+.card--feature {
+  padding: var(--spacing-32);
+  border-radius: var(--radius-feature);
+}
+
+.card--flat {
+  box-shadow: none;
+}
+
+.card--inverse {
+  border-color: var(--color-soot);
+  background-color: var(--color-soot);
+  color: var(--color-stone-border);
+}
+
+.card--inverse h1,
+.card--inverse h2,
+.card--inverse h3,
+.card--inverse h4 {
+  color: var(--color-pure-white);
+}
+
+.card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-16);
+  margin-bottom: var(--spacing-16);
+}
+
+.card__title {
+  margin: 0;
+  color: var(--color-ink-black);
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: -0.008em;
+}
+
+.card__meta {
+  margin-top: var(--spacing-4);
+  color: var(--color-ash-gray);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Buttons — pill shape; the filled cyan CTA is the single loud element. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-8);
+  min-height: 36px;
+  padding: var(--spacing-8) var(--spacing-16);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0;
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color 120ms ease, border-color 120ms ease,
+    color 120ms ease, filter 120ms ease;
+}
+
+.btn:disabled,
+.btn[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  border-color: var(--color-cyan-edge);
+  background-color: var(--color-cyan-signal);
+  color: var(--color-pure-white);
+}
+
+.btn--primary:hover:not(:disabled) {
+  filter: brightness(0.96);
+}
+
+.btn--ghost {
+  border-color: var(--color-stone-border);
+  background-color: transparent;
+  color: var(--color-ink-black);
+  font-weight: 400;
+}
+
+.btn--ghost:hover:not(:disabled) {
+  border-color: var(--color-stone-muted);
+  background-color: var(--color-stone-canvas);
+}
+
+.btn--danger {
+  padding-inline: var(--spacing-8);
+  border-color: transparent;
+  background-color: transparent;
+  color: var(--color-status-risk);
+  font-weight: 400;
+}
+
+.btn--danger:hover:not(:disabled) {
+  color: var(--color-status-risk);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.btn--sm {
+  min-height: 28px;
+  padding: var(--spacing-4) var(--spacing-12);
+  font-size: 13px;
+}
+
+/* Forms */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-4);
+  min-width: 0;
+}
+
+.field__label {
+  color: var(--color-ink-black);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.field__hint {
+  color: var(--color-warm-gray);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.field__error {
+  color: var(--color-status-risk);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.input,
+.select,
+.textarea {
+  width: 100%;
+  min-height: 36px;
+  padding: var(--spacing-8) var(--spacing-12);
+  border: 1px solid var(--color-stone-muted);
+  border-radius: var(--radius-input);
+  background-color: var(--color-pure-white);
+  color: var(--color-ink-black);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.4;
+  transition: border-color 120ms ease;
+}
+
+.textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--color-warm-gray);
+}
+
+.input:hover,
+.select:hover,
+.textarea:hover {
+  border-color: var(--color-ash-gray);
+}
+
+.input:focus,
+.select:focus,
+.textarea:focus {
+  border-color: var(--color-cyan-edge);
+  outline: 2px solid var(--color-cyan-signal);
+  outline-offset: 1px;
+}
+
+.input:disabled,
+.select:disabled,
+.textarea:disabled {
+  background-color: var(--color-stone-canvas);
+  color: var(--color-ash-gray);
+  cursor: not-allowed;
+}
+
+.input[aria-invalid='true'],
+.select[aria-invalid='true'],
+.textarea[aria-invalid='true'] {
+  border-color: var(--color-status-risk);
+}
+
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--color-cyan-signal);
+}
+
+input[type='checkbox']:disabled,
+input[type='radio']:disabled {
+  cursor: not-allowed;
+}
+
+input[type='file'] {
+  color: var(--color-warm-gray);
+  font-size: 13px;
+}
+
+/* Tables — data is the product; numbers right-aligned and tabular. */
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--color-stone-border);
+  border-radius: var(--radius-cards);
+  background-color: var(--color-pure-white);
+}
+
+.table {
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  line-height: 1.5;
+  text-align: left;
+}
+
+.table th,
+.table td {
+  padding: var(--spacing-12);
+  border-bottom: 1px solid var(--color-stone-border);
+  vertical-align: middle;
+}
+
+.table th {
+  color: var(--color-warm-gray);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.table td {
+  color: var(--color-ink-black);
+}
+
+.table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.table tbody tr:hover {
+  background-color: var(--color-stone-canvas);
+}
+
+.table--sticky thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid var(--color-stone-border);
+  background-color: var(--color-pure-white);
+}
+
+.table .u-numeric,
+.table .u-right {
+  text-align: right;
+}
+
+/* Status badges — a dot and colored text, never a filled chip. */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-8);
+  padding: 2px var(--spacing-8);
+  border: 1px solid var(--color-stone-border);
+  border-radius: var(--radius-pill);
+  background-color: transparent;
+  color: var(--color-warm-gray);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.badge::before {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: currentColor;
+}
+
+.badge--healthy {
+  color: var(--color-status-healthy);
+}
+
+.badge--watch {
+  color: var(--color-status-watch);
+}
+
+.badge--risk {
+  color: var(--color-status-risk);
+}
+
+.badge--neutral {
+  color: var(--color-warm-gray);
+}
+
+/* KPI tile */
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-8);
+  padding: var(--spacing-24);
+  border: 1px solid var(--color-stone-border);
+  border-radius: var(--radius-cards);
+  background-color: var(--color-pure-white);
+  box-shadow: var(--shadow-card);
+}
+
+.kpi__label {
+  color: var(--color-warm-gray);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.kpi__value {
+  color: var(--color-ink-black);
+  font-family: var(--font-display);
+  font-size: 32px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.kpi__delta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-4);
+  color: var(--color-warm-gray);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+}
+
+.kpi__delta--up {
+  color: var(--color-status-healthy);
+}
+
+.kpi__delta--down {
+  color: var(--color-status-risk);
+}
+
+.kpi__delta--flat {
+  color: var(--color-warm-gray);
+}
+
+.kpi__hint {
+  color: var(--color-ash-gray);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Empty state — explain what is missing and offer the next action. */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-8);
+  padding: var(--spacing-48) var(--spacing-24);
+  border: 1px dashed var(--color-stone-muted);
+  border-radius: var(--radius-cards);
+  color: var(--color-warm-gray);
+  text-align: center;
+}
+
+.empty-state__title {
+  color: var(--color-ink-black);
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.empty-state__text {
+  max-width: 42ch;
+  font-size: 14px;
+}
+
+.empty-state__actions {
+  margin-top: var(--spacing-8);
+}
+
+/* Skeleton — opacity pulse instead of a gradient shimmer. */
+.skeleton {
+  border-radius: var(--radius-input);
+  background-color: var(--color-stone-muted);
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.skeleton--text {
+  height: 12px;
+}
+
+.skeleton--title {
+  height: 20px;
+  max-width: 40%;
+}
+
+.skeleton--circle {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+}
+
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* Inline alerts */
+.alert {
+  padding: var(--spacing-12) var(--spacing-16);
+  border: 1px solid var(--color-stone-border);
+  border-left: 2px solid var(--color-stone-muted);
+  border-radius: var(--radius-input);
+  background-color: var(--color-pure-white);
+  color: var(--color-warm-gray);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.alert--error {
+  border-left-color: var(--color-status-risk);
+}
+
+.alert--warning {
+  border-left-color: var(--color-status-watch);
+}
+
+.alert--success {
+  border-left-color: var(--color-status-healthy);
+}
+
+.alert__title {
+  color: var(--color-ink-black);
+  font-weight: 500;
+}
+
+/* Highlight span — the single inline color treatment in a headline. */
+.highlight {
+  padding: 2px var(--spacing-8);
+  border-radius: var(--radius-icon);
+  background-color: var(--color-sky-wash);
+  color: var(--color-cyan-edge);
+}
+
+/* --------------------------------------------------------------------------
+   7. Belarusian ruble sign — ligature from the NBRB font.
+   Always render as <span class="byn">BYN</span>; never type ₽/$/руб.
+   -------------------------------------------------------------------------- */
+
+.byn {
+  font-family: var(--font-byn);
+  font-feature-settings: 'liga';
+  font-style: normal;
+  font-weight: 400;
+  font-variant: normal;
+  letter-spacing: 0;
+  speak: none;
+}
+
+/* --------------------------------------------------------------------------
+   8. Utilities
+   -------------------------------------------------------------------------- */
+
+.u-hidden {
+  display: none !important;
+}
+
+.u-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.u-numeric {
+  font-variant-numeric: tabular-nums;
+}
+
+.u-right {
+  text-align: right;
+}
+
+.u-muted {
+  color: var(--color-warm-gray);
+}
+
+.u-nowrap {
+  white-space: nowrap;
+}
+
+.u-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------------------
+   9. Responsive adjustments
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 1024px) {
+  h1 {
+    font-size: 40px;
+  }
+
+  h2 {
+    font-size: 28px;
+  }
+
+  .section {
+    padding-block: var(--spacing-64);
+  }
+
+  .grid--3,
+  .grid--4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .container {
+    padding-inline: var(--spacing-16);
+  }
+
+  .section {
+    padding-block: var(--spacing-48);
+  }
+
+  h1 {
+    font-size: 32px;
+  }
+
+  h2 {
+    font-size: 26px;
+  }
+
+  h3 {
+    font-size: 18px;
+  }
+
+  .grid,
+  .grid--2,
+  .grid--3,
+  .grid--4 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .card,
+  .kpi {
+    padding: var(--spacing-16);
+  }
+
+  .table {
+    font-size: 13px;
+  }
+
+  .table th,
+  .table td {
+    padding: var(--spacing-8);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   10. Reduced motion — respect the OS preference, keep the UI static.
+   -------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .skeleton {
+    animation: none;
+    opacity: 1;
+  }
+}
