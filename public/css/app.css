@@ -172,8 +172,9 @@ video {
   height: auto;
 }
 
-/* Images are block-level in layouts; icons must stay inline with text. */
-img {
+/* Images and video are block-level in layouts; icons must stay inline with text. */
+img,
+video {
   display: block;
 }
 
@@ -592,7 +593,7 @@ hr {
 .select:focus,
 .textarea:focus {
   border-color: var(--color-cyan-edge);
-  outline: 2px solid var(--color-cyan-signal);
+  outline: 2px solid var(--color-cyan-edge);
   outline-offset: 1px;
 }
 

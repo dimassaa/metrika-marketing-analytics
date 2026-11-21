@@ -45,7 +45,7 @@ describe('single stylesheet rule', () => {
       readFileSync('src/views/partials/head.ejs', 'utf8'),
     ];
     const refs = new Set(
-      sources.flatMap((text) => [...text.matchAll(/\/fonts\/[\w.-]+\.woff2/g)].map((m) => m[0])),
+      sources.flatMap((text) => [...text.matchAll(/\/fonts\/[\w.-]+\.(woff2|ttf)/g)].map((m) => m[0])),
     );
     expect(refs.size).toBeGreaterThan(0);
     for (const ref of refs) {
