@@ -6,6 +6,7 @@
     "test": "vitest run",
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
+    "db:setup": "node db/setup.js",
     "migrate": "node db/migrate.js",
     "seed": "node db/seed/seed.js",
     "test:watch": "vitest"
