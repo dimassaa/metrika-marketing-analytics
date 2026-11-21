@@ -6,7 +6,7 @@ import expressLayouts from 'express-ejs-layouts';
 import helmet from 'helmet';
 import compression from 'compression';
 import { pinoHttp } from 'pino-http';
-import { logger } from './lib/logger.js';
+import { HTTP_LOG_SERIALIZERS, logger } from './lib/logger.js';
 import { requestId } from './middleware/requestId.js';
 import { errorHandler, notFound } from './middleware/errors.js';
 import publicRoutes from './routes/public.routes.js';
@@ -92,7 +92,9 @@ export function createApp({ db, sessionStore } = {}) {
     }),
   );
 
-  app.use(pinoHttp({ logger, genReqId: (req) => req.id }));
+  // Custom serializers keep `set-cookie` (the live session id) and `x-csrf-token` out of the log stream; the
+  // pino-http defaults log every response header. See `src/lib/logger.js`.
+  app.use(pinoHttp({ logger, serializers: HTTP_LOG_SERIALIZERS, genReqId: (req) => req.id }));
   app.use(compression());
   app.use(express.json({ limit: '100kb' }));
   app.use(express.urlencoded({ extended: false, limit: '100kb' }));

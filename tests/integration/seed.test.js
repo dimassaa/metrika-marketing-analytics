@@ -175,14 +175,40 @@ describe('demo seed', () => {
     }
   });
 
+  /**
+   * Content fingerprint of the generated tables. Row counts alone would not notice a change in impressions,
+   * clicks, leads or spend, and the revenue sum only covers `orders`; the daily-checksum closes that gap. The
+   * timestamps are compared as min/max so a shifted event window fails even if row counts stay equal.
+   * @returns {Promise<{ daily: string, orders: { first: string, last: string }, touchpoints: { first: string, last: string } }>}
+   */
+  async function dataFingerprint() {
+    const { rows: [daily] } = await pool.query(`
+      SELECT md5(string_agg(
+        campaign_id::text || ':' || stat_date::text || ':' || impressions::text || ':' ||
+        clicks::text || ':' || leads::text || ':' || spend_cents::text,
+        ',' ORDER BY campaign_id, stat_date
+      )) AS digest
+      FROM daily_stats`);
+    const { rows: [orders] } = await pool.query(
+      'SELECT min(occurred_at)::text AS first, max(occurred_at)::text AS last FROM orders',
+    );
+    const { rows: [touchpoints] } = await pool.query(
+      'SELECT min(occurred_at)::text AS first, max(occurred_at)::text AS last FROM touchpoints',
+    );
+    return { daily: daily.digest, orders, touchpoints };
+  }
+
   it('is idempotent: a second run reproduces the same rows and totals', async () => {
+    const fingerprintBefore = await dataFingerprint();
     const { rows: [before] } = await pool.query('SELECT sum(revenue_cents)::text AS s FROM orders');
     const second = await seed();
     const { rows: [after] } = await pool.query('SELECT sum(revenue_cents)::text AS s FROM orders');
+    const fingerprintAfter = await dataFingerprint();
 
     expect(second.orders).toBe(first.orders);
     expect(second.customers).toBe(first.customers);
     expect(after.s).toBe(before.s);
     expect(await countRows('orders')).toBe(first.orders);
+    expect(fingerprintAfter).toEqual(fingerprintBefore);
   });
 });

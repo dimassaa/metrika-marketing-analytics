@@ -23,13 +23,26 @@ function isApiRequest(req) {
  * Returns a user-supplied redirect target only when it is a path inside `/app`.
  *
  * `//evil.example` is a protocol-relative URL and `\` is treated as `/` by several browsers, so both are rejected
- * along with CR/LF (header injection). Anything unexpected falls back to the dashboard.
+ * along with CR/LF (header injection). Percent-encoded CR/LF or slashes are rejected after one decode: a browser
+ * may decode them later, so accepting the encoded form would still produce a hostile target. Anything unexpected
+ * falls back to the dashboard.
  * @param {unknown} value Raw `next` value from a query string or form field.
  * @returns {string} A safe `/app/...` path.
  */
 export function safeRedirectTarget(value) {
   if (typeof value !== 'string') return DEFAULT_APP_PATH;
   if (!value.startsWith('/app/') || value.includes('//') || value.includes('\\') || /[\r\n]/.test(value)) {
+    return DEFAULT_APP_PATH;
+  }
+
+  let decoded;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    // Malformed escape sequences cannot be trusted as a path either.
+    return DEFAULT_APP_PATH;
+  }
+  if (decoded.includes('//') || decoded.includes('\\') || /[\r\n]/.test(decoded)) {
     return DEFAULT_APP_PATH;
   }
   return value;

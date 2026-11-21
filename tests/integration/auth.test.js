@@ -25,6 +25,16 @@ function newAgent() {
   return request.agent(app);
 }
 
+/**
+ * Extracts the `name=value` part of the session cookie from a response. The attributes are asserted separately;
+ * comparing the value is what proves the session id was rotated.
+ * @param {import('supertest').Response} res
+ * @returns {string | undefined}
+ */
+function sidCookie(res) {
+  return res.headers['set-cookie']?.find((value) => value.startsWith('metrika.sid='))?.split(';')[0];
+}
+
 beforeAll(async () => {
   await resetTestDatabase();
   await seed();
@@ -93,6 +103,42 @@ describe('POST /login', () => {
     expect(res.text).not.toContain('не найден');
   });
 
+  it('answers an unknown email with the same generic message and no authenticated session', async () => {
+    const agent = newAgent();
+    const csrf = await getCsrf(agent);
+
+    const res = await agent
+      .post('/login')
+      .type('form')
+      .send({ email: 'nobody@metrika.by', password: DEMO_PASSWORD, _csrf: csrf });
+
+    expect(res.status).toBe(401);
+    expect(res.text).toContain('Неверный email или пароль');
+    expect(res.text).not.toContain('не найден');
+
+    // The anonymous CSRF session survives, but it must not carry a user: the guarded page sends it back to login.
+    const dashboard = await agent.get('/app/dashboard');
+    expect(dashboard.status).toBe(302);
+    expect(dashboard.headers.location).toMatch(/^\/login/);
+  });
+
+  it('rotates the session id when the credentials are accepted', async () => {
+    const agent = newAgent();
+    const loginPage = await agent.get('/login');
+    const before = sidCookie(loginPage);
+    const csrf = loginPage.text.match(/name="_csrf" value="([^"]+)"/)?.[1];
+    expect(before).toBeTruthy();
+    expect(csrf).toBeTruthy();
+
+    const res = await agent.post('/login').type('form').send({ email: ADMIN, password: DEMO_PASSWORD, _csrf: csrf });
+    const after = sidCookie(res);
+
+    expect(res.status).toBe(302);
+    expect(after).toBeTruthy();
+    // Session fixation: the pre-login id must not stay valid after authentication.
+    expect(after).not.toBe(before);
+  });
+
   it('answers an inactive user with the same generic message', async () => {
     await pool.query('UPDATE users SET is_active = false WHERE email = $1', [ANALYST]);
     try {
@@ -122,6 +168,24 @@ describe('POST /login', () => {
 
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/app/dashboard');
+  });
+
+  it.each([
+    ['protocol-relative', '//evil.example'],
+    ['backslash', '\\evil.example'],
+    ['encoded CR/LF', '/app/dashboard%0d%0aLocation:%20https://evil.example'],
+  ])('falls back to the dashboard for a %s next target', async (_label, next) => {
+    const agent = newAgent();
+    const csrf = await getCsrf(agent);
+
+    const res = await agent
+      .post('/login')
+      .type('form')
+      .send({ email: ADMIN, password: DEMO_PASSWORD, next, _csrf: csrf });
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/app/dashboard');
+    expect(res.headers.location).not.toMatch(/evil\.example/);
   });
 
   it('honours a next target inside the app', async () => {

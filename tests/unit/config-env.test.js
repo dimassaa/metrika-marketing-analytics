@@ -17,4 +17,24 @@ describe('parseEnv', () => {
   it('rejects non-numeric port', () => {
     expect(() => parseEnv({ ...base, PORT: 'abc' })).toThrow(/PORT/);
   });
+  it('rejects the example placeholder session secret in production', () => {
+    expect(() =>
+      parseEnv({
+        ...base,
+        NODE_ENV: 'production',
+        SESSION_SECRET: `replace-with-${'x'.repeat(32)}`,
+        COOKIE_SECURE: 'true',
+      }),
+    ).toThrow(/SESSION_SECRET/);
+  });
+  it('rejects COOKIE_SECURE=false in production', () => {
+    expect(() => parseEnv({ ...base, NODE_ENV: 'production', COOKIE_SECURE: 'false' })).toThrow(
+      /COOKIE_SECURE/,
+    );
+  });
+  it('accepts a real production configuration', () => {
+    expect(
+      parseEnv({ ...base, NODE_ENV: 'production', SESSION_SECRET: 's'.repeat(32), COOKIE_SECURE: 'true' }),
+    ).toMatchObject({ nodeEnv: 'production', cookieSecure: true });
+  });
 });

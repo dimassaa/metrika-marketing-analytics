@@ -13,29 +13,78 @@ Non-critical findings recorded during implementation. Priority is decided by the
 - **`express-ejs-layouts@^4` from the plan does not exist on npm** (latest is 2.5.1), so 2.5.1 is installed.
   The plan text needs correcting before Tasks 4–5 use layouts, otherwise the next implementer hits the same wall.
 
+## Database and migrations
+
+- **A failed `ROLLBACK` masks the original error** in both `withTransaction` (`src/lib/db.js`) and the migration runner
+  (`db/migrate.js`). When the rollback itself throws, the caller sees the rollback failure instead of the statement
+  that actually broke the transaction. Catch the rollback error, attach it as `cause`, and rethrow the original.
+- **The reset guard's `name !== 'metrika_test'` clause is redundant**: the following `endsWith('_test')` already
+  covers it. Two spellings of one rule invite drift; keep the suffix check only.
+- **`databaseName()` parses the DSN as a URL only.** Socket paths, query parameters and percent-encoded names are not
+  normalized, so two spellings of the same database can compare unequal in the guard. Decide whether the helper
+  supports only URL DSNs and state it, or reuse one parser everywhere.
+- **`client.connect()` in `runMigrations` sits outside the `try/finally`**, so a connection failure skips `client.end`.
+  Move the connect inside the guarded block or wrap it explicitly.
+- **The advisory lock is acquired with a blocking call and no timeout.** A stuck migration blocks every later deploy
+  at boot without a diagnostic. Set `lock_timeout` (and a `statement_timeout`) and fail with a message naming the lock.
+- **The unlock comment justifies the call by a hypothetical pooled caller** («if this ever moves off a dedicated
+  connection»). It is a session-level lock; describe the real invariant or delete the speculation, because a future
+  reader may preserve an unnecessary call for a wrong reason.
+- **Applied migrations are not checksummed.** Ruling for now: never edit `001`; every schema change ships as `002`
+  and later, so an applied file is immutable. If edits still need detection, add a checksum column to
+  `schema_migrations` and fail the run on a mismatch.
+- **`DROP SCHEMA public CASCADE` / `CREATE SCHEMA public` is not transactional and assumes the connecting role owns
+  the schema.** Under a two-role setup (migration owner vs application role) `resetTestDatabase` fails. Document the
+  required ownership or split the privileges explicitly.
+- **`DATABASE_URL` is required even when only `TEST_DATABASE_URL` is set.** A CI job that runs tests against a
+  service container cannot parse the environment without inventing a development URL. Make the pair conditional on
+  `NODE_ENV`, or accept a test-only configuration.
+- **The advisory-lock and rollback failure paths are untested** (lock contention, a rollback that throws after a
+  migration failure). The happy path is covered; these paths guard data integrity, so add tests before the runner
+  changes again.
+- **The 23503 comment describes only one side of the FK error**, which can be raised by either the child insert or
+  the parent delete. Make the comment match the actual assertion so the next reader does not narrow the handler.
+
 ## Design system
 
+- **The headline highlight span is 2.28:1 (`#3398e1` on `#c1e1f7`), below WCAG AA for normal text.** This is the
+  accepted brand ruling: the element is fixed by the supplied style reference and AGENTS §6, and changing the hue
+  would break the design contract. Recorded for the defence, not a bug to fix; revisit only if the owner changes the
+  brand.
 - **`--shadow-subtle` is unused and `--shadow-preview` only serves the landing preview.** Shipped shadows should be
   the ones components actually use; either apply them in M2 or remove them so the token list stays honest.
 - **Public components use unprefixed global class names** (`.card`, `.btn`, `.field`, `.table`, `.badge`), while the
   app shell namespaces its own as `app-*`. Nothing collides today, but a public variant of `.card` will change app
   screens too. Scope public classes under a wrapper or namespace them before the M4 React islands add more classnames.
+- **`.card` on the landing carries a card shadow**, while AGENTS §6 allows shadows only for floating/preview cards.
+  Either drop the shadow from the base card and keep it on `.preview`, or document why the landing base card is an
+  exception.
+- **`format('woff2-variations')` is Fontsource-standard but not a standard CSS value.** It works in current
+  browsers; keep it only as long as the Fontsource build emits it, otherwise switch to `format('woff2')`.
+- **`.u-numeric` also applies right alignment inside `.table`.** The utility is described as numeric formatting but
+  changes layout; split the alignment into its own class so a future table cell can use tabular numbers without
+  being pushed right.
+- **Status words (`healthy`/`watch`/`risk`) are not enforced by CSS.** A class rename would silently render a neutral
+  colour; add a rule or a test that ties the three tokens to the class names.
+- **The OG SVG's text uses the app font stack but falls back outside it in social cards** because an SVG opened by a
+  crawler cannot load the local WOFF2. The PNG rendered in M6 should rasterize the text with the real font.
 
 ## Public landing
 
 - **The mobile header hides the anchor navigation** (`.site-nav { display: none }`) and leaves only the brand and
   «Войти». Add a compact disclosure or a shortened menu with «Возможности / Как считаем / Безопасность» so the
   landing does not lose its in-page navigation at 390 px.
-- **The landing promises encrypted backups with a 7-day retention** («pg_dump + AES-256-GCM, 7 дней»), but backup
-  tooling belongs to M6. Keep the copy only if it is labelled as a planned capability; otherwise reword it until the
-  scripts exist, so the demo does not describe a feature that cannot be shown.
 - **The Open Graph image is SVG** (`public/img/og-cover.svg`). Several social crawlers reject SVG for `og:image`.
   Render a 1200×630 PNG for the meta tag in M6 and keep the SVG as the editable source.
+- **The landing tests cover the hero and meta tags but not the FAQ or the formula section.** A broken `<details>`
+  block or a wrong formula would pass; add one assertion per section when the copy is next edited.
+- **The logo is declared as 32×32 while its CSS box is 28 px.** The mismatch causes a tiny layout shift on first
+  paint; make the intrinsic attributes match the rendered size.
+- **Copy nit** («Никаких «примерно» и ручных сведений в таблице»): «сведений» reads as officialese and «в таблице»
+  is redundant. Reword to «Никаких «примерно» и ручных правок» when the section is next touched.
 
 ## Runtime
 
-- `pino-http` logs the full response header set, including CSP, on every request. Trimming the serializers would cut
-  log volume, but the log shape should be decided together with the observability work, not now.
 - `/health` reports only `status`, `db` and `version`. If deployment ever needs partial degradation (DB up but a
   dependency down), the response shape has to grow; nothing today requires it.
 - **`express.static` uses the default caching policy.** CSS, fonts and SVG have no explicit long-lived caching, while
@@ -48,12 +97,21 @@ Non-critical findings recorded during implementation. Priority is decided by the
 - **The touchpoint mix is 78.2 %, not the brief's 70 %.** The 70 % rule is applied to extra touches while the first
   touch is forced to the acquisition channel, which lifts the overall share. Either retune the generator or record
   the interpretation explicitly in the seed spec; a reviewer comparing the two numbers will otherwise read it as a bug.
-- **The determinism test ignores `daily_stats` values.** It compares row counts and `sum(revenue_cents)`, so a change
-  in impressions, clicks, leads or spend would still pass. Add a checksum over those columns (or a content hash of the
-  daily rows) to the idempotency assertion.
+- **Fixed seed metadata is untested.** Channel names and kinds, campaign counts, goal metrics and the demo password
+  hash are not asserted, so a typo in `db/seed/data.js` would still pass the suite. Add a small metadata test.
 - **Several seed comments overclaim behaviour**: "byte-for-byte", "documented in README", "spend from the start" and
   the "30-day window" wording do not match what the generator or the docs actually do. Fix the comments with the next
   seed change; a misleading comment is worse than none.
+- **`seed()` is ~320 lines and mixes generation with inserts.** The pure generators can be split out and tested
+  without a database; the current shape makes every tweak a review of I/O and arithmetic at once.
+- **Date/number helpers are duplicated** (`pad2`, month math, `formatByn`) between the seed and `src/lib`. Reuse the
+  shared helpers so a formatting change cannot apply to only one side.
+- **The goals count is hardcoded** in the seed and the test. Derive it from the goals array, otherwise adding a goal
+  silently fails the count assertion for the wrong reason.
+- **`countRows()` interpolates table names** into SQL. Callers pass constants today, but the helper should take a
+  fixed whitelist key instead of a free string so the pattern cannot be copied into user-influenced code.
+- **The goal window is only regex-checked** (`^\d{4}-\d{2}-01$`). Assert the exact 12-month span relative to the
+  anchor; a window that shrinks to one month would currently pass.
 - **`seed()` without `anchorDate` resolves "yesterday" per call.** Two runs that straddle Minsk midnight produce
   different datasets even with the same PRNG seed. Tests are effectively immune, but a cron or a demo reset should
   pass `anchorDate` explicitly so the anchor and the generated window cannot disagree.
@@ -132,6 +190,8 @@ Non-critical findings recorded during implementation. Priority is decided by the
 - **Failed login attempts are not written to `audit_log`.** Only `auth.login` success and `auth.logout` are recorded,
   as the M1 brief requires. If the audit screen must show brute-force attempts, add `auth.login_failed` with IP and a
   normalized e-mail (never the password) and a retention rule.
+- **`DEMO_PASSWORD` is duplicated** between `db/seed/data.js` and `tests/helpers/app.js`. Import the seed constant in
+  the test helper (or vice versa) so a rotated demo password cannot leave half the suite failing for the wrong reason.
 
 ## Code quality
 
@@ -158,7 +218,25 @@ Non-critical findings recorded during implementation. Priority is decided by the
 - **The rbac empty-state test is order-dependent.** It truncates `daily_stats, touchpoints, orders, customers` and
   never reseeds, so any later test in the same file that needs statistics would fail. Move it to its own file with a
   `beforeAll` seed or reseed in a `finally`; Vitest's `fileParallelism: false` only hides the problem across files.
-- **Session-id rotation on login and rejection of an unsafe `next` are verified only indirectly.** The auth tests
-  assert the redirect and the external target, but not that the cookie value changed across login or that `//evil`,
-  `\evil` and CR/LF targets fall back. Add both assertions with the first auth change; they guard a security property
-  that a refactor can silently break.
+- **The JSON-vs-text error contract, the CSP nonce and `withTransaction` rollback were verified by hand**, not by
+  automated tests. Add coverage when the error middleware or the transaction helper is next changed.
+
+## Resolved during the M1 final fix wave
+
+Recorded so the deferred findings do not disappear from history when the open entries above are closed.
+
+- **HTTP logs no longer contain `set-cookie`, `metrika.sid` or `x-csrf-token`.** `pino-http` defaults logged every
+  response header; custom serializers in `src/lib/logger.js` now emit method/url/statusCode only, with redaction kept
+  as defense in depth, and `tests/unit/logger.test.js` guards it.
+- **The seed determinism test now fingerprints `daily_stats`** (md5 over campaign, date, impressions, clicks, leads,
+  spend) plus min/max event timestamps for orders and touchpoints.
+- **Session-id rotation, protocol-relative/backslash/encoded-CR/LF `next` targets and the unknown-email path** now
+  have regression tests in `tests/integration/auth.test.js`; `safeRedirectTarget` rejects percent-encoded control
+  characters and slashes after one decode.
+- **Production environment parsing rejects the `.env.example` placeholder secret and `COOKIE_SECURE=false`**, naming
+  the offending key (`src/config/env.js`, covered in `tests/unit/config-env.test.js`).
+- **Canonical URLs are normalized** so a protocol-relative or doubled-slash path cannot point off-site
+  (`src/lib/seo.js`, covered in `tests/unit/seo.test.js`). The 404 handler still passes `req.path`, which is now safe
+  by construction rather than by trusting the caller.
+- **The landing no longer claims encrypted backups as a shipped feature**; the security card labels them as a
+  deployment-stage capability (`src/views/pages/home.ejs`).
