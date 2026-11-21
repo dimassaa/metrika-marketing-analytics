@@ -240,3 +240,12 @@ Recorded so the deferred findings do not disappear from history when the open en
   by construction rather than by trusting the caller.
 - **The landing no longer claims encrypted backups as a shipped feature**; the security card labels them as a
   deployment-stage capability (`src/views/pages/home.ejs`).
+
+## Финальное ревью M1 — остаточные находки (отложено)
+
+- `src/controllers/public.controller.js` передаёт сырой `req.path` в `buildSeo`; путь с обратным слэшем теперь даёт
+  500 вместо 404. Для страницы 404 canonical не нужен — использовать константу `/404`.
+- Кастомный `err`-сериализатор логов оставляет только `type/message/stack` и теряет `code`, `statusCode`, `detail`
+  (SQLSTATE для ошибок `pg`). Вернуть эти поля в M2, иначе диагностика БД станет хуже.
+- `imagePath` в `src/lib/seo.js` не валидируется: вызывающий код может отдать внешний `og:image`. Нормализовать так же,
+  как canonical.
