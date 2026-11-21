@@ -95,7 +95,7 @@ docs/screenshots/m1/
 ```bash
 npm init -y
 npm pkg set type=module
-npm i express@^5 ejs@^3 express-ejs-layouts@^4 pg@^8 zod@^4 dotenv@^16 pino@^9 pino-http@^10 \
+npm i express@^5 ejs@^3 express-ejs-layouts@^2.5.1 pg@^8 zod@^4 dotenv@^16 pino@^9 pino-http@^10 \
   helmet@^8 compression@^1 express-session@^1 connect-pg-simple@^10 @node-rs/argon2@^2 \
   express-rate-limit@^7
 npm i -D vitest@^3 supertest@^7
