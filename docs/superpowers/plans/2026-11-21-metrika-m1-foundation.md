@@ -598,16 +598,22 @@ git commit -m "feat: add deterministic seeded demo dataset for belarusian market
 Inter и Inter Tight (variable, latin + cyrillic) — из пакетов Fontsource через npm pack (без CDN в рантайме):
 
 ```bash
-npm pack @fontsource-variable/inter @fontsource-variable/inter-tight --pack-destination /tmp
-cd /tmp && tar -xzf fontsource-variable-inter-*.tgz && tar -xzf fontsource-variable-inter-tight-*.tgz
+mkdir -p /tmp/fonts-inter /tmp/fonts-inter-tight
+npm pack @fontsource-variable/inter --pack-destination /tmp/fonts-inter
+npm pack @fontsource-variable/inter-tight --pack-destination /tmp/fonts-inter-tight
+tar -xzf /tmp/fonts-inter/*.tgz -C /tmp/fonts-inter
+tar -xzf /tmp/fonts-inter-tight/*.tgz -C /tmp/fonts-inter-tight
 mkdir -p /home/dimass/opencode/10/public/fonts
-cp package/files/inter-latin-wght-normal.woff2 package/files/inter-cyrillic-wght-normal.woff2 \
+cp /tmp/fonts-inter/package/files/inter-latin-wght-normal.woff2 \
+   /tmp/fonts-inter/package/files/inter-cyrillic-wght-normal.woff2 \
    /home/dimass/opencode/10/public/fonts/
-cp package/files/inter-tight-latin-wght-normal.woff2 package/files/inter-tight-cyrillic-wght-normal.woff2 \
+cp /tmp/fonts-inter-tight/package/files/inter-tight-latin-wght-normal.woff2 \
+   /tmp/fonts-inter-tight/package/files/inter-tight-cyrillic-wght-normal.woff2 \
    /home/dimass/opencode/10/public/fonts/
+cp /tmp/fonts-inter/package/LICENSE /home/dimass/opencode/10/public/fonts/LICENSE-inter.txt
+cp /tmp/fonts-inter-tight/package/LICENSE /home/dimass/opencode/10/public/fonts/LICENSE-inter-tight.txt
 ```
-Имена файлов уточнить по факту в `package/files/` (могут содержать `wght`). Скопировать `LICENSE` обоих пакетов
-как `public/fonts/LICENSE-inter.txt` и `LICENSE-inter-tight.txt`.
+Имена файлов уточнить по факту в `package/files/` (могут содержать `wght`).
 Шрифт НБРБ уже скачан: скопировать `/tmp/nbrb/nbrb.woff2` и `/tmp/nbrb/nbrb.ttf` в `public/fonts/`.
 Если `/tmp/nbrb` пропал — скачать `https://www.nbrb.by/coinsbanknotes/byn-ico/nbrb_font.zip` и распаковать.
 
@@ -790,6 +796,7 @@ git commit -m "feat: add public landing page with seo metadata and sitemap"
   `src/controllers/auth.controller.js`, `src/routes/auth.routes.js`, `src/views/pages/login.ejs`,
   `src/views/errors/403.ejs`
 - Modify: `src/app.js` (session, csrf, locals), `src/views/partials/head.ejs` (nonce для JSON-LD)
+- Create: `src/routes/app.routes.js` (минимальный защищённый `/app` + `/app/dashboard`-заглушка; Task 7 заменит обработчик)
 - Test: `tests/integration/auth.test.js`, `tests/unit/permissions.test.js`
 
 **Interfaces:**
@@ -810,7 +817,7 @@ expect(can('viewer', 'dashboard:view')).toBe(true);
 ```
 `tests/integration/auth.test.js` (после `resetTestDatabase(); await seed()`; `agent = request.agent(app)`):
 1. GET `/login` 200 и содержит `name="_csrf"`;
-2. POST `/login` без CSRF → 403, сессии нет (`GET /app/dashboard` → 302);
+2. POST `/login` без CSRF → 403, в `sessions` нет строки;
 3. POST с CSRF и верным паролем → 302 `/app/dashboard`, cookie `metrika.sid`;
 4. неверный пароль → 401, текст «Неверный email или пароль», нет утечки «пользователь не найден»;
 5. неактивный пользователь (admin деактивирует analyst в БД) → 401 с тем же сообщением;
@@ -856,6 +863,10 @@ export function can(role, permission) { return (PERMISSIONS[role] ?? []).include
 `auth.controller.js`: GET login (если уже вошёл → `/app/dashboard`); POST login — Zod, `login()`,
 `req.session.regenerate`, установить `req.session.user`, аудит `auth.login`, redirect по safe `next`;
 POST logout — destroy, clearCookie, аудит `auth.logout`.
+`app.routes.js` (временный, до Task 7): `GET /app` → redirect `/app/dashboard`, `GET /app/dashboard` —
+`requireAuth` + plain text «Дашборд»; это минимальный seam, чтобы проверить guard, Task 7 заменит на EJS.
+`createApp({ db, sessionStore })`: если `sessionStore` не передан — `PgStore`; в тестах передаётся
+`new session.MemoryStore()`; обновить `tests/integration/health.test.js`, чтобы он передавал memory store.
 `rateLimit.js`: `rateLimit({ windowMs: 15*60*1000, limit: 5, standardHeaders: true, legacyHeaders: false,
   keyGenerator: req => `${req.ip}:${(req.body?.email ?? '').toLowerCase()}`, handler: 429 render login })`.
 В `app.js` порядок: session → csrf → locals → routes.
@@ -890,12 +901,12 @@ git commit -m "feat: add session auth with csrf protection and role-based access
 ### Task 7: Каркас приложения, data anchor, RBAC-экраны, ошибки
 
 **Files:**
-- Create: `src/repositories/reference.repo.js`, `src/routes/app.routes.js`, `src/controllers/app.controller.js`,
+- Create: `src/repositories/reference.repo.js`, `src/controllers/app.controller.js`,
   `src/controllers/admin.controller.js`, `src/views/layouts/app.ejs`, `src/views/partials/sidebar.ejs`,
   `src/views/partials/topbar.ejs`, `src/views/pages/dashboard.ejs`,
   `src/views/pages/admin-users.ejs`, `src/views/pages/coming-soon.ejs`, `src/views/errors/500.ejs`
-- Modify: `src/app.js`, `src/middleware/errors.js`, `src/views/errors/404.ejs` (ссылка на дашборд при входе),
-  `src/views/errors/403.ejs` (то же)
+- Modify: `src/routes/app.routes.js` (заменить заглушку из Task 6), `src/app.js`, `src/middleware/errors.js`,
+  `src/views/errors/404.ejs` (ссылка на дашборд при входе), `src/views/errors/403.ejs` (то же)
 - Test: `tests/integration/rbac.test.js`
 
 **Interfaces:**
@@ -912,8 +923,8 @@ git commit -m "feat: add session auth with csrf protection and role-based access
 4. analyst GET `/app/admin/users` → 403, но `/app/import` → 200 (заглушка);
 5. admin GET `/app/admin/users` → 200, видит 3 пользователя и роли;
 6. dashboard содержит «Данные по» и дату anchor;
-7. пустая БД (после `resetTestDatabase()` без сида): dashboard → 200, текст «Данных пока нет», anchor = сегодня
-   Minsk; KPI показывают «—», а не `NaN`;
+7. пустая статистика (`TRUNCATE daily_stats, touchpoints, orders, customers RESTART IDENTITY CASCADE`, пользователи
+   остаются): dashboard → 200, текст «Данных пока нет», anchor = сегодня Minsk; KPI показывают «—», а не `NaN`;
 8. GET `/app/unknown` → 404 HTML.
 
 - [ ] **Step 2: Запустить и убедиться в падении**
