@@ -183,6 +183,134 @@ export function createMetricsRepository(db) {
     },
 
     /**
+     * Weekly spend and new customers for the dashboard and the channel card.
+     *
+     * Only Monday–Sunday weeks that fit inside `[from, to]` are returned: a week whose Sunday is past `to` is still
+     * accumulating, and a partial bucket would make a chart show a false drop at the right edge.
+     *
+     * The two sources are aggregated in separate CTEs and joined afterwards. Joining `daily_stats` with `customers`
+     * directly would multiply every spend row by every customer row of the same week. The `FULL JOIN` keeps a week
+     * that spent money without acquiring anyone (and vice versa) instead of silently dropping it.
+     *
+     * New customers are bucketed by the Europe/Minsk calendar date of `first_order_at`. Grouping by the UTC date
+     * would move an order placed at 00:30 Minsk into the previous day and, around midnight on Monday, into the
+     * previous week; `AT TIME ZONE` matches the day bounds used by every other metrics query.
+     *
+     * @param {{ from: string, to: string, channelIds?: string[] | null }} filters `null` means every channel.
+     * @returns {Promise<Array<{ weekStart: string, spendCents: bigint, newCustomers: number }>>} Sorted by week.
+     * @throws {ValidationError} When a channel id is not a BIGINT id.
+     */
+    async listWeeklySeries({ from, to, channelIds = null }) {
+      let scopedChannelIds = null;
+      if (channelIds !== null && channelIds !== undefined) {
+        if (!Array.isArray(channelIds)) {
+          throw new ValidationError('Некорректный список каналов');
+        }
+        scopedChannelIds = channelIds.map((channelId) => {
+          const id = parseBigIntId(channelId);
+          if (id === null) throw new ValidationError('Некорректный идентификатор канала');
+          return id;
+        });
+      }
+
+      const { rows } = await db.query(
+        `WITH spend AS (
+           SELECT date_trunc('week', ds.stat_date)::date AS week_start,
+                  coalesce(sum(ds.spend_cents), 0)::bigint::text AS spend_cents
+             FROM daily_stats ds
+             JOIN campaigns cp ON cp.id = ds.campaign_id
+            WHERE ds.stat_date BETWEEN $1::date AND $2::date
+              AND ($3::bigint[] IS NULL OR cp.channel_id = ANY($3::bigint[]))
+            GROUP BY 1
+         ),
+         new_customers AS (
+           SELECT date_trunc('week', (cu.first_order_at AT TIME ZONE 'Europe/Minsk')::date)::date AS week_start,
+                  count(*)::int AS new_customers
+             FROM customers cu
+            WHERE cu.first_order_at >= $4::timestamptz
+              AND cu.first_order_at <= $5::timestamptz
+              AND ($3::bigint[] IS NULL OR cu.first_channel_id = ANY($3::bigint[]))
+            GROUP BY 1
+         )
+         SELECT (coalesce(s.week_start, n.week_start))::text AS week_start,
+                coalesce(s.spend_cents, '0') AS spend_cents,
+                coalesce(n.new_customers, 0) AS new_customers
+           FROM spend s
+           FULL JOIN new_customers n ON n.week_start = s.week_start
+          WHERE coalesce(s.week_start, n.week_start) >= $1::date
+            AND coalesce(s.week_start, n.week_start) + 6 <= $2::date
+          ORDER BY 1`,
+        [from, to, scopedChannelIds, minskDayStart(from), minskDayEnd(to)],
+      );
+
+      return rows.map((row) => ({
+        weekStart: row.week_start,
+        spendCents: spendFromRow(row.spend_cents),
+        newCustomers: countFromRow(row.new_customers, 'new_customers'),
+      }));
+    },
+
+    /**
+     * Single funnel query for the channel card: impressions, clicks and leads come from the channel's campaigns,
+     * customers and orders are counted by the customer's acquisition channel inside the same period.
+     *
+     * All five numbers are aggregated in one statement and every CTE returns exactly one row (`count(*)` does even
+     * on an empty table), so a channel without any statistics answers zeros, never `null` and never `NaN`. There is
+     * no per-campaign query: the funnel is a screen-level aggregate, not a table row.
+     *
+     * @param {{ from: string, to: string, channelId: string }} request
+     * @returns {Promise<{ impressions: number, clicks: number, leads: number, newCustomers: number, orders: number }>}
+     * @throws {ValidationError} When the channel id is not a BIGINT id.
+     */
+    async getChannelFunnel({ from, to, channelId }) {
+      const scopedChannelId = parseBigIntId(channelId);
+      if (scopedChannelId === null) {
+        throw new ValidationError('Некорректный идентификатор канала');
+      }
+
+      const { rows } = await db.query(
+        `WITH stats AS (
+           SELECT coalesce(sum(ds.impressions), 0)::int AS impressions,
+                  coalesce(sum(ds.clicks), 0)::int AS clicks,
+                  coalesce(sum(ds.leads), 0)::int AS leads
+             FROM daily_stats ds
+             JOIN campaigns cp ON cp.id = ds.campaign_id
+            WHERE cp.channel_id = $1::bigint
+              AND ds.stat_date BETWEEN $2::date AND $3::date
+         ),
+         acquired AS (
+           SELECT count(*)::int AS new_customers
+             FROM customers cu
+            WHERE cu.first_channel_id = $1::bigint
+              AND cu.first_order_at >= $4::timestamptz
+              AND cu.first_order_at <= $5::timestamptz
+         ),
+         channel_orders AS (
+           SELECT count(*)::int AS orders
+             FROM orders o
+             JOIN customers cu ON cu.id = o.customer_id
+            WHERE cu.first_channel_id = $1::bigint
+              AND o.occurred_at >= $4::timestamptz
+              AND o.occurred_at <= $5::timestamptz
+         )
+         SELECT s.impressions, s.clicks, s.leads, a.new_customers, o.orders
+           FROM stats s
+           CROSS JOIN acquired a
+           CROSS JOIN channel_orders o`,
+        [scopedChannelId, from, to, minskDayStart(from), minskDayEnd(to)],
+      );
+
+      const row = rows[0] ?? {};
+      return {
+        impressions: countFromRow(row.impressions, 'impressions'),
+        clicks: countFromRow(row.clicks, 'clicks'),
+        leads: countFromRow(row.leads, 'leads'),
+        newCustomers: countFromRow(row.new_customers, 'new_customers'),
+        orders: countFromRow(row.orders, 'orders'),
+      };
+    },
+
+    /**
      * Spend alone per channel, for ROMI and budget screens that do not need the customer count.
      *
      * @param {{ from: string, to: string }} period

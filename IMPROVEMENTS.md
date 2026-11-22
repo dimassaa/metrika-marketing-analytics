@@ -475,3 +475,23 @@ Recorded so the deferred findings do not disappear from history when the open en
   (`last_touch`), while `getChannelHealthReport` already accepts `attributionModel`. Deliberately out of the BO-04
   brief, but once the UI lets users compare models the ranking must forward the parameter instead of adding a second
   report path; otherwise the screen would show a last-touch score under a first-touch/linear label.
+
+### M3 aggregation (task 6 follow-ups)
+
+- **The weekly series always returns `weeks` buckets, filling absent weeks with zeros.** The brief said "empty data →
+  an empty series"; a fixed axis was chosen instead so a chart cannot silently shorten its period and every bucket
+  keeps the `weekStart` contract. The dashboard's empty state should be decided from `verdict.status`/all-zero
+  buckets, not from `weeklySeries.length`.
+- **The last complete week is the week containing `to` when `to` is Sunday.** The brief's
+  `addDays(isoWeekStart(to), -7)` would drop that complete week; the semantic rule "only full Mon–Sun weeks" was
+  implemented and covered by tests. Every other `to` weekday gives the brief's formula unchanged.
+- **`deviation.abs` is directional while `deviation.pct` is a signed fact-vs-plan change.** For lower-is-better a
+  positive `abs` means "behind"; for higher-is-better the sign is inverted by the brief, while `pct` always uses
+  `percentChange(fact, target)`. M4 must combine `abs`/`pct` with `direction` for tone and text; if one signed number
+  is needed, extend the view-model rather than reinterpreting these two.
+- **Goal metric labels are duplicated from `goals.service.js`.** The M2 labels are private, so
+  `goals-progress.service.js` repeats the five Russian names. They must stay byte-identical; moving them into
+  `src/lib/metrics-labels.js` is the obvious fix once M2's list is next touched.
+- **`getDashboardSummary` has no channel/campaign filter yet.** BO-13 mentions filters, but T6 only defines the
+  unfiltered view-model; the weekly query already accepts `channelIds`, so the filter can be added without a second
+  aggregation path.
