@@ -4,6 +4,7 @@ import { createAppController } from '../controllers/app.controller.js';
 import { createAdminController } from '../controllers/admin.controller.js';
 import { createChannelsController } from '../controllers/channels.controller.js';
 import { createCampaignsController } from '../controllers/campaigns.controller.js';
+import { createGoalsController } from '../controllers/goals.controller.js';
 
 /**
  * Sections that exist in the sidebar but render the honest «Раздел появится на следующем этапе» placeholder until
@@ -15,7 +16,6 @@ const PLACEHOLDER_SECTIONS = [
   { slug: 'attribution', title: 'Атрибуция' },
   { slug: 'scenarios', title: 'Сценарии' },
   { slug: 'alerts', title: 'Алерты' },
-  { slug: 'goals', title: 'Цели' },
 ];
 
 /**
@@ -28,6 +28,7 @@ const PLACEHOLDER_SECTIONS = [
  *   auditService: ReturnType<typeof import('../services/audit.service.js').createAuditService>,
  *   channelsService: ReturnType<typeof import('../services/channels.service.js').createChannelsService>,
  *   campaignsService: ReturnType<typeof import('../services/campaigns.service.js').createCampaignsService>,
+ *   goalsService: ReturnType<typeof import('../services/goals.service.js').createGoalsService>,
  * }} deps
  * @returns {import('express').Router}
  */
@@ -38,11 +39,13 @@ export function createAppRouter({
   auditService,
   channelsService,
   campaignsService,
+  goalsService,
 }) {
   const appController = createAppController({ referenceRepository });
   const adminController = createAdminController({ usersService, auditService, referenceRepository });
   const channelsController = createChannelsController({ channelsService, campaignsService, referenceRepository });
   const campaignsController = createCampaignsController({ campaignsService, channelsService, referenceRepository });
+  const goalsController = createGoalsController({ goalsService, channelsService, referenceRepository });
   const router = Router();
 
   router.get('/', requireAuth, (req, res) => {
@@ -74,6 +77,13 @@ export function createAppRouter({
     requirePermission('campaigns:manage'),
     campaignsController.delete,
   );
+
+  // Reading goals is open to viewers, mutations to analysts and admins. Metric and channel are immutable after
+  // creation; `/delete` keeps its own permission so a hidden button is never the only guard.
+  router.get('/goals', requireAuth, requirePermission('goals:view'), goalsController.list);
+  router.post('/goals', requireAuth, requirePermission('goals:manage'), goalsController.create);
+  router.post('/goals/:id/delete', requireAuth, requirePermission('goals:manage'), goalsController.delete);
+  router.post('/goals/:id', requireAuth, requirePermission('goals:manage'), goalsController.update);
 
   for (const { slug, title } of PLACEHOLDER_SECTIONS) {
     router.get(`/${slug}`, requireAuth, appController.comingSoon({ title, activeNav: slug }));

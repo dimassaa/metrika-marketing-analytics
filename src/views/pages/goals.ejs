@@ -1,0 +1,258 @@
+<section class="app-section">
+  <div class="stack stack--lg">
+    <div class="stack stack--sm">
+      <h2>Цели и плановые показатели</h2>
+      <p class="u-muted">
+        Цель задаёт план на период: для одной метрики и канала периоды не пересекаются. Глобальная цель без канала
+        относится ко всей компании. Единица плана зависит от метрики: CAC — белорусские рубли, ROMI — проценты,
+        LTV:CAC — коэффициент, Payback — месяцы, новые клиенты — целое число.
+      </p>
+    </div>
+
+    <div class="toolbar">
+      <form class="filter-bar" method="get" action="/app/goals" aria-label="Фильтры целей">
+        <label class="field">
+          <span class="field__label">Канал</span>
+          <select class="select" name="channelId">
+            <option value="all" <%= filters.channelId === 'all' ? 'selected' : '' %>>Все цели</option>
+            <% channels.forEach((channel) => { %>
+            <option value="<%= channel.id %>" <%= filters.channelId === channel.id ? 'selected' : '' %>>
+              <%= channel.name %><%= channel.isActive ? '' : ' (в архиве)' %>
+            </option>
+            <% }) %>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Метрика</span>
+          <select class="select" name="metric">
+            <option value="all" <%= filters.metric === 'all' ? 'selected' : '' %>>Все метрики</option>
+            <% metricOptions.forEach((option) => { %>
+            <option value="<%= option.value %>" <%= filters.metric === option.value ? 'selected' : '' %>>
+              <%= option.label %>
+            </option>
+            <% }) %>
+          </select>
+        </label>
+
+        <button class="btn btn--ghost btn--sm" type="submit">Показать</button>
+      </form>
+
+      <p class="u-muted">
+        Целей: <strong class="u-numeric"><%= goals.length %></strong>
+      </p>
+    </div>
+
+    <% if (deleteError) { %>
+    <div class="alert alert--error" role="alert">
+      <p class="alert__title">Цель не удалена</p>
+      <%= deleteError %>
+    </div>
+    <% } %>
+
+    <% if (can('goals:manage')) { %>
+    <div class="card card--flat">
+      <div class="card__header">
+        <div>
+          <h3 class="card__title">Новая цель</h3>
+          <p class="card__meta">
+            Метрика и канал задаются один раз. Для той же метрики и канала период не должен пересекаться с уже
+            существующей целью.
+          </p>
+        </div>
+      </div>
+
+      <% if (createError) { %>
+      <div class="alert alert--error" role="alert">
+        <p class="alert__title">Цель не создана</p>
+        <%= createError %>
+      </div>
+      <% } %>
+
+      <form class="inline-form" method="post" action="/app/goals">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+
+        <label class="field">
+          <span class="field__label">Метрика</span>
+          <select class="select" name="metric" required>
+            <% metricOptions.forEach((option) => { %>
+            <option value="<%= option.value %>" <%= createValues.metric === option.value ? 'selected' : '' %>>
+              <%= option.label %> (<%= option.unit %>)
+            </option>
+            <% }) %>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Канал</span>
+          <select class="select" name="channelId">
+            <option value="" <%= createValues.channelId === '' ? 'selected' : '' %>>Вся компания</option>
+            <% channels.forEach((channel) => { %>
+            <option value="<%= channel.id %>" <%= createValues.channelId === channel.id ? 'selected' : '' %>>
+              <%= channel.name %><%= channel.isActive ? '' : ' (в архиве)' %>
+            </option>
+            <% }) %>
+          </select>
+          <span class="field__hint">Пустое значение — глобальная цель по всей компании</span>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Плановое значение</span>
+          <input
+            class="input"
+            type="text"
+            name="targetValue"
+            value="<%= createValues.targetValue %>"
+            placeholder="42,50"
+            inputmode="decimal"
+            autocomplete="off"
+            required
+          >
+          <span class="field__hint">
+            CAC — BYN, ROMI — %, LTV:CAC — коэффициент, Payback — месяцы, новые клиенты — целое число
+          </span>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Начало периода</span>
+          <input class="input" type="date" name="periodStart" value="<%= createValues.periodStart %>" required>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Окончание периода</span>
+          <input class="input" type="date" name="periodEnd" value="<%= createValues.periodEnd %>" required>
+        </label>
+
+        <div class="cluster">
+          <button class="btn btn--primary" type="submit">Добавить цель</button>
+        </div>
+      </form>
+    </div>
+    <% } %>
+
+    <% if (can('goals:manage') && edit) { %>
+    <div class="card card--flat">
+      <div class="card__header">
+        <div>
+          <h3 class="card__title">Изменить цель</h3>
+          <p class="card__meta">
+            <%= edit.metricLabel %> · <%= edit.channelLabel %> ·
+            <span class="u-muted">план в единицах: <%= edit.metricUnit %></span>
+          </p>
+        </div>
+        <a class="btn btn--ghost btn--sm" href="/app/goals">Закрыть</a>
+      </div>
+
+      <% if (editError) { %>
+      <div class="alert alert--error" role="alert">
+        <p class="alert__title">Изменение не применено</p>
+        <%= editError %>
+      </div>
+      <% } %>
+
+      <form class="inline-form" method="post" action="/app/goals/<%= edit.id %>">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+
+        <label class="field">
+          <span class="field__label">Плановое значение, <%= edit.metricUnit %></span>
+          <input
+            class="input"
+            type="text"
+            name="targetValue"
+            value="<%= edit.values.targetValue %>"
+            inputmode="decimal"
+            autocomplete="off"
+            required
+          >
+        </label>
+
+        <label class="field">
+          <span class="field__label">Начало периода</span>
+          <input class="input" type="date" name="periodStart" value="<%= edit.values.periodStart %>" required>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Окончание периода</span>
+          <input class="input" type="date" name="periodEnd" value="<%= edit.values.periodEnd %>" required>
+        </label>
+
+        <div class="cluster">
+          <button class="btn btn--ghost" type="submit">Сохранить</button>
+        </div>
+      </form>
+
+      <form class="inline-form" method="post" action="/app/goals/<%= edit.id %>/delete">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <div class="cluster">
+          <button class="btn btn--danger btn--sm" type="submit">Удалить цель</button>
+          <span class="field__hint">Удаление цели не затрагивает историю заказов и статистику каналов.</span>
+        </div>
+      </form>
+    </div>
+    <% } %>
+
+    <% if (goals.length === 0) { %>
+    <div class="empty-state">
+      <p class="empty-state__title">По этому фильтру целей нет</p>
+      <p class="empty-state__text">Измените канал или метрику — или вернитесь к полному списку целей.</p>
+      <div class="empty-state__actions">
+        <a class="btn btn--ghost" href="/app/goals">Сбросить фильтры</a>
+      </div>
+    </div>
+    <% } else { %>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">Метрика</th>
+            <th scope="col">Канал</th>
+            <th scope="col" class="u-right">План</th>
+            <th scope="col">Период</th>
+            <th scope="col">Статус</th>
+            <th scope="col"><span class="u-visually-hidden">Действия</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <% goals.forEach((goal) => { %>
+          <tr>
+            <td>
+              <%= goal.metricLabel %>
+              <span class="u-muted u-nowrap">· <%= goal.metricUnit %></span>
+            </td>
+            <td>
+              <% if (goal.channelId === null) { %>
+              <%= goal.channelLabel %>
+              <% } else { %>
+              <a href="/app/channels/<%= goal.channelId %>"><%= goal.channelLabel %></a>
+              <% } %>
+            </td>
+            <td class="u-right u-nowrap">
+              <% if (goal.targetIsByn) { %>
+              <%= goal.targetLabel %> <span class="byn">BYN</span>
+              <% } else { %>
+              <%= goal.targetLabel %>
+              <% } %>
+            </td>
+            <td class="u-nowrap u-numeric"><%= goal.periodStartLabel %> — <%= goal.periodEndLabel %></td>
+            <td>
+              <span class="badge badge--<%= goal.statusTone %>"><%= goal.statusLabel %></span>
+            </td>
+            <td>
+              <% if (can('goals:manage')) { %>
+              <div class="row-actions">
+                <a class="btn btn--ghost btn--sm" href="/app/goals?edit=<%= goal.id %>">Изменить</a>
+                <form method="post" action="/app/goals/<%= goal.id %>/delete">
+                  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                  <button class="btn btn--danger btn--sm" type="submit">Удалить</button>
+                </form>
+              </div>
+              <% } %>
+            </td>
+          </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+    <% } %>
+  </div>
+</section>

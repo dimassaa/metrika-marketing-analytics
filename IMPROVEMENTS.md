@@ -250,10 +250,38 @@ Non-critical findings recorded during implementation. Priority is decided by the
   cannot happen through the UI; a future partial form would silently clear the budget.
 - **Every campaign mutation commits, then writes its audit row.** A failed `audit_log` insert therefore leaves the
   change applied and answers 500; the row and its trail disagree. The same pattern exists in the task-1 channel
-  mutations. Wrap the state change and `auditService.record` in one `withTransaction`, or make audit explicitly
-  best-effort (log the failure, keep the mutation result) so the chosen contract is visible in code.
+  mutations and the task-4 goal mutations. Wrap the state change and `auditService.record` in one
+  `withTransaction`, or make audit explicitly best-effort (log the failure, keep the mutation result) so the chosen
+  contract is visible in code.
 - **BIGINT id parsing is duplicated between `channels.controller.js` and `campaigns.controller.js` (plus the filter
   transform in the campaign validator).** A shared `src/lib/ids.js` would remove three copies of the same range rule.
+
+## M2 goals (task 4 follow-ups)
+
+- **`goals.target_value` remains `NUMERIC(14,2)` with five different units.** This is the documented exception from
+  the task brief: BYN for `cac`, percent for `romi`, a ratio for `ltv_cac`, months for `payback` and an integer for
+  `new_customers`. A `target_value_cents` column would cover only one metric out of five and force a second field
+  for the rest, so no migration was made. The compensation is enforced in code: CAC input goes through
+  `parseBynToCents` and back to a decimal string, and every metric is stored as a two-decimal string. M3 must parse
+  `cac` through `parseBynToCents` as well, never through `Number()`, when it compares plan with fact.
+- **The database cannot enforce the general overlap rule.** `goals_unique_idx` only rejects an identical
+  `(metric, channel, period_start, period_end)`; two different overlapping intervals are caught by the service's
+  transaction plus `pg_advisory_xact_lock(hashtext(...))`. A direct SQL insert, another service, or a future import
+  bypassing `goals.service.js` can still create an overlap. A `btree_gist` exclusion constraint on
+  `(metric, COALESCE(channel_id, 0), daterange(period_start, period_end, '[]'))` would move the rule into the
+  database, but requires a new migration and the `btree_gist` extension, which was outside this task's file list.
+- **The task brief names `002_m2_data.sql` as the source of the goal index.** That migration does not exist in the
+  repository; the whole `goals` table, including `goals_unique_idx`, already ships in `001_init.sql`. The brief should
+  be corrected before the next task repeats the reference.
+- **The goal list has no row cap or pagination.** The demo has four seeded goals plus a handful of test rows, so the
+  screen remains readable; add the same explicit cap/pager as campaigns if goals become numerous.
+- **A stale `?edit=<id>` on `/app/goals` silently hides the edit card.** The behaviour matches the campaign list and
+  avoids a 404 for a page that still exists, but a short «цель не найдена» notice would explain the missing form.
+- **Goal create/edit/delete redirect without a success notice.** The same flash-style mechanism requested for
+  campaigns and the profile would confirm the change; today the person has to find the row again.
+- **The metric and channel are immutable after creation, but the create schema is also used to validate the hidden
+  scope on edit.** The update path re-reads the goal to learn its metric before parsing the target, which costs one
+  extra `SELECT`; acceptable for a form, and it keeps unit rules in one validator.
 
 ## M2 users, profile and audit (task 3 follow-ups)
 
