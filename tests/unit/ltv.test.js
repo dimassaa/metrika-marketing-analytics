@@ -112,15 +112,19 @@ describe('computeCohortLtv', () => {
  * In-memory cohort repository that honours the documented filters. Filtering here (instead of returning every row
  * regardless of the request) makes a wrong `fromCohortMonth` visible as a wrong LTV, not just a wrong mock call.
  *
+ * `withSnapshot` is a pass-through: these tests cover aggregation, while the repository unit test checks that the
+ * real wrapper opens a repeatable-read transaction.
+ *
  * @param {{
  *   sizes: Array<{ cohortMonth: string, channelId: string, channelCode: string, cohortSize: number }>,
  *   margins: Array<{
  *     cohortMonth: string, channelId: string, monthOffset: number,
  *     activeCustomers: number, marginCents: bigint,
  *   }>,
+ *   channels?: Array<{ channelId: string, channelCode: string, isActive?: boolean }>,
  * }} rows
  */
-function repositoryFixture({ sizes, margins }) {
+function repositoryFixture({ sizes, margins, channels }) {
   /**
    * @param {{ fromCohortMonth?: string | null, toCohortMonth: string, channelId?: string | null }} filters
    * @param {{ cohortMonth: string, channelId: string }} row
@@ -136,8 +140,31 @@ function repositoryFixture({ sizes, margins }) {
   const listCohortSizes = vi.fn(async (filters) => sizes.filter((row) => matches(filters, row)));
   const listCohortMonthlyMargins = vi.fn(async (filters) => margins.filter((row) => matches(filters, row)));
 
-  return { listCohortSizes, listCohortMonthlyMargins };
+  const dimension = channels ?? [
+    ...new Map(sizes.map((row) => [row.channelId, { channelId: row.channelId, channelCode: row.channelCode }])).values(),
+  ];
+  const listChannels = vi.fn(async ({ channelId = null } = {}) =>
+    dimension
+      .filter((channel) => channelId === null || channel.channelId === channelId)
+      .map((channel) => ({ isActive: true, ...channel })),
+  );
+
+  const repository = {
+    listCohortSizes,
+    listCohortMonthlyMargins,
+    listChannels,
+    withSnapshot: (read) => read(repository),
+  };
+  return repository;
 }
+
+const JUNE_MARGINS_ROWS = Array.from({ length: 12 }, (_, monthOffset) => ({
+  cohortMonth: '2025-06-01',
+  channelId: '1',
+  monthOffset,
+  activeCustomers: monthOffset === 0 ? 100 : 50,
+  marginCents: 50000n,
+}));
 
 const TWO_CHANNEL_COHORTS = {
   sizes: [
@@ -145,13 +172,7 @@ const TWO_CHANNEL_COHORTS = {
     { cohortMonth: '2026-01-01', channelId: '1', channelCode: 'instagram', cohortSize: 120 },
   ],
   margins: [
-    ...Array.from({ length: 12 }, (_, monthOffset) => ({
-      cohortMonth: '2025-06-01',
-      channelId: '1',
-      monthOffset,
-      activeCustomers: monthOffset === 0 ? 100 : 50,
-      marginCents: 50000n,
-    })),
+    ...JUNE_MARGINS_ROWS,
     ...[
       [0, 120, 380000n],
       [1, 60, 380000n],
@@ -178,6 +199,7 @@ describe('createLtvService', () => {
       fromCohortMonth: null,
       toCohortMonth: '2027-01-01',
       channelId: null,
+      anchor: '2027-01-20',
     });
 
     const january = report.cohorts.find((cohort) => cohort.cohortMonth === '2026-01-01');
@@ -237,6 +259,7 @@ describe('createLtvService', () => {
     });
     // The service must ask for the full history; `from = anchor - 12 months` would drop the 2025-06 cohort.
     expect(repository.listCohortSizes.mock.calls[0][0].fromCohortMonth).toBe(null);
+    expect(repository.listChannels).toHaveBeenCalledWith({ channelId: null });
   });
 
   it('keeps incomplete cohorts out of channel averages but inside the matrix', async () => {
@@ -347,6 +370,101 @@ describe('createLtvService', () => {
     expect(january3.cells.at(-1).cumLtvCents).toBe('9500');
     expect(january12.cells.at(-1).cumLtvCents).toBe('12000');
     expect(repository.listCohortSizes.mock.calls.at(-1)[0].channelId).toBe('1');
+    expect(repository.listCohortSizes.mock.calls.at(-1)[0].anchor).toBe('2027-01-20');
+  });
+
+  it('keeps a completed cohort with no margin rows in the denominator and null in the matrix', async () => {
+    const repository = repositoryFixture({
+      sizes: [
+        { cohortMonth: '2025-06-01', channelId: '1', channelCode: 'instagram', cohortSize: 100 },
+        { cohortMonth: '2025-07-01', channelId: '1', channelCode: 'instagram', cohortSize: 100 },
+      ],
+      margins: JUNE_MARGINS_ROWS,
+    });
+    const service = createLtvService({ cohortsRepository: repository });
+
+    const channelReport = await service.getChannelLtv({ anchor: '2027-01-20', horizonMonths: 12 });
+
+    // Spec §2: Σ margin / Σ N over completed cohorts. 600 000 / 200 = 3 000 c, not 6 000 c.
+    expect(channelReport.rows[0]).toEqual({
+      channelId: '1',
+      channelCode: 'instagram',
+      ltvCents: '3000',
+      customerCount: 200,
+      cohortCount: 2,
+      status: 'ok',
+    });
+    expect(channelReport.blended).toEqual({
+      ltvCents: '3000',
+      customerCount: 200,
+      cohortCount: 2,
+      status: 'ok',
+    });
+
+    const report = await service.getCohortMatrix({ anchor: '2027-01-20', horizonMonths: 12 });
+    const empty = report.cohorts.find((cohort) => cohort.cohortMonth === '2025-07-01');
+    expect(empty).toMatchObject({ ltvCents: null, ltvLabel: '—', isComplete: true, monthsObserved: 12 });
+    expect(empty.cells[0]).toEqual({ monthOffset: 0, retentionPct: 0, cumLtvCents: null });
+    expect(report.excludedIncomplete).toEqual([]);
+  });
+
+  it('distinguishes a real zero margin from missing margin data', async () => {
+    const repository = repositoryFixture({
+      sizes: [
+        { cohortMonth: '2026-01-01', channelId: '1', channelCode: 'instagram', cohortSize: 10 },
+        { cohortMonth: '2026-02-01', channelId: '1', channelCode: 'instagram', cohortSize: 10 },
+      ],
+      margins: [
+        { cohortMonth: '2026-01-01', channelId: '1', monthOffset: 0, activeCustomers: 10, marginCents: 0n },
+      ],
+    });
+    const service = createLtvService({ cohortsRepository: repository });
+
+    const report = await service.getCohortMatrix({ anchor: '2027-01-20', horizonMonths: 12 });
+    const zero = report.cohorts.find((cohort) => cohort.cohortMonth === '2026-01-01');
+    const missing = report.cohorts.find((cohort) => cohort.cohortMonth === '2026-02-01');
+
+    expect(zero).toMatchObject({ ltvCents: '0', ltvLabel: '0,00' });
+    expect(zero.cells[0]).toEqual({ monthOffset: 0, retentionPct: 100, cumLtvCents: '0' });
+    expect(missing).toMatchObject({ ltvCents: null, ltvLabel: '—' });
+    expect(missing.cells[0]).toEqual({ monthOffset: 0, retentionPct: 0, cumLtvCents: null });
+  });
+
+  it('returns channels without customers so cac rows can be left-joined', async () => {
+    const repository = repositoryFixture({
+      ...TWO_CHANNEL_COHORTS,
+      channels: [
+        { channelId: '1', channelCode: 'instagram', isActive: true },
+        // Archived channel with spend but no customers: still part of the historical LTV report.
+        { channelId: '9', channelCode: 'spend_only', isActive: false },
+      ],
+    });
+    const service = createLtvService({ cohortsRepository: repository });
+
+    const report = await service.getChannelLtv({ anchor: '2027-01-20', horizonMonths: 12 });
+
+    expect(report.rows).toEqual([
+      {
+        channelId: '1',
+        channelCode: 'instagram',
+        ltvCents: '9273',
+        customerCount: 220,
+        cohortCount: 2,
+        status: 'ok',
+      },
+      {
+        channelId: '9',
+        channelCode: 'spend_only',
+        ltvCents: null,
+        customerCount: 0,
+        cohortCount: 0,
+        status: 'insufficient_history',
+      },
+    ]);
+    expect(report.blended.customerCount).toBe(220);
+
+    const matrix = await service.getCohortMatrix({ anchor: '2027-01-20', horizonMonths: 12 });
+    expect(matrix.channelLtv).toEqual(report.rows);
   });
 
   it('rejects invalid anchors, horizons, months and channel ids', async () => {
@@ -360,6 +478,9 @@ describe('createLtvService', () => {
     await expect(service.getCohortMatrix({ anchor: '2026-11-22', channelId: 'abc' })).rejects.toThrow(ValidationError);
     await expect(
       service.getCohortMatrix({ anchor: '2026-11-22', fromCohortMonth: '2026-10-01', toCohortMonth: '2026-09-01' }),
+    ).rejects.toThrow(ValidationError);
+    await expect(
+      service.getCohortMatrix({ anchor: '2026-11-22', toCohortMonth: '2026-12-01' }),
     ).rejects.toThrow(ValidationError);
     await expect(service.getChannelLtv({})).rejects.toThrow(ValidationError);
   });

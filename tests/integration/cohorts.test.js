@@ -140,6 +140,7 @@ describe('cohort LTV against the seeded stand', () => {
       fromCohortMonth: '2025-10-01',
       toCohortMonth: '2025-11-01',
       channelId: null,
+      anchor: ANCHOR,
     });
 
     expect(rows.length).toBeGreaterThan(0);
@@ -199,7 +200,8 @@ describe('Minsk month boundaries', () => {
         );
       }
 
-      // The same instant in UTC differs between these first two customers: only the Minsk bucket separates them.
+      // A and B are on the same Minsk day (2026-02-01) but their UTC dates are 2026-01-31 and 2026-02-01:
+      // a UTC month bucket would split one cohort across two months. C stays in January on both clocks.
       const a = await insertCustomer('tz_a', '2026-02-01T00:30:00+03:00');
       const b = await insertCustomer('tz_b', '2026-02-01T03:30:00+03:00');
       const c = await insertCustomer('tz_c', '2026-01-31T23:59:00+03:00');
@@ -210,12 +212,28 @@ describe('Minsk month boundaries', () => {
       await insertOrder('tz_a_3', a, '2026-03-01T00:30:00+03:00', 5000);
       await insertOrder('tz_b_1', b, '2026-02-01T03:30:00+03:00', 2000);
       await insertOrder('tz_c_1', c, '2026-01-31T23:59:00+03:00', 3000);
+      // Data corruption (an order before first_order_at) must not create a negative offset.
+      await insertOrder('tz_a_early', a, '2026-01-15T12:00:00+03:00', 11000);
+      // After the anchor: this order would land in offset 9 of the February cohort if the upper bound were missing.
+      await insertOrder('tz_a_future', a, '2026-11-22T00:30:00+03:00', 9000);
+
+      // A customer whose first order is after the anchor must not join any cohort.
+      const d = await insertCustomer('tz_d', '2026-11-22T00:30:00+03:00');
+      await insertOrder('tz_d_1', d, '2026-11-22T00:30:00+03:00', 6000);
+      // Just after the upper month: excluded by the cohort month range.
+      const f = await insertCustomer('tz_f', '2026-03-01T00:30:00+03:00');
+      await insertOrder('tz_f_1', f, '2026-03-01T00:30:00+03:00', 8000);
+      // Anchor-day order at 23:30 Minsk is still inside the report.
+      const e = await insertCustomer('tz_e', '2026-11-21T10:00:00+03:00');
+      await insertOrder('tz_e_1', e, '2026-11-21T23:30:00+03:00', 4000);
+      await insertOrder('tz_e_2', e, '2026-11-22T00:30:00+03:00', 3000);
 
       const scopedRepository = createCohortsRepository(client);
       const sizes = await scopedRepository.listCohortSizes({
         fromCohortMonth: '2026-01-01',
         toCohortMonth: '2026-02-01',
         channelId,
+        anchor: ANCHOR,
       });
       expect(sizes).toEqual([
         { cohortMonth: '2026-01-01', channelId, channelCode: 'tz_probe', cohortSize: 1 },
@@ -226,11 +244,34 @@ describe('Minsk month boundaries', () => {
         fromCohortMonth: '2026-01-01',
         toCohortMonth: '2026-02-01',
         channelId,
+        anchor: ANCHOR,
       });
+      // No negative offset from tz_a_early and no offset 9 from tz_a_future: both bounds hold.
       expect(margins).toEqual([
         { cohortMonth: '2026-01-01', channelId, monthOffset: 0, activeCustomers: 1, marginCents: 3000n },
         { cohortMonth: '2026-02-01', channelId, monthOffset: 0, activeCustomers: 2, marginCents: 10000n },
         { cohortMonth: '2026-02-01', channelId, monthOffset: 1, activeCustomers: 1, marginCents: 5000n },
+      ]);
+
+      // The anchor month: tz_d (first order on 2026-11-22) is absent, tz_e's 23:30 order is present and its
+      // 00:30 order on the next day is not.
+      const anchorMonthSizes = await scopedRepository.listCohortSizes({
+        fromCohortMonth: '2026-11-01',
+        toCohortMonth: '2026-11-01',
+        channelId,
+        anchor: ANCHOR,
+      });
+      expect(anchorMonthSizes).toEqual([
+        { cohortMonth: '2026-11-01', channelId, channelCode: 'tz_probe', cohortSize: 1 },
+      ]);
+      const anchorMonthMargins = await scopedRepository.listCohortMonthlyMargins({
+        fromCohortMonth: '2026-11-01',
+        toCohortMonth: '2026-11-01',
+        channelId,
+        anchor: ANCHOR,
+      });
+      expect(anchorMonthMargins).toEqual([
+        { cohortMonth: '2026-11-01', channelId, monthOffset: 0, activeCustomers: 1, marginCents: 4000n },
       ]);
 
       const scopedService = createLtvService({ cohortsRepository: scopedRepository });
@@ -248,8 +289,67 @@ describe('Minsk month boundaries', () => {
       ]);
       expect(report.cohorts[1].cells[0]).toEqual({ monthOffset: 0, retentionPct: 100, cumLtvCents: '5000' });
       expect(report.cohorts[1].cells[1]).toEqual({ monthOffset: 1, retentionPct: 50, cumLtvCents: '7500' });
+      // Offset 9 is inside the 12-month horizon; tz_a_future would have filled it without the anchor bound.
+      expect(report.cohorts[1].cells[9]).toEqual({ monthOffset: 9, retentionPct: 0, cumLtvCents: '7500' });
     } finally {
       // The probe rows must never leak into the golden assertions above: they would shift channel averages.
+      await client.query('ROLLBACK');
+      client.release();
+    }
+  });
+});
+
+describe('channels without customers', () => {
+  it('keeps an archived channel with spend but no customers in the channel LTV rows', async () => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Archived on purpose: historical LTV must survive a channel being switched off, and a channel that has
+      // spend but no customers yet must not silently disappear before LTV:CAC can left-join the CAC report.
+      const { rows: channels } = await client.query(
+        `INSERT INTO channels (code, name, kind, is_active)
+         VALUES ('spend_only', 'Только расходы', 'paid', FALSE)
+         RETURNING id::text AS id`,
+      );
+      const channelId = channels[0].id;
+
+      const { rows: campaigns } = await client.query(
+        `INSERT INTO campaigns (channel_id, code, name, status, started_on)
+         VALUES ($1, 'spend_only_campaign', 'Только расходы — кампания', 'finished', $2::date)
+         RETURNING id::text AS id`,
+        [channelId, ANCHOR],
+      );
+      await client.query(
+        `INSERT INTO daily_stats (campaign_id, stat_date, impressions, clicks, leads, spend_cents)
+         VALUES ($1, $2::date, 1000, 50, 5, 50000)`,
+        [campaigns[0].id, ANCHOR],
+      );
+
+      const scopedRepository = createCohortsRepository(client);
+      const scopedService = createLtvService({ cohortsRepository: scopedRepository });
+
+      const report = await scopedService.getChannelLtv({ anchor: ANCHOR, horizonMonths: HORIZON });
+
+      expect(report.rows).toHaveLength(9);
+      expect(report.rows.find((row) => row.channelCode === 'spend_only')).toEqual({
+        channelId,
+        channelCode: 'spend_only',
+        ltvCents: null,
+        customerCount: 0,
+        cohortCount: 0,
+        status: 'insufficient_history',
+      });
+      // The empty channel adds nothing to the blended number.
+      expect(report.blended.customerCount).toBe(585);
+
+      const matrix = await scopedService.getCohortMatrix({ anchor: ANCHOR, horizonMonths: HORIZON });
+      expect(matrix.channelLtv.find((row) => row.channelCode === 'spend_only')).toMatchObject({
+        ltvCents: null,
+        customerCount: 0,
+        status: 'insufficient_history',
+      });
+    } finally {
       await client.query('ROLLBACK');
       client.release();
     }

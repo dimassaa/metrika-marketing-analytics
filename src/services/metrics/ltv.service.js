@@ -152,8 +152,9 @@ export function computeCohortLtv({ cohort, marginsByOffset, horizonMonths, ancho
  * One matrix row: retention and cumulative LTV for `k = 0 … horizonMonths - 1`.
  *
  * A month that has not started relative to the anchor is `null` in both columns — the spec forbids painting future
- * cells as zero. A started month without orders is a real zero: nobody from the cohort was active, so retention is
- * `0` and the cumulative LTV simply does not grow.
+ * cells as zero. A started month without orders has a real `0` retention: nobody from the cohort was active. Its
+ * cumulative LTV stays `null` until the first observed margin row, because "no margin recorded" and "margin was
+ * exactly zero" are different facts; once a row (even a zero-margin one) is seen, the cell carries a number.
  *
  * @param {{
  *   cohortMonth: string,
@@ -192,7 +193,7 @@ function buildCells({ cohortMonth, cohortSize, marginsByOffset, horizonMonths, m
     cells.push({
       monthOffset,
       retentionPct: row ? roundNumber((row.activeCustomers * 100) / cohortSize, 2) : 0,
-      cumLtvCents: centsToApi(hasMargin ? divideCents(cumulativeCents, cohortSize) : 0n),
+      cumLtvCents: hasMargin ? centsToApi(divideCents(cumulativeCents, cohortSize)) : null,
     });
   }
 
@@ -274,13 +275,22 @@ function mergeCompanyCohorts(entries) {
 }
 
 /**
- * Weighted channel LTV over completed cohorts only (metrics spec §2).
+ * Weighted channel LTV over every completed cohort (metrics spec §2).
  *
  * The average is `Σ margin / Σ customers`, not the mean of per-cohort LTVs: a 100-customer cohort must not weigh
- * as much as a 400-customer one. Incomplete cohorts are excluded entirely — they are shown in the matrix with the
- * `isComplete` flag. The same entries serve the company-wide blended number, so no extra query is needed.
+ * as much as a 400-customer one. Every completed cohort contributes its full `N`, even when it has no margin row
+ * at all — the spec's denominator is the cohort size, and dropping a zero-margin cohort would quietly inflate the
+ * channel average. Incomplete cohorts are excluded entirely; the matrix shows them with the `isComplete` flag.
  *
- * @param {Array<{ cohortMonth: string, cohortSize: number, channelId: string, channelCode: string }>} entries
+ * The channel list comes from the `channels` table, so a channel with spend but no customers yet is still returned
+ * with `ltvCents: null` and `insufficient_history`; LTV:CAC can then left-join CAC rows. Inactive channels are
+ * included for the same reason: historical LTV must remain available after a channel is archived.
+ *
+ * @param {Array<{
+ *   cohortMonth: string, cohortSize: number, channelId: string, channelCode: string,
+ *   marginsByOffset: Map<number, { activeCustomers: number, marginCents: bigint }>,
+ * }>} entries
+ * @param {Array<{ channelId: string, channelCode: string }>} channels
  * @param {{ anchor: string, horizonMonths: number }} options
  * @returns {{
  *   rows: Array<{
@@ -292,32 +302,31 @@ function mergeCompanyCohorts(entries) {
  *     cohortCount: number, status: 'ok' | 'insufficient_history',
  *   },
  * }}
+ *   `blended.cohortCount` is the number of distinct completed cohort months; a channel row counts its own
+ *   completed channel-cohorts.
  */
-function buildChannelLtv(entries, { anchor, horizonMonths }) {
+function buildChannelLtv(entries, channels, { anchor, horizonMonths }) {
   /** @type {Map<string, { channelId: string, channelCode: string, totalCents: bigint, customers: number, cohorts: number }>} */
-  const byChannel = new Map();
+  const byChannel = new Map(
+    channels.map((channel) => [
+      channel.channelId,
+      { channelId: channel.channelId, channelCode: channel.channelCode, totalCents: 0n, customers: 0, cohorts: 0 },
+    ]),
+  );
   const completedMonths = new Set();
   let totalCents = 0n;
   let totalCustomers = 0;
 
   for (const entry of entries) {
-    let channel = byChannel.get(entry.channelId);
+    const channel = byChannel.get(entry.channelId);
     if (!channel) {
-      channel = { channelId: entry.channelId, channelCode: entry.channelCode, totalCents: 0n, customers: 0, cohorts: 0 };
-      byChannel.set(entry.channelId, channel);
+      throw new TypeError(`cohort references a channel missing from the channel dimension: ${entry.channelId}`);
     }
 
-    const { isComplete } = computeCohortLtv({
-      cohort: entry,
-      marginsByOffset: entry.marginsByOffset,
-      horizonMonths,
-      anchor,
-    });
-    if (!isComplete) continue;
+    // Completeness is a calendar fact; computing it directly avoids summing the cohort once more just to read it.
+    if (addMonths(entry.cohortMonth, horizonMonths) > anchor) continue;
 
-    const { totalCents: cohortCents, hasMargin } = sumHorizonMargins(entry.marginsByOffset, horizonMonths);
-    if (!hasMargin) continue;
-
+    const { totalCents: cohortCents } = sumHorizonMargins(entry.marginsByOffset, horizonMonths);
     channel.totalCents += cohortCents;
     channel.customers += entry.cohortSize;
     channel.cohorts += 1;
@@ -383,23 +392,35 @@ export function createLtvService({ cohortsRepository }) {
   }
 
   /**
-   * Loads and joins the two aggregate queries by (cohort month, channel). Returns one entry per channel-cohort;
-   * `marginsByOffset` is the keyed map `computeCohortLtv` expects.
+   * Loads the two aggregates and the channel dimension inside one snapshot, then joins sizes and margins by
+   * (cohort month, channel). Returns one entry per channel-cohort with a keyed `marginsByOffset` map.
    *
-   * @param {{ fromCohortMonth: string | null, toCohortMonth: string, channelId: string | null }} filters
-   * @returns {Promise<Array<{
-   *   cohortMonth: string,
-   *   cohortSize: number,
-   *   channelId: string,
-   *   channelCode: string,
-   *   marginsByOffset: Map<number, { activeCustomers: number, marginCents: bigint }>,
-   * }>>}
+   * The snapshot is what lets the consistency guards below stay loud: without it an import committing between the
+   * reads could yield a margin row whose cohort the sizes read never saw.
+   *
+   * @param {{
+   *   fromCohortMonth: string | null, toCohortMonth: string, channelId: string | null, anchor: string,
+   * }} filters
+   * @returns {Promise<{
+   *   entries: Array<{
+   *     cohortMonth: string,
+   *     cohortSize: number,
+   *     channelId: string,
+   *     channelCode: string,
+   *     marginsByOffset: Map<number, { activeCustomers: number, marginCents: bigint }>,
+   *   }>,
+   *   channels: Array<{ channelId: string, channelCode: string, isActive: boolean }>,
+   * }>}
    */
-  async function loadEntries(filters) {
-    const [sizes, margins] = await Promise.all([
-      cohortsRepository.listCohortSizes(filters),
-      cohortsRepository.listCohortMonthlyMargins(filters),
-    ]);
+  async function loadReport(filters) {
+    const { sizes, margins, channels } = await cohortsRepository.withSnapshot(async (repository) => {
+      // Sequential on purpose: all three statements share one client/snapshot, and node-postgres deprecates
+      // overlapping queries on a single client.
+      const sizeRows = await repository.listCohortSizes(filters);
+      const marginRows = await repository.listCohortMonthlyMargins(filters);
+      const channelRows = await repository.listChannels({ channelId: filters.channelId });
+      return { sizes: sizeRows, margins: marginRows, channels: channelRows };
+    });
 
     /** @type {Map<string, object>} */
     const byKey = new Map();
@@ -429,10 +450,14 @@ export function createLtvService({ cohortsRepository }) {
       });
     }
 
-    return [...byKey.values()].sort(
-      (left, right) =>
-        left.cohortMonth.localeCompare(right.cohortMonth) || String(left.channelCode).localeCompare(String(right.channelCode)),
-    );
+    return {
+      entries: [...byKey.values()].sort(
+        (left, right) =>
+          left.cohortMonth.localeCompare(right.cohortMonth) ||
+          String(left.channelCode).localeCompare(String(right.channelCode)),
+      ),
+      channels,
+    };
   }
 
   /**
@@ -454,6 +479,11 @@ export function createLtvService({ cohortsRepository }) {
     if (from !== null && from > to) {
       throw new ValidationError('Начало диапазона когорт не может быть позже окончания');
     }
+    // A cohort month after the anchor has no observed data; allowing it would silently produce an empty row and a
+    // report whose range lies about the data horizon.
+    if (to > startOfMonth(anchorDate)) {
+      throw new ValidationError('Последний месяц когорт не может быть позже отчётной даты');
+    }
     const scopedChannelId = channelId === null || channelId === undefined ? null : parseBigIntId(channelId);
     if (channelId !== null && channelId !== undefined && scopedChannelId === null) {
       throw new ValidationError('Некорректный идентификатор канала');
@@ -462,7 +492,7 @@ export function createLtvService({ cohortsRepository }) {
     return {
       anchor: anchorDate,
       horizonMonths: horizon,
-      filters: { fromCohortMonth: from, toCohortMonth: to, channelId: scopedChannelId },
+      filters: { fromCohortMonth: from, toCohortMonth: to, channelId: scopedChannelId, anchor: anchorDate },
     };
   }
 
@@ -493,7 +523,7 @@ export function createLtvService({ cohortsRepository }) {
      */
     async getCohortMatrix(request) {
       const { anchor, horizonMonths, filters } = normaliseMatrixRequest(request);
-      const entries = await loadEntries(filters);
+      const { entries, channels } = await loadReport(filters);
       const options = { anchor, horizonMonths };
 
       const cohorts = mergeCompanyCohorts(entries).map((entry) => toCohortView(entry, options));
@@ -513,7 +543,7 @@ export function createLtvService({ cohortsRepository }) {
         horizonMonths,
         anchor,
         cohorts,
-        channelLtv: buildChannelLtv(entries, options).rows,
+        channelLtv: buildChannelLtv(entries, channels, options).rows,
         excludedIncomplete,
       };
     },
@@ -541,13 +571,14 @@ export function createLtvService({ cohortsRepository }) {
     async getChannelLtv({ anchor, horizonMonths = METRICS_CONFIG.ltv.defaultHorizon } = {}) {
       const anchorDate = validated(() => assertDate(anchor));
       const horizon = validated(() => assertHorizon(horizonMonths));
-      const entries = await loadEntries({
+      const { entries, channels } = await loadReport({
         fromCohortMonth: null,
         toCohortMonth: startOfMonth(anchorDate),
         channelId: null,
+        anchor: anchorDate,
       });
 
-      const { rows, blended } = buildChannelLtv(entries, {
+      const { rows, blended } = buildChannelLtv(entries, channels, {
         anchor: anchorDate,
         horizonMonths: horizon,
       });

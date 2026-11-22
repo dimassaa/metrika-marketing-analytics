@@ -440,3 +440,23 @@ Recorded so the deferred findings do not disappear from history when the open en
   while ROMI is `null` by metrics spec §3.2; health §3.4 then falls back to `no_data` even though the channel acquired
   customers at zero cost. This is the literal spec ruling and must not be changed silently — it needs an owner
   decision (for example, treat ROMI as not applicable instead of missing for a free channel).
+
+### M3 cohorts and LTV (task 2 follow-ups)
+
+- **The margin query fetches every month offset of every selected cohort, not just the requested horizon.** The
+  repository has no horizon parameter, so a long-lived stand returns rows the service immediately drops
+  (`monthOffset >= horizonMonths`). At demo volume (14 months) this is invisible; if history grows to years, pass the
+  horizon into `listCohortMonthlyMargins` and cap offsets in SQL.
+- **`withSnapshot` recognises a pool by the `pg.Pool` connection counters (`totalCount`).** A bare `pg.Client` that is
+  not already inside a transaction is treated as transactional and will not open a repeatable-read snapshot. The
+  integration tests only pass checked-out pool clients, so the rule holds there; if the service ever receives a
+  standalone client, wrap it explicitly.
+- **`getChannelLtv` and the matrix's `channelLtv` include inactive channels.** This is required so historical LTV can
+  be left-joined with CAC after a channel is archived, but the UI must decide whether to grey out or hide an inactive
+  row; the view-model deliberately carries no `isActive` flag yet.
+- **The matrix merges channels into company cohorts, so it cannot show a channel breakdown per month.** A per-channel
+  matrix is available through `getCohortMatrix({ channelId })`; rendering every channel × month at once would need a
+  wider view-model and is out of scope for BO-06.
+- **A cohort month later than the anchor is rejected, but `fromCohortMonth` earlier than the first customer is
+  accepted** and simply returns the available months. That matches a date-range filter; the UI should clamp the picker
+  to the data window rather than relying on an error.
