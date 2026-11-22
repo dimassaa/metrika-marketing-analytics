@@ -1,5 +1,6 @@
 import { NotFoundError, ValidationError } from '../lib/errors.js';
 import { parseBigIntId } from '../lib/ids.js';
+import { mediaAssetUrl } from '../lib/mediaUrl.js';
 
 const NOT_FOUND_MESSAGE = 'Изображение не найдено';
 
@@ -38,11 +39,16 @@ export function createMediaController({ mediaService }) {
    */
   function sendMedia(req, res, media) {
     const etag = `"${media.checksum}"`;
+    // The CSRF middleware publishes the session token on safe requests. A response that shared caches may keep for
+    // a year must not carry it (or a refreshed cookie) to another visitor.
+    res.removeHeader('X-CSRF-Token');
+    res.removeHeader('Set-Cookie');
     res.set({
       'Content-Type': media.mimeType,
       ETag: etag,
-      // Immutable content, addressed by id/slug: a changed upload gets a new checksum, so a year is safe for the
-      // demo and keeps social previews from re-downloading the cover on every crawl.
+      // Immutable content, addressed by `/media/<id>?v=<checksum>`: a changed upload gets a new checksum, hence a
+      // new URL, so a year is safe for the demo and keeps social previews from re-downloading the cover on every
+      // crawl. The bare id/slug URL stays valid for direct links and old shares.
       'Cache-Control': 'public, max-age=86400, immutable',
       // The stored type is checked against magic bytes, but nosniff keeps a legacy browser from guessing anyway.
       'X-Content-Type-Options': 'nosniff',
@@ -83,16 +89,18 @@ export function createMediaController({ mediaService }) {
    */
   function respondWithUpload(res, media) {
     res.status(200).json({
-      mediaId: Number(media.id),
+      // BIGINT ids stay decimal strings, matching every other id in the API and in PostgreSQL.
+      mediaId: media.id,
       slug: media.slug,
-      url: `/media/${media.id}`,
+      url: mediaAssetUrl(media, { bySlug: media.slug === 'og-cover' }),
     });
   }
 
   return {
     /**
      * `GET /media/:id`. A malformed or out-of-range id is indistinguishable from a missing one: both are 404, so
-     * the route cannot be used to probe the id space.
+     * the route cannot be used to probe the id space. Leading zeros are acceptable and normalize (`/media/007` reads
+     * the row with id 7), because the shared parser compares `BigInt` values rather than spelling.
      * @type {import('express').RequestHandler}
      */
     async byId(req, res) {

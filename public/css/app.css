@@ -1904,6 +1904,8 @@ input[type='file'] {
   font-weight: 500;
   letter-spacing: 0.02em;
   text-decoration: none;
+  /* Uploaded pictures are not guaranteed square; crop rather than squeeze inside the 32 px circle. */
+  object-fit: cover;
 }
 
 .app-avatar:hover {

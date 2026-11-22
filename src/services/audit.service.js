@@ -84,6 +84,9 @@ const DETAIL_KEYS = Object.freeze([
   ['name', 'Название'],
   ['code', 'Код'],
   ['filename', 'Файл'],
+  // Media uploads carry the validated type and byte size; the bytes themselves never enter the payload.
+  ['mimeType', 'Тип'],
+  ['sizeBytes', 'Размер, байт'],
   // Goal mutations carry these four fields and nothing else, so the journal line reads as a sentence about the plan.
   ['metric', 'Метрика'],
   ['targetValue', 'План'],

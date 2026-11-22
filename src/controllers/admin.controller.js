@@ -1,5 +1,6 @@
 import { buildShellLocals, roleLabel } from './app.controller.js';
 import { NotFoundError, ValidationError } from '../lib/errors.js';
+import { mediaAssetUrl } from '../lib/mediaUrl.js';
 import { buildSeo } from '../lib/seo.js';
 import {
   auditFiltersSchema,
@@ -91,7 +92,8 @@ export function createAdminController({ usersService, auditService, referenceRep
       createError: error,
       createValues: values ?? EMPTY_CREATE_FORM,
       resetNotice,
-      ogCoverUrl: ogCover ? '/media/slug/og-cover' : null,
+      // `?v=<checksum>` changes on every replacement so the immutable cache cannot pin the previous cover.
+      ogCoverUrl: ogCover ? mediaAssetUrl(ogCover, { bySlug: true }) : null,
     });
   }
 
@@ -111,7 +113,8 @@ export function createAdminController({ usersService, auditService, referenceRep
       ...buildShellLocals(req, { title: 'Профиль', activeNav: 'profile', dataAnchor }),
       profile: { ...profile, roleLabel: roleLabel(profile.role) },
       passwordError: error,
-      avatarUrl: avatar ? `/media/${avatar.id}` : null,
+      // Same content-addressed form as the OG cover: a replaced avatar gets a new URL, not a day-old cache hit.
+      avatarUrl: avatar ? mediaAssetUrl(avatar) : null,
     });
   }
 

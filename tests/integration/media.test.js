@@ -25,6 +25,18 @@ const TRANSPARENT_PNG = Buffer.from(
   'base64',
 );
 
+/** A 1×1 JPEG; the service validates the signature, the decoder is not part of the test. */
+const ONE_PIXEL_JPEG = Buffer.from(
+  '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABD/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/EB//xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/EB//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/EB//2Q==',
+  'base64',
+);
+
+/** A 1×1 VP8 WebP. */
+const ONE_PIXEL_WEBP = Buffer.from(
+  'UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEAAUAmJQBOgCHwAP7+4AAAAA==',
+  'base64',
+);
+
 /** @type {import('pg').Pool} */
 let pool;
 /** @type {import('express').Express} */
@@ -157,6 +169,16 @@ describe('public media route', () => {
       expect(res.status).toBe(404);
     },
   );
+
+  it('rejects a non-whitelisted MIME type at the database boundary', async () => {
+    await expect(
+      pool.query(
+        `INSERT INTO media_assets (slug, filename, mime_type, size_bytes, checksum, bytes)
+         VALUES ('bad-type', 'bad.svg', 'image/svg+xml', 6, 'checksum', $1)`,
+        [Buffer.from('<svg/>')],
+      ),
+    ).rejects.toMatchObject({ code: '23514' });
+  });
 });
 
 describe('avatar upload', () => {
@@ -169,15 +191,17 @@ describe('avatar upload', () => {
     expect(upload.status).toBe(200);
     expect(upload.headers['content-type']).toMatch(/application\/json/);
     expect(upload.body.slug).toMatch(/^avatar-user-\d+$/);
-    expect(Number.isInteger(upload.body.mediaId)).toBe(true);
-    expect(upload.body.url).toBe(`/media/${upload.body.mediaId}`);
+    expect(typeof upload.body.mediaId).toBe('string');
+    expect(upload.body.mediaId).toMatch(/^[1-9]\d*$/);
+    const checksum = createHash('sha256').update(ONE_PIXEL_PNG).digest('hex');
+    expect(upload.body.url).toBe(`/media/${upload.body.mediaId}?v=${checksum}`);
 
     const stored = await queryRows(
       'SELECT checksum, size_bytes, octet_length(bytes)::int AS bytes_length, mime_type, filename FROM media_assets WHERE id = $1',
       [upload.body.mediaId],
     );
     expect(stored).toHaveLength(1);
-    expect(stored[0].checksum).toBe(createHash('sha256').update(ONE_PIXEL_PNG).digest('hex'));
+    expect(stored[0].checksum).toBe(checksum);
     expect(stored[0].size_bytes).toBe(ONE_PIXEL_PNG.length);
     expect(stored[0].bytes_length).toBe(ONE_PIXEL_PNG.length);
     expect(stored[0].mime_type).toBe('image/png');
@@ -188,8 +212,21 @@ describe('avatar upload', () => {
     expect(served.status).toBe(200);
     expect(served.headers['content-type']).toBe('image/png');
     expect(served.headers.etag).toBe(`"${stored[0].checksum}"`);
+    expect(served.headers['cache-control']).toBe('public, max-age=86400, immutable');
+    // The CSRF middleware publishes this header on authenticated safe requests; a publicly cached image must not.
+    expect(served.headers['x-csrf-token']).toBeUndefined();
     expect(Buffer.isBuffer(served.body)).toBe(true);
     expect(served.body.equals(ONE_PIXEL_PNG)).toBe(true);
+
+    // Leading zeros are accepted and normalized by the shared BIGINT parser: `/media/007` addresses row 7.
+    const padded = await getBinary(agent, `/media/00${upload.body.mediaId}`);
+    expect(padded.status).toBe(200);
+    expect(padded.body.equals(ONE_PIXEL_PNG)).toBe(true);
+
+    // The profile page embeds the content-addressed URL, so a replacement cannot be hidden by the immutable cache.
+    const profilePage = await agent.get('/app/profile');
+    expect(profilePage.status).toBe(200);
+    expect(profilePage.text).toContain(upload.body.url);
 
     const audit = await queryRows(
       "SELECT entity, entity_id, payload FROM audit_log WHERE action = 'media.upload' ORDER BY id DESC LIMIT 1",
@@ -231,6 +268,59 @@ describe('avatar upload', () => {
     expect(withToken.headers['content-type']).toMatch(/application\/json/);
   });
 
+  it('changes the content-addressed URL when the avatar is replaced', async () => {
+    const agent = await signedIn(ANALYST);
+    const token = await getAppCsrf(agent, '/app/profile');
+
+    const first = await postImage(agent, '/api/v1/profile/avatar', 'avatar', ONE_PIXEL_PNG, { token });
+    const second = await postImage(agent, '/api/v1/profile/avatar', 'avatar', TRANSPARENT_PNG, {
+      token,
+      filename: 'new.png',
+    });
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    // The slug is stable, so the row id is reused; only the checksum (and therefore the URL) changes.
+    expect(second.body.mediaId).toBe(first.body.mediaId);
+    expect(second.body.url).not.toBe(first.body.url);
+
+    const newChecksum = createHash('sha256').update(TRANSPARENT_PNG).digest('hex');
+    expect(second.body.url).toBe(`/media/${second.body.mediaId}?v=${newChecksum}`);
+
+    const served = await getBinary(agent, second.body.url);
+    expect(served.status).toBe(200);
+    expect(served.headers.etag).toBe(`"${newChecksum}"`);
+    expect(served.body.equals(TRANSPARENT_PNG)).toBe(true);
+
+    const page = await agent.get('/app/profile');
+    expect(page.text).toContain(second.body.url);
+    expect(page.text).not.toContain(first.body.url);
+  });
+
+  it('accepts JPEG and WebP signatures and serves them with their own type', async () => {
+    const agent = await signedIn(ANALYST);
+    const token = await getAppCsrf(agent, '/app/profile');
+
+    const cases = [
+      { buffer: ONE_PIXEL_JPEG, contentType: 'image/jpeg', filename: 'photo.jpg' },
+      { buffer: ONE_PIXEL_WEBP, contentType: 'image/webp', filename: 'photo.webp' },
+    ];
+
+    for (const testCase of cases) {
+      const upload = await postImage(agent, '/api/v1/profile/avatar', 'avatar', testCase.buffer, {
+        token,
+        filename: testCase.filename,
+        contentType: testCase.contentType,
+      });
+
+      expect(upload.status).toBe(200);
+      const served = await getBinary(agent, upload.body.url);
+      expect(served.status).toBe(200);
+      expect(served.headers['content-type']).toBe(testCase.contentType);
+      expect(served.body.equals(testCase.buffer)).toBe(true);
+    }
+  });
+
   it('rejects an upload without the CSRF header with a JSON 403', async () => {
     const agent = await signedIn(ANALYST);
 
@@ -251,6 +341,8 @@ describe('avatar upload', () => {
       { buffer: svg, contentType: 'image/svg+xml', filename: 'x.svg' },
       { buffer: svg, contentType: 'image/png', filename: 'x.png' },
       { buffer: Buffer.from('not an image at all', 'utf8'), contentType: 'image/png', filename: 'x.png' },
+      // Magic bytes win over the declared type: real PNG bytes labelled JPEG are still rejected.
+      { buffer: ONE_PIXEL_PNG, contentType: 'image/jpeg', filename: 'x.jpg' },
     ];
 
     for (const testCase of cases) {
@@ -304,13 +396,23 @@ describe('og cover upload', () => {
     const res = await postImage(agent, '/api/v1/admin/media/og-cover', 'file', TRANSPARENT_PNG, { token });
 
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ slug: 'og-cover', url: `/media/${res.body.mediaId}` });
+    const newChecksum = createHash('sha256').update(TRANSPARENT_PNG).digest('hex');
+    expect(res.body).toMatchObject({
+      slug: 'og-cover',
+      mediaId: expect.any(String),
+      url: `/media/slug/og-cover?v=${newChecksum}`,
+    });
 
-    const served = await getBinary(request(app), '/media/slug/og-cover');
+    // The admin page and the API point at the same content-addressed slug URL.
+    const page = await agent.get('/app/admin/users');
+    expect(page.status).toBe(200);
+    expect(page.text).toContain(res.body.url);
+
+    const served = await getBinary(request(app), res.body.url);
     expect(served.status).toBe(200);
     expect(Buffer.isBuffer(served.body)).toBe(true);
     expect(served.body.equals(TRANSPARENT_PNG)).toBe(true);
-    expect(served.headers.etag).toBe(`"${createHash('sha256').update(TRANSPARENT_PNG).digest('hex')}"`);
+    expect(served.headers.etag).toBe(`"${newChecksum}"`);
 
     // The slug is unique: replacing the cover updates the same row instead of accumulating rows.
     const rows = await queryRows("SELECT count(*)::int AS total FROM media_assets WHERE slug = 'og-cover'");
