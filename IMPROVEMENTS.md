@@ -502,3 +502,40 @@ Recorded so the deferred findings do not disappear from history when the open en
 - **`getDashboardSummary` has no channel/campaign filter yet.** BO-13 mentions filters, but T6 only defines the
   unfiltered view-model; the weekly query already accepts `channelIds`, so the filter can be added without a second
   aggregation path.
+
+### M3 integration, golden numbers and performance (task 7 follow-ups)
+
+- **M5 deferrals.** Alert rules and the alerts screen, what-if scenarios, and budget optimisation are outside M3.
+  M3 ships the eight analytics view-models with no HTTP layer; M4 renders them and M5 adds alerts/scenarios/budget.
+- **The measured query ceilings are higher than the plan's illustrative numbers.** The plan listed CAC 2,
+  health/ranking 8, dashboard 11, passport 15, goals 9. `getAttributionReport` actually performs four reads (orders,
+  touchpoints, `listChannelSpend`, channel dimension), not two, so every ceiling that includes a health report is
+  two higher; the LTV `withSnapshot` adds `BEGIN`/`COMMIT`, which `tests/helpers/queryCounter.js` counts because
+  they are real round trips. T7 pins the measured flat ceilings (CAC 2, LTV 5, attribution 4, health/ranking 12,
+  dashboard 15, passport 19, goals 13) and the invariant that they do not grow with the number of channels. The
+  alternative — silently counting only pool-level queries — would have hidden the LTV snapshot and made the plan's
+  numbers look satisfied; that is worse than an honest ceiling.
+- **The company-wide CAC query does not use the migration-004 index, by design.** `listChannelCacInputs` aggregates
+  every channel, so under `enable_seqscan=off` PostgreSQL picks `customers_first_order_idx` for the
+  `first_order_at` window. `customers_channel_first_order_idx` serves the channel-scoped read
+  (`getChannelFunnel` and the passport/dashboard channel card), which filters `first_channel_id` first. Both paths
+  are asserted in `tests/integration/metrics.performance.test.js`; the composite is not redundant with the two
+  single-column indexes because it returns the per-channel rows already ordered by acquisition date.
+- **The plan's payback fixtures are not encoded.** `payback = 12 / ratio`, so `payback 12` means `ratio 1`, which is
+  `watch`, not `healthy`; `payback 12.004` implies `ratio < 1` and is `risk`. T7 asserts the derived statuses
+  (`12 → watch`, `12.004 → risk`, `ratio 2.9996 → watch`) instead of the plan's unsatisfiable `12 → healthy` case.
+- **Free channels stay `no_data`.** Email and SEO acquire customers at zero spend, so CAC is `free` (`0n`) while ROMI
+  is undefined and health is `no_data`. This is the literal metrics-spec ruling and is now pinned by the T7
+  integration suite; changing it needs an owner decision, not a test edit.
+- **`goals.cac` is the one money value that must be parsed with `parseBynToCents`.** `goals.target_value` is a mixed
+  `NUMERIC(14,2)` (BYN, percent, ratio, months, count), so there is no `target_value_cents` column. `goals-progress`
+  converts only the CAC target through `parseBynToCents` and keeps the other units numeric; a future `Number()`
+  shortcut would turn `50,00` into `50` or `NaN` depending on the separator.
+- **Golden numbers are a recapture contract, not a tolerance.** `tests/fixtures/m3-golden.json` records anchor, from,
+  to, model, horizon and seed PRNG. `tests/integration/metrics.services.test.js` compares exact kopeck strings and
+  integers, and asserts the fixture's PRNG equals the exported `SEED_PRNG`. Any seed change must update the fixture in
+  the same commit; otherwise the suite fails honestly instead of drifting.
+- **Ranking contributions are display-rounded individually.** The exact weighted sum equals the score (asserted in
+  integer basis points), but the visible `Σ contributions` can differ from the score by up to one hundredth after
+  per-term rounding. T7 asserts both the exact sum and a `0.05` display tolerance; a UI that prints the sum must use
+  the same tolerance rather than an equality check.

@@ -22,8 +22,11 @@ import { logger } from '../../src/lib/logger.js';
 import { addDays, minskDayEnd, minskDayStart, minskYesterday, toDateOnly } from '../../src/lib/dates.js';
 import { CAMPAIGNS, CHANNELS, DEMO_PASSWORD, DEMO_USERS } from './data.js';
 
-/** PRNG seed fixed by the brief; changing it changes every generated number. */
-const PRNG_SEED = 20261121;
+/**
+ * PRNG seed fixed by the brief; changing it changes every generated number.
+ * Exported so the golden fixture can pin the same value instead of hard-coding a second copy.
+ */
+export const SEED_PRNG = 20261121;
 /** Bulk insert size. 500 rows × at most 7 columns stays far below PostgreSQL's 65535 bound parameters. */
 const BATCH_SIZE = 500;
 const CUSTOMER_COUNT = 4000;
@@ -260,7 +263,7 @@ export async function seed({ anchorDate, pool: providedPool } = {}) {
   const periodStartMs = minskDayStart(periodStart).getTime();
   const anchorEndMs = minskDayEnd(anchor).getTime();
 
-  const random = createRandom(PRNG_SEED);
+  const random = createRandom(SEED_PRNG);
   // One hash for all three demo accounts: the password is identical and hashing is the slowest step of the seed.
   const passwordHash = await hash(DEMO_PASSWORD);
 

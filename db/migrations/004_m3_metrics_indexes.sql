@@ -1,0 +1,15 @@
+-- M3 metrics: cover the channel-scoped customer reads.
+--
+-- Channel-scoped analytics filter `customers` by acquisition channel and a first-order window: the passport funnel
+-- counts new customers of one channel, and per-channel cohort margins bound the same window by the data anchor. The
+-- two existing single-column indexes (`customers_first_channel_idx`, `customers_first_order_idx`) each read more heap
+-- pages than needed for the pair; this composite serves both predicates and returns the rows in acquisition order.
+-- The company-wide CAC aggregate still prefers `customers_first_order_idx`, because it scans every channel and the
+-- leading `first_channel_id` column would not narrow it; `tests/integration/metrics.performance.test.js` asserts both
+-- paths instead of pretending one index serves both.
+--
+-- No second index on orders: `orders_customer_idx (customer_id, occurred_at)` already covers the cohort join and the
+-- attribution `EXISTS`; a leading-`occurred_at` index is `orders_time_idx`, so an additional index would only
+-- duplicate a prefix and add write cost. `touchpoints_time_idx` and `daily_stats_date_idx` already cover the
+-- attribution window and the weekly series.
+CREATE INDEX customers_channel_first_order_idx ON customers (first_channel_id, first_order_at);

@@ -1,0 +1,52 @@
+{
+  "comment": "captured from seed 20261121; recapture only with a seed change",
+  "seedPrng": 20261121,
+  "capturedFromSeed": "20261121",
+  "cases": [
+    {
+      "name": "default 30 days, last_touch, ltv horizon 12",
+      "anchor": "2026-11-20",
+      "from": "2026-10-22",
+      "to": "2026-11-20",
+      "model": "last_touch",
+      "horizonMonths": 12,
+      "expected": {
+        "instagramSpendCents": "298904",
+        "instagramNewCustomers": 68,
+        "instagramCacCents": "4396",
+        "blendedSpendCents": "1164861",
+        "blendedNewCustomers": 264,
+        "blendedCacCents": "4412",
+        "ltv12Cents": "14868",
+        "ltv12CustomerCount": 131,
+        "ltv12CohortCount": 2,
+        "blendedLtv12Cents": "14355",
+        "blendedLtv12CustomerCount": 588,
+        "blendedLtv12CohortCount": 2,
+        "attributionTotalsByModel": {
+          "last_touch": "9405408",
+          "first_touch": "9405408",
+          "linear": "9405408"
+        },
+        "attributionInstagramCentsByModel": {
+          "last_touch": "2210845",
+          "first_touch": "2234435",
+          "linear": "2175636"
+        },
+        "totalRevenueCents": "9405408",
+        "blendedRomiPct": 707.43,
+        "blendedPaybackMonths": 3.69,
+        "blendedLtvCacRatio": 3.254,
+        "blendedHealthStatus": "healthy",
+        "rankingTopCode": "instagram",
+        "rankingTopScore": 90.98,
+        "rankingBottomCode": "tiktok",
+        "rankingBottomScore": 13.56,
+        "dashboardSpendCents": "1164861",
+        "dashboardNewCustomers": 264,
+        "dashboardCacCents": "4412",
+        "dashboardRomiPct": 707.43
+      }
+    }
+  ]
+}
