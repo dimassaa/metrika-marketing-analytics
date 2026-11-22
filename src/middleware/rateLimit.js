@@ -8,6 +8,11 @@ const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_ATTEMPT_LIMIT = 5;
 const RATE_LIMIT_MESSAGE = 'Слишком много попыток входа. Попробуйте снова через 15 минут.';
 
+/** Import quota from the spec: twenty files per person per fifteen minutes. */
+const IMPORT_WINDOW_MS = 15 * 60 * 1000;
+const IMPORT_ATTEMPT_LIMIT = 20;
+const IMPORT_RATE_LIMIT_MESSAGE = 'Слишком много импортов. Попробуйте снова через 15 минут.';
+
 /**
  * Builds a dedicated login limiter with its own in-memory store.
  *
@@ -34,6 +39,30 @@ export function createLoginRateLimiter() {
         error: RATE_LIMIT_MESSAGE,
         email: typeof req.body?.email === 'string' ? req.body.email : '',
         next: safeRedirectTarget(req.body?.next),
+      });
+    },
+  });
+}
+
+/**
+ * Builds the import limiter with its own store, one per application instance.
+ *
+ * The quota belongs to a person, not to an address: several analysts may share an office IP, and one person must not
+ * be able to reset their quota by switching networks. The session user id is therefore the key, with the address as
+ * the fallback for a request that reached the limiter without a session (the route guard normally rejects it first).
+ *
+ * @returns {import('express').RequestHandler}
+ */
+export function createImportRateLimiter() {
+  return rateLimit({
+    windowMs: IMPORT_WINDOW_MS,
+    limit: IMPORT_ATTEMPT_LIMIT,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => String(req.session?.user?.id ?? req.ip),
+    handler: (req, res) => {
+      res.status(429).json({
+        error: { code: 'RATE_LIMITED', message: IMPORT_RATE_LIMIT_MESSAGE },
       });
     },
   });

@@ -324,6 +324,20 @@ Non-critical findings recorded during implementation. Priority is decided by the
   it in production; the alternative (generating every initial password server-side and showing it once) reuses the
   reset flow and avoids the administrator inventing weak passwords.
 
+## M2 CSV import (task 5 follow-ups)
+
+- **The Minsk `DD.MM.YYYY HH:mm` formatter now exists twice**: a private helper in `audit.service.js` and another in
+  `import.service.js`. They are identical; extract one into `src/lib/format.js` when a third screen needs timestamps.
+- **A committed import writes one query per row plus one update per order/touchpoint.** The 10 000-row ceiling keeps it
+  bounded on the local stand, but a real dataset would want multi-row `INSERT ... SELECT unnest(...)` batches. The
+  per-row shape is what the brief pins (`insertDailyStatsRow`, `insertOrderRow`, ...).
+- **A threshold-refused batch has no `batchId` in the response**, because the contract explicitly sets it to `null`
+  when the 10 % rule rejects a file. The report is persisted and visible in the last-20 table, but the island cannot
+  link to it directly; the person has to reload the page. Revisit the contract if a permanent deep link is required.
+- **Touchpoint and order templates reference `zerna_customer_0001/0002` from the demo seed.** On a stand without the
+  seed those rows fail with «Клиент не найден», which is honest but makes the downloaded template look broken. Point
+  the template at a self-contained pair, or label the dependency in the template comment, once templates gain comments.
+
 ## Resolved during the M1 final fix wave
 
 Recorded so the deferred findings do not disappear from history when the open entries above are closed.

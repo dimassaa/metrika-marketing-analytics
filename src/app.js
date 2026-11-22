@@ -21,15 +21,19 @@ import { createAuditRepository } from './repositories/audit.repo.js';
 import { createChannelsRepository } from './repositories/channels.repo.js';
 import { createCampaignsRepository } from './repositories/campaigns.repo.js';
 import { createGoalsRepository } from './repositories/goals.repo.js';
+import { createImportRepository } from './repositories/import.repo.js';
 import { createAuthService } from './services/auth.service.js';
 import { createAuditService } from './services/audit.service.js';
 import { createUsersService } from './services/users.service.js';
 import { createChannelsService } from './services/channels.service.js';
 import { createCampaignsService } from './services/campaigns.service.js';
 import { createGoalsService } from './services/goals.service.js';
+import { createImportService } from './services/import.service.js';
 import { createAuthController } from './controllers/auth.controller.js';
+import { createImportController } from './controllers/import.controller.js';
 import { createAuthRouter } from './routes/auth.routes.js';
 import { createAppRouter } from './routes/app.routes.js';
+import { createApiRouter } from './routes/api.routes.js';
 
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const viewsDir = fileURLToPath(new URL('./views', import.meta.url));
@@ -40,9 +44,13 @@ const publicDir = fileURLToPath(new URL('../public', import.meta.url));
  * connection. `db` is the shared PostgreSQL pool in production; it also backs the default session store, which keeps
  * integration tests on the test database. Tests that need no sessions pass a `MemoryStore` explicitly.
  * @param {{
- *   db: { query: (text: string, params?: unknown[]) => Promise<unknown> } & Partial<import('pg').Pool>,
+ *   db: {
+ *     query: (text: string, params?: unknown[]) => Promise<unknown>,
+ *     connect: () => Promise<import('pg').PoolClient>,
+ *   } & Partial<import('pg').Pool>,
  *   sessionStore?: import('express-session').Store,
- * }} deps
+ * }} deps `db.connect` backs `withTransaction`: the import writes data, its batch and its audit row in one
+ *   transaction. Integration tests pass a pool pointed at the test database, never the shared one.
  * @returns {import('express').Express}
  */
 export function createApp({ db, sessionStore } = {}) {
@@ -56,13 +64,18 @@ export function createApp({ db, sessionStore } = {}) {
   const channelsRepository = createChannelsRepository(db);
   const campaignsRepository = createCampaignsRepository(db);
   const goalsRepository = createGoalsRepository(db);
+  // The pooled import repository serves the read-only batch screens; writes are created from the transaction client
+  // inside the import service, so a rollback cannot leave an orphan batch.
+  const importRepository = createImportRepository(db);
   const authService = createAuthService({ usersRepository });
   const auditService = createAuditService({ auditRepository });
   const usersService = createUsersService({ db, usersRepository, auditService });
   const channelsService = createChannelsService({ channelsRepository, auditService });
   const campaignsService = createCampaignsService({ campaignsRepository, channelsRepository, auditService });
   const goalsService = createGoalsService({ db, goalsRepository, auditService });
+  const importService = createImportService({ db, importRepository });
   const authController = createAuthController({ authService, auditService });
+  const importController = createImportController({ importService, referenceRepository });
   const store = sessionStore ?? createPgSessionStore(db);
 
   const app = express();
@@ -128,6 +141,9 @@ export function createApp({ db, sessionStore } = {}) {
 
   app.use('/', publicRoutes);
   app.use(createAuthRouter({ authController }));
+  // Mounted after `csrfProtection`: every mutating API call carries `X-CSRF-Token`, including multipart uploads,
+  // whose body cannot be parsed by the global CSRF middleware.
+  app.use('/api/v1', createApiRouter({ importController }));
   app.use('/app', createAppRouter({
     requireAuth,
     referenceRepository,
@@ -136,6 +152,7 @@ export function createApp({ db, sessionStore } = {}) {
     channelsService,
     campaignsService,
     goalsService,
+    importController,
   }));
 
   app.get('/health', async (req, res) => {

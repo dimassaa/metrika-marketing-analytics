@@ -9,8 +9,15 @@ const SERVER_ERROR_SEO = buildSeo({
   noindex: true,
 });
 
+/**
+ * `errorHandler` and `notFound` run both inside and outside mounted routers; `originalUrl` keeps the full path so a
+ * failure under `/api/v1` is answered with JSON even when Express reports a router-relative `req.path`.
+ * @param {import('express').Request} req
+ * @returns {boolean}
+ */
 function isApiRequest(req) {
-  return req.path === '/api' || req.path.startsWith('/api/');
+  const path = String(req.originalUrl ?? req.url ?? '').split('?')[0];
+  return path === '/api' || path.startsWith('/api/');
 }
 
 /**

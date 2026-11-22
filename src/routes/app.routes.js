@@ -29,6 +29,7 @@ const PLACEHOLDER_SECTIONS = [
  *   channelsService: ReturnType<typeof import('../services/channels.service.js').createChannelsService>,
  *   campaignsService: ReturnType<typeof import('../services/campaigns.service.js').createCampaignsService>,
  *   goalsService: ReturnType<typeof import('../services/goals.service.js').createGoalsService>,
+ *   importController: ReturnType<typeof import('../controllers/import.controller.js').createImportController>,
  * }} deps
  * @returns {import('express').Router}
  */
@@ -40,6 +41,7 @@ export function createAppRouter({
   channelsService,
   campaignsService,
   goalsService,
+  importController,
 }) {
   const appController = createAppController({ referenceRepository });
   const adminController = createAdminController({ usersService, auditService, referenceRepository });
@@ -90,10 +92,9 @@ export function createAppRouter({
   }
 
   // Import writes history and audit exposes the whole team's actions, so both need a permission, not just a login.
-  router.get('/import', requireAuth, requirePermission('import:run'), appController.comingSoon({
-    title: 'Импорт',
-    activeNav: 'import',
-  }));
+  router.get('/import', requireAuth, requirePermission('import:run'), importController.list);
+  router.get('/import/templates/:kind.csv', requireAuth, requirePermission('import:run'), importController.template);
+  router.get('/import/batches/:id', requireAuth, requirePermission('import:run'), importController.batch);
 
   // Every signed-in role owns their profile; user administration and the journal are admin-only on the server.
   router.get('/profile', requireAuth, adminController.profile);

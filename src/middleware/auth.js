@@ -12,11 +12,15 @@ const FORBIDDEN_SEO = buildSeo({
 });
 
 /**
+ * API guards run inside mounted routers, where `req.path` is router-relative (`/import`, not `/api/v1/import`).
+ * `originalUrl` always carries the full path, so a viewer calling `/api/v1/import` gets JSON instead of the styled
+ * HTML 403 the page family uses.
  * @param {import('express').Request} req
  * @returns {boolean}
  */
 function isApiRequest(req) {
-  return req.path === '/api' || req.path.startsWith('/api/');
+  const path = String(req.originalUrl ?? req.url ?? '').split('?')[0];
+  return path === '/api' || path.startsWith('/api/');
 }
 
 /**

@@ -1,0 +1,79 @@
+<section class="app-section">
+  <div class="stack stack--lg">
+    <div class="stack stack--sm">
+      <div class="cluster">
+        <a class="btn btn--ghost btn--sm" href="/app/import">К импорту</a>
+      </div>
+      <h2>Пакет импорта №<%= batch.id %></h2>
+      <p class="u-muted">
+        <%= batch.kindLabel %> · <span class="u-numeric"><%= batch.createdAtLabel %></span> ·
+        файл «<%= batch.filename %>»<% if (batch.createdByEmail) { %>, загрузил <%= batch.createdByEmail %><% } %>
+      </p>
+    </div>
+
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col" class="u-right">Всего строк</th>
+            <th scope="col" class="u-right">Принято</th>
+            <th scope="col" class="u-right">Дубликаты</th>
+            <th scope="col" class="u-right">Ошибки</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="u-numeric u-right"><%= batch.rowsTotal %></td>
+            <td class="u-numeric u-right"><%= batch.rowsOk %></td>
+            <td class="u-numeric u-right"><%= batch.rowsDuplicate %></td>
+            <td class="u-numeric u-right">
+              <% if (batch.rowsFailed > 0) { %>
+              <span class="badge badge--risk"><%= batch.rowsFailed %></span>
+              <% } else { %>
+              <span class="u-muted">0</span>
+              <% } %>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="stack stack--sm">
+      <h3>Ошибки по строкам</h3>
+
+      <% if (batch.errors.length === 0) { %>
+      <div class="empty-state">
+        <p class="empty-state__title">Ошибок нет</p>
+        <p class="empty-state__text">
+          <% if (batch.rowsFailed === 0 && batch.rowsOk === 0 && batch.rowsDuplicate > 0) { %>
+          Все строки файла уже были в базе и пропущены как дубликаты.
+          <% } else { %>
+          Каждая строка файла прошла проверку и была применена.
+          <% } %>
+        </p>
+      </div>
+      <% } else { %>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col" class="u-right">Строка</th>
+              <th scope="col">Колонка</th>
+              <th scope="col">Причина</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% batch.errors.forEach((error) => { %>
+            <tr>
+              <td class="u-numeric u-right"><%= error.row %></td>
+              <td><% if (error.field) { %><code><%= error.field %></code><% } else { %><span class="u-muted">—</span><% } %></td>
+              <td><%= error.message %></td>
+            </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+      <% } %>
+    </div>
+  </div>
+</section>

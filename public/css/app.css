@@ -631,6 +631,113 @@ input[type='file'] {
   font-size: 13px;
 }
 
+/* CSV upload: the native file input stays visible (it is the real control) and its button becomes a hairline pill,
+   so the page never fakes a button that opens an invisible input. */
+.file-input {
+  width: 100%;
+  padding: var(--spacing-8) var(--spacing-12);
+  border: 1px solid var(--color-stone-muted);
+  border-radius: var(--radius-input);
+  background-color: var(--color-pure-white);
+  color: var(--color-warm-gray);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.file-input::file-selector-button {
+  margin-right: var(--spacing-12);
+  padding: var(--spacing-4) var(--spacing-12);
+  border: 1px solid var(--color-stone-border);
+  border-radius: var(--radius-pill);
+  background-color: transparent;
+  color: var(--color-ink-black);
+  font-family: var(--font-body);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.file-input::file-selector-button:hover {
+  border-color: var(--color-stone-muted);
+  background-color: var(--color-stone-canvas);
+}
+
+.file-input:hover {
+  border-color: var(--color-ash-gray);
+}
+
+.file-input:focus-visible {
+  border-color: var(--color-cyan-edge);
+  outline: 2px solid var(--color-cyan-edge);
+  outline-offset: 1px;
+}
+
+/* Upload report: a white card lifted with the one shared shadow, because it appears after the action and must read
+   as the result rather than as part of the form. */
+.upload-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-12);
+  margin-top: var(--spacing-16);
+  padding: var(--spacing-16);
+  border: 1px solid var(--color-stone-border);
+  border-left: 2px solid var(--color-stone-muted);
+  border-radius: var(--radius-cards);
+  background-color: var(--color-pure-white);
+  box-shadow: var(--shadow-card);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.upload-status[hidden] {
+  display: none;
+}
+
+.upload-status[data-state='success'] {
+  border-left-color: var(--color-status-healthy);
+}
+
+.upload-status[data-state='warning'],
+.upload-status[data-state='error'] {
+  border-left-color: var(--color-status-risk);
+}
+
+.upload-status__title {
+  color: var(--color-ink-black);
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: -0.008em;
+}
+
+.upload-status__meta {
+  color: var(--color-warm-gray);
+  font-size: 13px;
+}
+
+.upload-status__list {
+  margin: 0;
+  padding-left: var(--spacing-24);
+  color: var(--color-warm-gray);
+  font-size: 13px;
+}
+
+.upload-status > .btn {
+  align-self: flex-start;
+}
+
+.noscript-note {
+  margin-top: var(--spacing-16);
+  padding: var(--spacing-12) var(--spacing-16);
+  border: 1px solid var(--color-stone-border);
+  border-radius: var(--radius-input);
+  background-color: var(--color-stone-canvas);
+  color: var(--color-warm-gray);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 /* Tables — data is the product; numbers right-aligned and tabular. */
 .table-wrap {
   /* The relative anchor matters: visually hidden labels inside a wide table are absolutely positioned against the

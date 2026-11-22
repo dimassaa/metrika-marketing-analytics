@@ -1,0 +1,147 @@
+<section class="app-section">
+  <div class="stack stack--lg">
+    <div class="stack stack--sm">
+      <h2>Импорт CSV</h2>
+      <p class="u-muted">
+        Загрузите файл с разделителем «;». Кодировка — UTF-8, BOM от Excel допустим, суммы — в белорусских рублях с
+        запятой или точкой. Проверка без сохранения показывает отчёт до записи в базу. Боевой импорт атомарен: если
+        ошибок больше 10% строк, не применяется ни одна строка файла.
+      </p>
+    </div>
+
+    <div class="card card--flat">
+      <div class="card__header">
+        <div>
+          <h3 class="card__title">Загрузить файл</h3>
+          <p class="card__meta">
+            Не более 2 МБ и 10 000 строк данных. Дубликаты пропускаются, статистика по паре «кампания + дата»
+            обновляется. Имя файла сохраняется только в отчёте.
+          </p>
+        </div>
+      </div>
+
+      <form id="import-form" class="stack" method="post" action="/api/v1/import" enctype="multipart/form-data">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+
+        <div class="inline-form">
+          <label class="field">
+            <span class="field__label">Тип данных</span>
+            <select class="select" name="kind" id="import-kind" required>
+              <% kinds.forEach((kind) => { %>
+              <option value="<%= kind.value %>"><%= kind.label %></option>
+              <% }) %>
+            </select>
+          </label>
+
+          <label class="field">
+            <span class="field__label">Файл CSV</span>
+            <input class="file-input" type="file" name="file" id="import-file" accept=".csv,text/csv" required>
+            <span class="field__hint">Файл читается в памяти и на диск сервера не сохраняется.</span>
+          </label>
+        </div>
+
+        <label class="cluster">
+          <input type="checkbox" name="dryRun" id="import-dry-run" value="true">
+          <span>Только проверить без сохранения (dry-run)</span>
+        </label>
+
+        <div class="cluster">
+          <button class="btn btn--primary" type="submit" id="import-submit">Проверить и загрузить</button>
+          <span class="u-muted">Отчёт по боевому импорту сохраняется в списке пакетов ниже.</span>
+        </div>
+      </form>
+
+      <div class="upload-status" id="import-status" aria-live="polite" hidden></div>
+
+      <noscript>
+        <p class="noscript-note">
+          Загрузка работает через JavaScript: только так браузер отправит файл вместе с защитным токеном. Включите
+          JavaScript и обновите страницу.
+        </p>
+      </noscript>
+    </div>
+
+    <div class="stack stack--sm">
+      <h3>Форматы файлов</h3>
+      <p class="u-muted">
+        Скачайте шаблон, заполните строки и загрузите его обратно. Порядок колонок свободный, лишние колонки
+        игнорируются с предупреждением.
+      </p>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">Тип данных</th>
+              <th scope="col">Обязательные колонки</th>
+              <th scope="col">Шаблон</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% kinds.forEach((kind) => { %>
+            <tr>
+              <td><%= kind.label %></td>
+              <td><code><%= kind.columns.join(';') %></code></td>
+              <td><a class="btn btn--ghost btn--sm" href="<%= kind.templatePath %>">Скачать CSV</a></td>
+            </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="stack stack--sm">
+      <div class="toolbar">
+        <h3>Последние пакеты</h3>
+        <p class="u-muted">Показаны 20 последних импортов</p>
+      </div>
+
+      <% if (batches.length === 0) { %>
+      <div class="empty-state">
+        <p class="empty-state__title">Пакетов импорта пока нет</p>
+        <p class="empty-state__text">Первый загруженный файл появится здесь с числом строк и списком ошибок.</p>
+      </div>
+      <% } else { %>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">Пакет</th>
+              <th scope="col">Тип данных</th>
+              <th scope="col">Файл</th>
+              <th scope="col" class="u-right">Строк</th>
+              <th scope="col" class="u-right">Принято</th>
+              <th scope="col" class="u-right">Дубли</th>
+              <th scope="col" class="u-right">Ошибки</th>
+              <th scope="col">Когда</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% batches.forEach((batch) => { %>
+            <tr>
+              <td class="u-numeric">
+                <a href="/app/import/batches/<%= batch.id %>">№<%= batch.id %></a>
+              </td>
+              <td><%= batch.kindLabel %></td>
+              <td class="u-truncate"><%= batch.filename %></td>
+              <td class="u-numeric u-right"><%= batch.rowsTotal %></td>
+              <td class="u-numeric u-right"><%= batch.rowsOk %></td>
+              <td class="u-numeric u-right"><%= batch.rowsDuplicate %></td>
+              <td class="u-numeric u-right">
+                <% if (batch.rowsFailed > 0) { %>
+                <span class="badge badge--risk"><%= batch.rowsFailed %></span>
+                <% } else { %>
+                <span class="u-muted">0</span>
+                <% } %>
+              </td>
+              <td class="u-numeric u-nowrap"><%= batch.createdAtLabel %></td>
+            </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+      <% } %>
+    </div>
+  </div>
+</section>
+
+<script src="/js/upload-form.js" defer></script>

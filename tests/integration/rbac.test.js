@@ -84,7 +84,7 @@ describe('app shell RBAC', () => {
     expect(res.text).toContain('Недостаточно прав');
   });
 
-  it('lets an analyst open the import placeholder but not the users screen', async () => {
+  it('lets an analyst open the import screen but not the users screen', async () => {
     const agent = await signedIn(ANALYST);
 
     const users = await agent.get('/app/admin/users');
@@ -92,7 +92,19 @@ describe('app shell RBAC', () => {
 
     const importPage = await agent.get('/app/import');
     expect(importPage.status).toBe(200);
-    expect(importPage.text).toContain('следующем этапе');
+    expect(importPage.text).toContain('Импорт CSV');
+    // The M1 placeholder wording must be gone now that the screen ships.
+    expect(importPage.text).not.toContain('следующем этапе');
+  });
+
+  it('answers a viewer on the import screen with the styled 403 page', async () => {
+    const agent = await signedIn(VIEWER);
+
+    const res = await agent.get('/app/import');
+
+    expect(res.status).toBe(403);
+    expect(res.headers['content-type']).toMatch(/text\/html/);
+    expect(res.text).toContain('Недостаточно прав');
   });
 
   it('lists the three seeded users for an admin', async () => {
