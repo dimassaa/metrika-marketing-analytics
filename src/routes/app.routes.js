@@ -5,6 +5,7 @@ import { createAdminController } from '../controllers/admin.controller.js';
 import { createChannelsController } from '../controllers/channels.controller.js';
 import { createCampaignsController } from '../controllers/campaigns.controller.js';
 import { createGoalsController } from '../controllers/goals.controller.js';
+import { createExportController } from '../controllers/export.controller.js';
 
 /**
  * Sections that exist in the sidebar but render the honest «Раздел появится на следующем этапе» placeholder until
@@ -30,6 +31,7 @@ const PLACEHOLDER_SECTIONS = [
  *   campaignsService: ReturnType<typeof import('../services/campaigns.service.js').createCampaignsService>,
  *   goalsService: ReturnType<typeof import('../services/goals.service.js').createGoalsService>,
  *   importController: ReturnType<typeof import('../controllers/import.controller.js').createImportController>,
+ *   exportService: ReturnType<typeof import('../services/export.service.js').createExportService>,
  * }} deps
  * @returns {import('express').Router}
  */
@@ -42,12 +44,14 @@ export function createAppRouter({
   campaignsService,
   goalsService,
   importController,
+  exportService,
 }) {
   const appController = createAppController({ referenceRepository });
   const adminController = createAdminController({ usersService, auditService, referenceRepository });
   const channelsController = createChannelsController({ channelsService, campaignsService, referenceRepository });
   const campaignsController = createCampaignsController({ campaignsService, channelsService, referenceRepository });
   const goalsController = createGoalsController({ goalsService, channelsService, referenceRepository });
+  const exportController = createExportController({ exportService, auditService });
   const router = Router();
 
   router.get('/', requireAuth, (req, res) => {
@@ -95,6 +99,15 @@ export function createAppRouter({
   router.get('/import', requireAuth, requirePermission('import:run'), importController.list);
   router.get('/import/templates/:kind.csv', requireAuth, requirePermission('import:run'), importController.template);
   router.get('/import/batches/:id', requireAuth, requirePermission('import:run'), importController.batch);
+
+  // Export is a safe GET download: every signed-in role has `export`, the query carries the current screen filters,
+  // and the controller records the call in the journal. No CSRF token is needed for a method without side effects.
+  router.get(
+    '/export/:dataset.csv',
+    requireAuth,
+    requirePermission('export'),
+    exportController.download,
+  );
 
   // Every signed-in role owns their profile; user administration and the journal are admin-only on the server.
   router.get('/profile', requireAuth, adminController.profile);

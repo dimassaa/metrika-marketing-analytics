@@ -49,6 +49,15 @@
         <button class="btn btn--ghost btn--sm" type="submit">Показать</button>
       </form>
 
+      <% if (can('export')) { %>
+      <form method="get" action="/app/export/campaigns.csv" aria-label="Экспорт кампаний в CSV">
+        <input type="hidden" name="channelId" value="<%= filters.channelId %>">
+        <input type="hidden" name="status" value="<%= filters.status %>">
+        <input type="hidden" name="q" value="<%= filters.q %>">
+        <button class="btn btn--ghost btn--sm" type="submit">Экспорт CSV</button>
+      </form>
+      <% } %>
+
       <div class="cluster" aria-label="Итоги по выбранным кампаниям">
         <span class="u-muted">Кампаний: <strong class="u-numeric"><%= totals.countLabel %></strong></span>
         <span class="u-muted">

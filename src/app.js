@@ -22,6 +22,7 @@ import { createChannelsRepository } from './repositories/channels.repo.js';
 import { createCampaignsRepository } from './repositories/campaigns.repo.js';
 import { createGoalsRepository } from './repositories/goals.repo.js';
 import { createImportRepository } from './repositories/import.repo.js';
+import { createExportRepository } from './repositories/export.repo.js';
 import { createAuthService } from './services/auth.service.js';
 import { createAuditService } from './services/audit.service.js';
 import { createUsersService } from './services/users.service.js';
@@ -29,6 +30,7 @@ import { createChannelsService } from './services/channels.service.js';
 import { createCampaignsService } from './services/campaigns.service.js';
 import { createGoalsService } from './services/goals.service.js';
 import { createImportService } from './services/import.service.js';
+import { createExportService } from './services/export.service.js';
 import { createAuthController } from './controllers/auth.controller.js';
 import { createImportController } from './controllers/import.controller.js';
 import { createAuthRouter } from './routes/auth.routes.js';
@@ -67,6 +69,8 @@ export function createApp({ db, sessionStore } = {}) {
   // The pooled import repository serves the read-only batch screens; writes are created from the transaction client
   // inside the import service, so a rollback cannot leave an orphan batch.
   const importRepository = createImportRepository(db);
+  // Export is read-only; the audit row is written by the controller after the file is built.
+  const exportRepository = createExportRepository(db);
   const authService = createAuthService({ usersRepository });
   const auditService = createAuditService({ auditRepository });
   const usersService = createUsersService({ db, usersRepository, auditService });
@@ -74,6 +78,7 @@ export function createApp({ db, sessionStore } = {}) {
   const campaignsService = createCampaignsService({ campaignsRepository, channelsRepository, auditService });
   const goalsService = createGoalsService({ db, goalsRepository, auditService });
   const importService = createImportService({ db, importRepository });
+  const exportService = createExportService({ exportRepository, referenceRepository });
   const authController = createAuthController({ authService, auditService });
   const importController = createImportController({ importService, referenceRepository });
   const store = sessionStore ?? createPgSessionStore(db);
@@ -153,6 +158,7 @@ export function createApp({ db, sessionStore } = {}) {
     campaignsService,
     goalsService,
     importController,
+    exportService,
   }));
 
   app.get('/health', async (req, res) => {

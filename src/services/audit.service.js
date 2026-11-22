@@ -35,6 +35,12 @@ const ENTITY_LABELS = Object.freeze({
   goal: 'Цель',
   import: 'Импорт',
   media: 'Файл',
+  // Export writes the dataset name as the entity (export.csv + entity=channels/orders/...), so the journal column
+  // must not fall back to the raw English code.
+  channels: 'Каналы',
+  campaigns: 'Кампании',
+  daily_stats: 'Статистика',
+  orders: 'Заказы',
 });
 
 /**
