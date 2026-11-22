@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { METRICS_CONFIG } from '../../src/config/metrics.js';
 import { ValidationError } from '../../src/lib/errors.js';
 import { normalizeBigInt, normalizeNumber } from '../../src/lib/metrics-math.js';
-import { computeRanking, normalizeWeights } from '../../src/services/metrics/ranking.service.js';
+import { computeRanking, computeWeightBasisPoints, normalizeWeights } from '../../src/services/metrics/ranking.service.js';
 
 /**
  * One health-report row as `getChannelHealthReport` produces it: CAC is a decimal kopeck string, the ratios are
@@ -38,7 +38,7 @@ describe('normalizeWeights', () => {
     const weights = normalizeWeights();
 
     expect(weights).toEqual({ ...METRICS_CONFIG.ranking.weights });
-    expect(weights.cac + weights.romi + weights.ltvCac + weights.newCustomers).toBe(1);
+    expect(weights.cac + weights.romi + weights.ltvCac + weights.newCustomers).toBeCloseTo(1, 12);
   });
 
   it('normalises arbitrary non-negative weights to a sum of one', () => {
@@ -48,15 +48,32 @@ describe('normalizeWeights', () => {
     expect(weights.romi).toBeCloseTo(0.333, 3);
     expect(weights.ltvCac).toBeCloseTo(0.167, 3);
     expect(weights.newCustomers).toBeCloseTo(0.167, 3);
-    expect(weights.cac + weights.romi + weights.ltvCac + weights.newCustomers).toBe(1);
+    expect(weights.cac + weights.romi + weights.ltvCac + weights.newCustomers).toBeCloseTo(1, 12);
   });
 
-  it('apportions the rounding residual so the weights sum to exactly one', () => {
-    // Independent rounding would give 0.091 + 0.182 + 0.273 + 0.455 = 1.001 and a score of 100.1.
-    const weights = normalizeWeights({ cac: 1, romi: 2, ltvCac: 3, newCustomers: 5 });
+  it('apportions the rounding residual so the integer basis points sum to exactly 1000', () => {
+    // Independent rounding would give 91 + 182 + 273 + 455 = 1001 units and a score of 100.1.
+    const basisPoints = computeWeightBasisPoints({ cac: 1, romi: 2, ltvCac: 3, newCustomers: 5 });
 
-    expect(weights).toEqual({ cac: 0.091, romi: 0.182, ltvCac: 0.273, newCustomers: 0.454 });
-    expect(weights.cac + weights.romi + weights.ltvCac + weights.newCustomers).toBe(1);
+    expect(basisPoints).toEqual({ cac: 91, romi: 182, ltvCac: 273, newCustomers: 454 });
+    expect(basisPoints.cac + basisPoints.romi + basisPoints.ltvCac + basisPoints.newCustomers).toBe(1000);
+  });
+
+  it('keeps the integer sum at 1000 for other non-clean ratios', () => {
+    const ratios = [
+      { cac: 0.685, romi: 0.56, ltvCac: 0.522, newCustomers: 0.149 },
+      { cac: 1, romi: 1, ltvCac: 1, newCustomers: 1 },
+      { cac: 0.1, romi: 0.2, ltvCac: 0.3, newCustomers: 0.4 },
+      { cac: 7, romi: 13, ltvCac: 2, newCustomers: 11 },
+    ];
+
+    for (const ratio of ratios) {
+      const basisPoints = computeWeightBasisPoints(ratio);
+      expect(Object.values(basisPoints).every(Number.isInteger)).toBe(true);
+      expect(basisPoints.cac + basisPoints.romi + basisPoints.ltvCac + basisPoints.newCustomers).toBe(1000);
+      const display = normalizeWeights(ratio);
+      expect(display.cac + display.romi + display.ltvCac + display.newCustomers).toBeCloseTo(1, 12);
+    }
   });
 
   it('keeps a single non-zero weight at one and the others at zero', () => {
@@ -232,7 +249,7 @@ describe('computeRanking scoring and order', () => {
     expect(computeRanking()).toMatchObject({ ranked: [], excluded: [] });
   });
 
-  it('makes the displayed contributions add up to the score', () => {
+  it('keeps displayed contributions within display rounding of the score', () => {
     const ranking = computeRanking({
       channels: [
         channel({ channelId: '1', code: 'alpha', romiPct: 635.46, ltvCacRatio: 3.424, newCustomers: 68 }),
@@ -243,7 +260,8 @@ describe('computeRanking scoring and order', () => {
 
     for (const row of ranking.ranked) {
       const sum = row.contributions.reduce((total, entry) => total + entry.contribution, 0);
-      expect(sum).toBeCloseTo(row.score, 2);
+      // The score is rounded once from the exact weighted sum; four display terms can drift by at most 0.02.
+      expect(Math.abs(sum - row.score)).toBeLessThanOrEqual(0.02 + 1e-9);
       expect(row.score).toBeGreaterThanOrEqual(0);
       expect(row.score).toBeLessThanOrEqual(100);
     }
@@ -289,7 +307,10 @@ describe('computeRanking scoring and order', () => {
       weights: { cac: 1, romi: 2, ltvCac: 3, newCustomers: 5 },
     });
 
-    // 0.091 + 0.182 + 0.273 + 0.454 is exactly 1 after largest-remainder apportionment, so the ceiling holds.
+    // 91 + 182 + 273 + 454 basis points sum to 1000, so the ceiling holds by construction.
+    expect(ranking.weightsBasisPoints).toEqual({ cac: 91, romi: 182, ltvCac: 273, newCustomers: 454 });
+    const basisPointsSum = Object.values(ranking.weightsBasisPoints).reduce((sum, value) => sum + value, 0);
+    expect(basisPointsSum).toBe(1000);
     expect(ranking.ranked[0]).toMatchObject({ code: 'best', rank: 1, score: 100 });
     expect(ranking.ranked[0].score).toBeLessThanOrEqual(100);
     expect(ranking.ranked[1].score).toBeLessThanOrEqual(100);

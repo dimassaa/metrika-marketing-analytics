@@ -57,6 +57,7 @@ describe('channel ranking against the seeded stand', () => {
 
     expect(report.period).toEqual({ from: FROM, to: TO, days: 30 });
     expect(report.weights).toEqual({ cac: 0.3, romi: 0.3, ltvCac: 0.25, newCustomers: 0.15 });
+    expect(report.weightsBasisPoints).toEqual({ cac: 300, romi: 300, ltvCac: 250, newCustomers: 150 });
     expect(report.ranked.map((row) => [row.rank, row.code])).toEqual([
       [1, 'instagram'],
       [2, 'telegram'],
@@ -87,7 +88,7 @@ describe('channel ranking against the seeded stand', () => {
     expect(tiktokCac).toMatchObject({ rawValue: '5871', normalized: 1, scored: 0, contribution: 0 });
   });
 
-  it('explains every contribution and makes them add up to the score', async () => {
+  it('explains every contribution and totals to the score within display rounding', async () => {
     const report = await rankingService.getRankingReport({ anchor: ANCHOR, from: FROM, to: TO });
     const instagram = report.ranked[0];
 
@@ -100,7 +101,8 @@ describe('channel ranking against the seeded stand', () => {
     expect(instagram.contributions.map((entry) => entry.rawValue)).toEqual(['4352', 635.46, 3.424, 68]);
     for (const row of report.ranked) {
       const sum = row.contributions.reduce((total, entry) => total + entry.contribution, 0);
-      expect(sum).toBeCloseTo(row.score, 2);
+      // Four independently rounded display terms can drift from the once-rounded score by up to 0.02.
+      expect(Math.abs(sum - row.score)).toBeLessThanOrEqual(0.02 + 1e-9);
     }
   });
 
@@ -125,7 +127,11 @@ describe('channel ranking against the seeded stand', () => {
     });
 
     expect(byRomi.weights).toEqual({ cac: 0, romi: 1, ltvCac: 0, newCustomers: 0 });
-    expect(byRomi.weights.cac + byRomi.weights.romi + byRomi.weights.ltvCac + byRomi.weights.newCustomers).toBe(1);
+    expect(byRomi.weights.cac + byRomi.weights.romi + byRomi.weights.ltvCac + byRomi.weights.newCustomers).toBeCloseTo(
+      1,
+      12,
+    );
+    expect(byRomi.weightsBasisPoints).toEqual({ cac: 0, romi: 1000, ltvCac: 0, newCustomers: 0 });
     for (const entry of byRomi.ranked[0].contributions) {
       // The reported weights are the scored weights: no second rounding pass may shift them.
       expect(entry.weight).toBe(byRomi.weights[entry.criterion]);

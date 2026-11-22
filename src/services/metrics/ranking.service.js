@@ -60,22 +60,18 @@ function validateWeights(weights = METRICS_CONFIG.ranking.weights) {
 }
 
 /**
- * Renormalises criterion weights to a sum of 1 (metrics spec §4).
+ * Renormalises criterion weights into integer thousandths (`basisPoints`) that sum to exactly 1000.
  *
- * Independent rounding is not enough: values like 1/2/3/5 round to 0.091, 0.182, 0.273 and 0.455, a sum of 1.001
- * that would let a channel best on every criterion score above 100. The largest-remainder method therefore rounds
- * the scaled weights to integer thousandths and hands the residual (+1 or −1 per unit) to the largest or smallest
- * fractional parts. The returned weights sum to exactly 1, and the same values are the ones used for scoring.
- *
- * Missing keys fall back to `METRICS_CONFIG.ranking.weights`, so a caller may override one criterion without
- * restating the rest. Negative, non-finite and unknown weights are rejected instead of being silently clamped or
- * ignored: a negative weight would invert a criterion, and a typo must not disappear.
+ * Independent rounding is not enough: 1/2/3/5 would give 91 + 182 + 273 + 455 = 1001 basis points and a channel
+ * best on every criterion could score 100.1. Largest-remainder apportionment takes the floors, then hands the
+ * `+1`/`−1` residual to the largest or smallest fractional parts. The integer sum is the contract; floating-point
+ * addition of the display decimals is not claimed to be exact.
  *
  * @param {Record<string, number>} [weights] Weights with `cac`, `romi`, `ltvCac`, `newCustomers`.
- * @returns {{ cac: number, romi: number, ltvCac: number, newCustomers: number }} Weights summing to exactly 1.
+ * @returns {{ cac: number, romi: number, ltvCac: number, newCustomers: number }} Integer basis points summing to 1000.
  * @throws {ValidationError} When the weights are invalid.
  */
-export function normalizeWeights(weights = METRICS_CONFIG.ranking.weights) {
+export function computeWeightBasisPoints(weights = METRICS_CONFIG.ranking.weights) {
   const merged = validateWeights(weights);
   const total = CRITERIA.reduce((sum, criterion) => sum + merged[criterion], 0);
 
@@ -86,8 +82,6 @@ export function normalizeWeights(weights = METRICS_CONFIG.ranking.weights) {
   });
   let residual = WEIGHT_SCALE - entries.reduce((sum, entry) => sum + entry.whole, 0);
 
-  // A positive residual goes to the largest fractional parts, a negative one is taken from the smallest, which is
-  // largest-remainder apportionment. Ties resolve by criterion order to keep repeated calls identical.
   if (residual !== 0) {
     const step = residual > 0 ? 1 : -1;
     const order = [...entries].sort((left, right) =>
@@ -101,23 +95,24 @@ export function normalizeWeights(weights = METRICS_CONFIG.ranking.weights) {
     }
   }
 
-  const normalized = Object.fromEntries(
-    entries.map((entry) => [entry.criterion, entry.whole / WEIGHT_SCALE]),
-  );
-
-  // Adding four thousandths in floating point can land one ULP away from 1; move that ULP to the largest weight so
-  // the returned weights sum exactly, not approximately.
-  const sum = CRITERIA.reduce((acc, criterion) => acc + normalized[criterion], 0);
-  if (sum !== 1) {
-    const largest = CRITERIA.reduce(
-      (best, criterion) => (normalized[criterion] > normalized[best] ? criterion : best),
-      CRITERIA[0],
-    );
-    normalized[largest] += 1 - sum;
-  }
-
-  return normalized;
+  return Object.fromEntries(entries.map((entry) => [entry.criterion, entry.whole]));
 }
+
+/**
+ * Display weights derived from the integer basis points (metrics spec §4).
+ *
+ * Use this for rendering only. The scoring path uses `computeWeightBasisPoints` directly, so a float artefact in the
+ * displayed decimals cannot move a score.
+ *
+ * @param {Record<string, number>} [weights] Weights with `cac`, `romi`, `ltvCac`, `newCustomers`.
+ * @returns {{ cac: number, romi: number, ltvCac: number, newCustomers: number }} Decimal weights, ≈1 in total.
+ * @throws {ValidationError} When the weights are invalid.
+ */
+export function normalizeWeights(weights = METRICS_CONFIG.ranking.weights) {
+  const basisPoints = computeWeightBasisPoints(weights);
+  return Object.fromEntries(CRITERIA.map((criterion) => [criterion, basisPoints[criterion] / WEIGHT_SCALE]));
+}
+
 
 
 /**
@@ -231,10 +226,10 @@ function numberRange(candidates, criterion) {
 /**
  * Builds the ranking view model from health-report rows (metrics spec §4; BO-04).
  *
- * The score is 0–100 and explainable: each criterion contributes `100 * weight * scored`, and the rounded
- * contributions add up to the rounded score, so the stack bar in the UI is arithmetic rather than decoration.
- * For CAC the raw `normalize` value is inverted into the scored value (`1 - norm`): cheap channels must earn the
- * points, raw normalization would reward the expensive one.
+ * The score is 0–100 and explainable. Weights are integers in thousandths summing to exactly 1000, so the exact
+ * weighted sum cannot exceed 100; the score is rounded once from that sum, and each contribution is the rounded
+ * display value of its own term. For CAC the raw `normalize` value is inverted into the scored value (`1 - norm`):
+ * cheap channels must earn the points, raw normalization would reward the expensive one.
  *
  * Tie-breaking is deterministic — score descending, then CAC ascending, then code ascending — so equal scores do
  * not reshuffle between requests.
@@ -243,6 +238,7 @@ function numberRange(candidates, criterion) {
  *   and optional criterion weights.
  * @returns {{
  *   weights: Record<string, number>,
+ *   weightsBasisPoints: Record<string, number>,
  *   ranked: Array<{
  *     channelId: string,
  *     code: string,
@@ -259,21 +255,25 @@ function numberRange(candidates, criterion) {
  *     }>,
  *   }>,
  *   excluded: Array<{ channelId?: string, code: string, reason: 'no_data' | 'missing_criterion' | 'blended', reasonLabel: string }>,
- * }} `ranked` is ordered by rank; `excluded` keeps the input order.
+ * }} `weights` are display decimals derived from `weightsBasisPoints`, whose integers sum to exactly 1000.
+ *   `ranked` is ordered by rank; `excluded` keeps the input order.
  * @throws {ValidationError} When the weights are invalid.
  * @throws {TypeError} When a report row breaks the health-report contract.
  */
 export function computeRanking({ channels = [], weights } = {}) {
-  const normalizedWeights = normalizeWeights(weights);
+  const basisPoints = computeWeightBasisPoints(weights);
+  const displayWeights = Object.fromEntries(
+    CRITERIA.map((criterion) => [criterion, basisPoints[criterion] / WEIGHT_SCALE]),
+  );
 
   if (channels.length === 0) {
-    return { weights: normalizedWeights, ranked: [], excluded: [] };
+    return { weights: displayWeights, weightsBasisPoints: basisPoints, ranked: [], excluded: [] };
   }
 
   const { candidates, excluded } = partitionChannels(channels);
 
   if (candidates.length === 0) {
-    return { weights: normalizedWeights, ranked: [], excluded };
+    return { weights: displayWeights, weightsBasisPoints: basisPoints, ranked: [], excluded };
   }
 
   const ranges = {
@@ -307,23 +307,27 @@ export function computeRanking({ channels = [], weights } = {}) {
       newCustomers: values.newCustomers,
     };
 
+    // With basis points summing to 1000 and every scored value in [0, 1], this exact sum is at most 100 by
+    // construction. Only the final display rounding happens afterwards.
+    const exactScore = CRITERIA.reduce(
+      (total, criterion) => total + (basisPoints[criterion] / WEIGHT_SCALE) * 100 * scoredValues[criterion],
+      0,
+    );
+
     const contributions = CRITERIA.map((criterion) => ({
       criterion,
-      weight: normalizedWeights[criterion],
+      weight: displayWeights[criterion],
       // Keep a zero as a real value; only an absent amount is null, and absent amounts were excluded above.
       rawValue: rawValues[criterion],
       normalized: normalized[criterion],
       scored: scoredValues[criterion],
       contribution: roundNumber(
-        100 * normalizedWeights[criterion] * scoredValues[criterion],
+        (basisPoints[criterion] / WEIGHT_SCALE) * 100 * scoredValues[criterion],
         CONTRIBUTION_DECIMALS,
       ),
     }));
 
-    const score = roundNumber(
-      contributions.reduce((total, entry) => total + entry.contribution, 0),
-      CONTRIBUTION_DECIMALS,
-    );
+    const score = roundNumber(Math.min(100, exactScore), CONTRIBUTION_DECIMALS);
 
     return {
       cacCents,
@@ -339,7 +343,8 @@ export function computeRanking({ channels = [], weights } = {}) {
   );
 
   return {
-    weights: normalizedWeights,
+    weights: displayWeights,
+    weightsBasisPoints: basisPoints,
     ranked: scored.map(({ view }, index) => ({ ...view, rank: index + 1 })),
     excluded,
   };
@@ -360,9 +365,10 @@ export function createRankingService({ healthService }) {
      * @returns {Promise<{
      *   period: { from: string, to: string, days: number },
      *   weights: Record<string, number>,
+     *   weightsBasisPoints: Record<string, number>,
      *   ranked: object[],
      *   excluded: object[],
-     * }>}
+     * }>} `weights` are display decimals; `weightsBasisPoints` are the integers that sum to 1000.
      * @throws {ValidationError} When the period or the weights are invalid.
      */
     async getRankingReport({ from = null, to = null, anchor = null, weights } = {}) {
