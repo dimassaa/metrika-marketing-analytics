@@ -1,6 +1,9 @@
 const USER_COLUMNS = 'id, email, password_hash, full_name, role, is_active, last_login_at';
 // The admin list never needs the password hash, so it selects an explicit subset instead of reusing USER_COLUMNS.
 const USER_LIST_COLUMNS = 'id, email, full_name, role, is_active, last_login_at';
+/** Row shape used by the last-admin check: enough to decide the rule, without loading password hashes. */
+const USER_GUARD_COLUMNS = 'id::text AS id, role, is_active';
+const USER_UPDATE_RETURNING = `RETURNING ${USER_LIST_COLUMNS}`;
 
 /**
  * Maps a `users` row to the shape the service layer works with. PostgreSQL returns BIGINT as a string, and that is
@@ -39,74 +42,10 @@ function mapUserListItem(row) {
 }
 
 /**
- * Runs `fn` on one checked-out client so a privilege check and the update that follows it see the same snapshot.
- *
- * The last-admin rule spans rows: two admins demoting each other concurrently could each see the other as active and
- * leave the system with none. Both operations therefore lock the active admins before deciding. The pool is injected
- * with the repository, so tests never touch the production pool through this helper.
- *
- * @template T
- * @param {{ connect?: () => Promise<import('pg').PoolClient> }} db
- * @param {(client: import('pg').PoolClient) => Promise<T>} fn
- * @returns {Promise<T>}
- */
-async function inTransaction(db, fn) {
-  if (typeof db.connect !== 'function') {
-    throw new TypeError('users repository needs a pool-like db with connect() for guarded updates');
-  }
-  const client = await db.connect();
-  try {
-    await client.query('BEGIN');
-    const result = await fn(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
-/** Row shape used by the guarded updates: enough to decide the rule, without loading password hashes into memory. */
-const USER_GUARD_COLUMNS = 'id::text AS id, role, is_active';
-const USER_UPDATE_RETURNING = `RETURNING ${USER_LIST_COLUMNS}`;
-
-/**
- * Locks the target and every active administrator in one statement.
- *
- * Locking in id order (the database does it for `FOR UPDATE`) prevents the deadlock two mutual demotions would
- * otherwise cause: each transaction would hold its own target row and wait for the other one.
- *
- * @param {import('pg').PoolClient} client
- * @param {string} id
- * @returns {Promise<Array<{ id: string, role: string, is_active: boolean }>>}
- */
-async function lockTargetAndActiveAdmins(client, id) {
-  const { rows } = await client.query(
-    `SELECT ${USER_GUARD_COLUMNS}
-       FROM users
-      WHERE id = $1::bigint OR (role = 'admin' AND is_active)
-      ORDER BY id
-      FOR UPDATE`,
-    [id],
-  );
-  return rows;
-}
-
-/**
- * @param {Array<{ id: string, role: string, is_active: boolean }>} locked
- * @param {string} targetId
- * @returns {number} Active administrators other than the target.
- */
-function otherActiveAdmins(locked, targetId) {
-  return locked.filter((row) => row.id !== targetId && row.role === 'admin' && row.is_active).length;
-}
-
-/**
  * Data access for the `users` table. The database handle is injected by `createApp` so the auth tests stay on the
- * test pool while production uses the shared pool.
- * @param {{ query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }>, connect?: () => Promise<import('pg').PoolClient> }} db
+ * test pool while production uses the shared pool. The service may pass a transaction client: a `pg` client exposes
+ * the same `query(text, params)` contract, so the factory works on either.
+ * @param {{ query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> }} db
  */
 export function createUsersRepository(db) {
   return {
@@ -167,57 +106,57 @@ export function createUsersRepository(db) {
     },
 
     /**
-     * Changes the role under the last-admin guard.
-     *
-     * Returns null when the user disappeared or when demoting the target would leave no active administrator. The
-     * service reads the target first, so it can tell a 404 from the guard without a second query.
-     * @param {string} id
-     * @param {string} role One of `USER_ROLES`.
-     * @returns {Promise<ReturnType<typeof mapUserListItem> | null>}
+     * Locks every active administrator in id order. The service calls this before reading the target, so two
+     * privilege changes serialize on the same rows and the last-admin rule cannot be raced.
+     * @returns {Promise<Array<{ id: string, role: string, isActive: boolean }>>}
      */
-    async updateUserRole(id, role) {
-      return inTransaction(db, async (client) => {
-        const locked = await lockTargetAndActiveAdmins(client, id);
-        const target = locked.find((row) => row.id === id);
-        if (!target) return null;
-        if (target.role === role) {
-          // No-op: do not touch `updated_at`, and the service skips session revocation and the audit row.
-          const { rows } = await client.query(`SELECT ${USER_LIST_COLUMNS} FROM users WHERE id = $1::bigint`, [id]);
-          return rows[0] ? mapUserListItem(rows[0]) : null;
-        }
-        if (target.role === 'admin' && target.is_active && role !== 'admin' && otherActiveAdmins(locked, id) === 0) {
-          return null;
-        }
-
-        const { rows } = await client.query(
-          `UPDATE users SET role = $2 WHERE id = $1::bigint ${USER_UPDATE_RETURNING}`,
-          [id, role],
-        );
-        return rows[0] ? mapUserListItem(rows[0]) : null;
-      });
+    async lockActiveAdmins() {
+      const { rows } = await db.query(
+        `SELECT ${USER_GUARD_COLUMNS}
+           FROM users
+          WHERE role = 'admin' AND is_active
+          ORDER BY id
+          FOR UPDATE`,
+      );
+      return rows.map((row) => ({ id: row.id, role: row.role, isActive: row.is_active }));
     },
 
     /**
-     * Sets the active flag under the last-admin guard. Deactivating the only active administrator returns null.
+     * Reads the target inside the caller's transaction and holds a row lock until commit.
+     * @param {string} id
+     * @returns {Promise<ReturnType<typeof mapUser> | null>}
+     */
+    async findByIdForUpdate(id) {
+      const { rows } = await db.query(`SELECT ${USER_COLUMNS} FROM users WHERE id = $1::bigint FOR UPDATE`, [id]);
+      return rows[0] ? mapUser(rows[0]) : null;
+    },
+
+    /**
+     * Updates only the role column. The caller owns the last-admin and self-demotion decisions.
+     * @param {string} id
+     * @param {string} role One of `USER_ROLES`.
+     * @returns {Promise<ReturnType<typeof mapUserListItem> | null>} Null only when the row disappeared.
+     */
+    async updateRole(id, role) {
+      const { rows } = await db.query(
+        `UPDATE users SET role = $2 WHERE id = $1::bigint ${USER_UPDATE_RETURNING}`,
+        [id, role],
+      );
+      return rows[0] ? mapUserListItem(rows[0]) : null;
+    },
+
+    /**
+     * Updates only the active flag. The caller owns the last-admin and self-deactivation decisions.
      * @param {string} id
      * @param {boolean} isActive
-     * @returns {Promise<ReturnType<typeof mapUserListItem> | null>}
+     * @returns {Promise<ReturnType<typeof mapUserListItem> | null>} Null only when the row disappeared.
      */
-    async setUserActive(id, isActive) {
-      return inTransaction(db, async (client) => {
-        const locked = await lockTargetAndActiveAdmins(client, id);
-        const target = locked.find((row) => row.id === id);
-        if (!target) return null;
-        if (!isActive && target.role === 'admin' && target.is_active && otherActiveAdmins(locked, id) === 0) {
-          return null;
-        }
-
-        const { rows } = await client.query(
-          `UPDATE users SET is_active = $2 WHERE id = $1::bigint ${USER_UPDATE_RETURNING}`,
-          [id, isActive],
-        );
-        return rows[0] ? mapUserListItem(rows[0]) : null;
-      });
+    async setActive(id, isActive) {
+      const { rows } = await db.query(
+        `UPDATE users SET is_active = $2 WHERE id = $1::bigint ${USER_UPDATE_RETURNING}`,
+        [id, isActive],
+      );
+      return rows[0] ? mapUserListItem(rows[0]) : null;
     },
 
     /**
@@ -245,6 +184,21 @@ export function createUsersRepository(db) {
       const { rowCount } = await db.query("DELETE FROM sessions WHERE (sess->'user'->>'id')::bigint = $1::bigint", [
         userId,
       ]);
+      return rowCount;
+    },
+
+    /**
+     * Deletes every session of the user except the one that made the current request. Used when a person changes
+     * their own password: other devices must lose access, but the browser they are using stays signed in.
+     * @param {string} userId
+     * @param {string} keepSessionId `req.sessionID` of the current session.
+     * @returns {Promise<number>} Deleted row count.
+     */
+    async deleteUserSessionsExcept(userId, keepSessionId) {
+      const { rowCount } = await db.query(
+        "DELETE FROM sessions WHERE (sess->'user'->>'id')::bigint = $1::bigint AND sid <> $2",
+        [userId, keepSessionId],
+      );
       return rowCount;
     },
   };

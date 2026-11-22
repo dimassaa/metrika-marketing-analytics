@@ -1,4 +1,4 @@
-import { AUDIT_ACTIONS } from '../config/audit-actions.js';
+import { AUDIT_ACTIONS, AUDIT_ENTITIES } from '../config/audit-actions.js';
 
 /** Page size fixed by the brief: the journal is scanned fifty rows at a time. */
 export const AUDIT_PAGE_SIZE = 50;
@@ -34,6 +34,7 @@ const ENTITY_LABELS = Object.freeze({
   campaign: 'Кампания',
   goal: 'Цель',
   import: 'Импорт',
+  media: 'Файл',
 });
 
 /**
@@ -103,7 +104,7 @@ function summarisePayload(payload) {
  * Adds Russian labels and a formatted timestamp to one repository row.
  * @param {{
  *   id: string, userId: string | null, userEmail: string | null, action: string, entity: string,
- *   entityId: string | null, payload: Record<string, unknown>, ip: string | null, createdAt: Date,
+ *   entityId: string | null, payload: Record<string, unknown>, createdAt: Date,
  * }} entry
  * @returns {Record<string, unknown>}
  */
@@ -119,29 +120,27 @@ function toView(entry) {
 }
 
 /**
- * Options for the audit filter selects. The action list comes from `AUDIT_ACTIONS`, so a new writer cannot appear in
- * the journal without becoming filterable here.
- * @returns {{
- *   actions: Array<{ value: string, label: string }>,
- *   entities: Array<{ value: string, label: string }>,
- * }}
- */
-export function auditFilterOptions() {
-  return {
-    actions: Object.values(AUDIT_ACTIONS).map((value) => ({ value, label: ACTION_LABELS[value] ?? value })),
-    entities: Object.keys(ENTITY_LABELS)
-      .filter((value) => ['user', 'channel', 'campaign'].includes(value))
-      .map((value) => ({ value, label: ENTITY_LABELS[value] })),
-  };
-}
-
-/**
  * Writes and reads the audit journal. The service exists so controllers describe an event instead of composing SQL
  * columns, and so the "no secrets in payload" rule has one place to live.
  * @param {{ auditRepository: ReturnType<typeof import('../repositories/audit.repo.js').createAuditRepository> }} deps
  */
 export function createAuditService({ auditRepository }) {
   return {
+    /**
+     * Options for the journal filter selects. Both lists come from the config vocabulary (`AUDIT_ACTIONS`,
+     * `AUDIT_ENTITIES`), so a new writer appears in the filter without a second hard-coded array in the controller.
+     * @returns {{
+     *   actions: Array<{ value: string, label: string }>,
+     *   entities: Array<{ value: string, label: string }>,
+     * }}
+     */
+    getFilterOptions() {
+      return {
+        actions: Object.values(AUDIT_ACTIONS).map((value) => ({ value, label: ACTION_LABELS[value] ?? value })),
+        entities: AUDIT_ENTITIES.map((value) => ({ value, label: ENTITY_LABELS[value] ?? value })),
+      };
+    },
+
     /**
      * @param {object} entry
      * @param {string | null} [entry.userId]

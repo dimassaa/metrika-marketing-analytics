@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
+import { hash } from '@node-rs/argon2';
 import { seed } from '../../db/seed/seed.js';
 import { closeTestPool, getTestPool, resetTestDatabase } from '../helpers/db.js';
 import { loginAs, makeApp } from '../helpers/app.js';
@@ -12,16 +13,31 @@ const VIEWER = 'viewer@metrika.by';
 const JUNIOR = 'junior@metrika.by';
 const RESET = 'reset@metrika.by';
 const JUNIOR_PASSWORD = 'TempPass2026!';
+const SEEDED_EMAILS = [ADMIN, ANALYST, VIEWER, JUNIOR];
+const SEEDED_ROLES = new Map([
+  [ADMIN, 'admin'],
+  [ANALYST, 'analyst'],
+  [VIEWER, 'viewer'],
+]);
 
 /** @type {import('pg').Pool} */
 let pool;
 /** @type {import('express').Express} */
 let app;
+/** @type {string} */
+let juniorPasswordHash;
 
 beforeAll(async () => {
   await resetTestDatabase();
   await seed();
   pool = getTestPool();
+  // The shared fixture exists before any test, so a filtered `vitest -t` run can exercise any case in isolation.
+  juniorPasswordHash = await hash(JUNIOR_PASSWORD);
+  await pool.query(
+    `INSERT INTO users (email, password_hash, full_name, role)
+     VALUES ($1, $2, 'Младший аналитик', 'analyst')`,
+    [JUNIOR, juniorPasswordHash],
+  );
 });
 
 afterAll(async () => {
@@ -29,13 +45,26 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  // Sessions are per-test fixtures; the user rows intentionally survive because the cases build on a created account.
+  // Every case starts from the seeded roster, an active analyst fixture and an empty journal. Accounts created by a
+  // previous case are removed so the next assertion about the roster is not order-dependent.
   await pool.query('DELETE FROM sessions');
+  await pool.query('DELETE FROM audit_log');
+  await pool.query('DELETE FROM users WHERE lower(email) <> ALL($1::text[])', [SEEDED_EMAILS]);
+  for (const [email, role] of SEEDED_ROLES) {
+    await pool.query("UPDATE users SET role = $2, is_active = true WHERE lower(email) = lower($1)", [email, role]);
+  }
+  await pool.query(
+    `UPDATE users
+        SET role = 'analyst', is_active = true, password_hash = $2, last_login_at = NULL
+      WHERE lower(email) = lower($1)`,
+    [JUNIOR, juniorPasswordHash],
+  );
   app = makeApp();
 });
 
 /**
  * @param {string} email
+ * @param {string} [password]
  * @returns {Promise<import('supertest').SuperAgentTest>}
  */
 async function signedIn(email, password) {
@@ -79,7 +108,7 @@ async function auditActions(entityId) {
 }
 
 /**
- * Counts live server-side sessions for a user id as strings, so the assertion does not depend on how pg types BIGINT.
+ * Counts live server-side sessions for a user id, so the assertion does not depend on how pg types BIGINT.
  * @param {string} userId
  * @returns {Promise<number>}
  */
@@ -123,12 +152,13 @@ function tableRowCount(html) {
 
 describe('user administration', () => {
   it('creates a user with a hashed temporary password, records the audit entry and lets them sign in', async () => {
+    const createdEmail = 'created@metrika.by';
     const admin = await signedIn(ADMIN);
     const csrf = await getAppCsrf(admin);
 
     const res = await admin.post('/app/admin/users').type('form').send({
-      email: JUNIOR,
-      fullName: 'Младший аналитик',
+      email: createdEmail,
+      fullName: 'Новый аналитик',
       role: 'analyst',
       password: JUNIOR_PASSWORD,
       _csrf: csrf,
@@ -137,21 +167,21 @@ describe('user administration', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/app/admin/users');
 
-    const created = await userRow(JUNIOR);
+    const created = await userRow(createdEmail);
     expect(created).toBeDefined();
     expect(created.role).toBe('analyst');
     expect(created.is_active).toBe(true);
     expect(created.password_hash).toMatch(/^\$argon2id\$/);
     expect(created.password_hash).not.toContain(JUNIOR_PASSWORD);
 
-    const junior = request.agent(app);
-    const login = await loginAs(junior, JUNIOR, JUNIOR_PASSWORD);
+    const newAgent = request.agent(app);
+    const login = await loginAs(newAgent, createdEmail, JUNIOR_PASSWORD);
     expect(login.status).toBe(302);
 
     const list = await admin.get('/app/admin/users');
     expect(list.status).toBe(200);
     expect(list.text).not.toContain('следующем этапе');
-    expect(tableBody(list.text)).toContain(JUNIOR);
+    expect(tableBody(list.text)).toContain(createdEmail);
     expect(await auditActions(created.id)).toContain(AUDIT_ACTIONS.USER_CREATE);
   });
 
@@ -216,6 +246,53 @@ describe('user administration', () => {
     expect(noCsrf.headers['content-type']).toContain('text/plain');
     expect(noCsrf.text).toBe('CSRF token mismatch');
     expect(await countByEmail('no-csrf@metrika.by')).toBe(0);
+  });
+
+  it('forbids every user mutation for viewers and analysts with the styled 403 page', async () => {
+    const juniorId = (await userRow(JUNIOR)).id;
+    for (const email of [VIEWER, ANALYST]) {
+      const agent = await signedIn(email);
+      const csrf = await getAppCsrf(agent);
+      const attempts = [
+        [`/app/admin/users/${juniorId}/role`, { role: 'viewer' }],
+        [`/app/admin/users/${juniorId}/toggle-active`, {}],
+        [`/app/admin/users/${juniorId}/reset-password`, {}],
+      ];
+
+      for (const [path, body] of attempts) {
+        const res = await agent
+          .post(path)
+          .type('form')
+          .send({ ...body, _csrf: csrf });
+
+        expect(res.status).toBe(403);
+        expect(res.headers['content-type']).toContain('text/html');
+        expect(res.text).toContain('Недостаточно прав');
+      }
+    }
+
+    const junior = await userRow(JUNIOR);
+    expect(junior.role).toBe('analyst');
+    expect(junior.is_active).toBe(true);
+  });
+
+  it('answers oversized and non-numeric user ids with the designed 404 page', async () => {
+    const admin = await signedIn(ADMIN);
+    const csrf = await getAppCsrf(admin);
+    const suffixes = ['role', 'toggle-active', 'reset-password'];
+
+    for (const id of ['abc', '0', '9223372036854775808']) {
+      for (const suffix of suffixes) {
+        const res = await admin
+          .post(`/app/admin/users/${id}/${suffix}`)
+          .type('form')
+          .send({ role: 'viewer', _csrf: csrf });
+
+        expect(res.status).toBe(404);
+        expect(res.headers['content-type']).toContain('text/html');
+        expect(res.text).toContain('Страница не найдена');
+      }
+    }
   });
 
   it('revokes sessions on a role change and reads the new role from the database after re-login', async () => {
@@ -295,7 +372,7 @@ describe('user administration', () => {
     expect(promote.status).toBe(302);
 
     // Simulate a stale privileged session: the actor is no longer an active admin in the database, so the only active
-    // admin is the target. The guard must refuse to demote the last one even though the request itself is authorised.
+    // admin is the target. The service-level guard must refuse to demote the last one.
     await pool.query('UPDATE users SET is_active = false WHERE id = $1::bigint', [adminId]);
     try {
       const res = await admin
@@ -382,7 +459,7 @@ describe('user administration', () => {
     expect(await auditActions(juniorId)).toContain(AUDIT_ACTIONS.USER_DEACTIVATE);
   });
 
-  it('resets a password once, revokes sessions and never writes the secret to the audit payload', async () => {
+  it('resets a password through POST/Redirect/GET, shows it once and never writes the secret to the audit payload', async () => {
     const admin = await signedIn(ADMIN);
     const csrf = await getAppCsrf(admin);
     const oldPassword = 'OldPass2026!';
@@ -402,12 +479,22 @@ describe('user administration', () => {
 
     const reset = await admin.post(`/app/admin/users/${target.id}/reset-password`).type('form').send({ _csrf: csrf });
 
-    expect(reset.status).toBe(200);
-    expect(reset.headers['content-type']).toContain('text/html');
-    const newPassword = temporaryPassword(reset.text);
+    expect(reset.status).toBe(302);
+    expect(reset.headers.location).toBe('/app/admin/users');
+    expect(await sessionCount(target.id)).toBe(0);
+
+    // The next GET consumes the flash: the password and the target e-mail are visible exactly once.
+    const confirmation = await admin.get('/app/admin/users');
+    expect(confirmation.status).toBe(200);
+    const newPassword = temporaryPassword(confirmation.text);
     expect(newPassword.length).toBeGreaterThanOrEqual(10);
     expect(newPassword).not.toBe(oldPassword);
-    expect(await sessionCount(target.id)).toBe(0);
+    expect(confirmation.text).toContain(RESET);
+
+    const again = await admin.get('/app/admin/users');
+    expect(again.status).toBe(200);
+    expect(temporaryPassword(again.text)).toBe('');
+    expect(again.text).not.toContain(newPassword);
 
     const updated = await userRow(RESET);
     expect(updated.password_hash).toMatch(/^\$argon2id\$/);
@@ -431,6 +518,22 @@ describe('user administration', () => {
 describe('audit journal and profile', () => {
   it('lists user actions for an admin, filters them and keeps the section closed to other roles', async () => {
     const admin = await signedIn(ADMIN);
+    const adminId = (await userRow(ADMIN)).id;
+    const juniorId = (await userRow(JUNIOR)).id;
+
+    // The journal is populated here, so the case does not depend on the administration cases above.
+    for (const action of [
+      AUDIT_ACTIONS.USER_CREATE,
+      AUDIT_ACTIONS.USER_ROLE_CHANGE,
+      AUDIT_ACTIONS.USER_DEACTIVATE,
+      AUDIT_ACTIONS.USER_PASSWORD_RESET,
+    ]) {
+      await pool.query(
+        `INSERT INTO audit_log (user_id, action, entity, entity_id, payload)
+         VALUES ($1::bigint, $2, 'user', $3, '{}'::jsonb)`,
+        [adminId, action, juniorId],
+      );
+    }
 
     const all = await admin.get('/app/audit?entity=user');
     expect(all.status).toBe(200);
@@ -452,7 +555,6 @@ describe('audit journal and profile', () => {
     expect(filtered).toContain(AUDIT_ACTIONS.USER_PASSWORD_RESET);
     expect(filtered).not.toContain(AUDIT_ACTIONS.USER_ROLE_CHANGE);
 
-    const adminId = (await userRow(ADMIN)).id;
     const byActor = await admin.get(`/app/audit?userId=${adminId}`);
     expect(byActor.status).toBe(200);
     expect(tableBody(byActor.text)).toContain(ADMIN);
@@ -508,8 +610,10 @@ describe('audit journal and profile', () => {
 
   it('rejects a wrong current password and changes the own password after verifying it', async () => {
     const junior = await signedIn(JUNIOR, JUNIOR_PASSWORD);
+    const otherSession = await signedIn(JUNIOR, JUNIOR_PASSWORD);
     const csrf = await getAppCsrf(junior, '/app/profile');
     const juniorId = (await userRow(JUNIOR)).id;
+    expect(await sessionCount(juniorId)).toBe(2);
 
     const wrong = await junior.post('/app/profile/password').type('form').send({
       currentPassword: 'definitely-wrong',
@@ -530,6 +634,14 @@ describe('audit journal and profile', () => {
 
     expect(changed.status).toBe(302);
     expect(changed.headers.location).toBe('/app/profile');
+
+    // The browser that changed the password stays signed in; every other session is revoked.
+    expect(await sessionCount(juniorId)).toBe(1);
+    expect((await junior.get('/app/dashboard')).status).toBe(200);
+    const otherStale = await otherSession.get('/app/dashboard');
+    expect(otherStale.status).toBe(302);
+    expect(otherStale.headers.location).toMatch(/^\/login/);
+
     expect((await loginAs(request.agent(app), JUNIOR, JUNIOR_PASSWORD)).status).toBe(401);
     expect((await loginAs(request.agent(app), JUNIOR, 'JuniorNewPass2026!')).status).toBe(302);
     expect(await auditActions(juniorId)).toContain(AUDIT_ACTIONS.USER_PASSWORD_CHANGE);

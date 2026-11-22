@@ -15,9 +15,10 @@ Non-critical findings recorded during implementation. Priority is decided by the
 
 ## Database and migrations
 
-- **A failed `ROLLBACK` masks the original error** in both `withTransaction` (`src/lib/db.js`) and the migration runner
-  (`db/migrate.js`). When the rollback itself throws, the caller sees the rollback failure instead of the statement
-  that actually broke the transaction. Catch the rollback error, attach it as `cause`, and rethrow the original.
+- **A failed `ROLLBACK` masks the original error** in the migration runner (`db/migrate.js`). When the rollback
+  itself throws, the caller sees the rollback failure instead of the statement that actually broke the transaction.
+  `withTransaction` now attaches the rollback error as `cause` and rethrows the original; apply the same pattern to
+  the migration runner.
 - **The reset guard's `name !== 'metrika_test'` clause is redundant**: the following `endsWith('_test')` already
   covers it. Two spellings of one rule invite drift; keep the suffix check only.
 - **`databaseName()` parses the DSN as a URL only.** Socket paths, query parameters and percent-encoded names are not
@@ -271,21 +272,22 @@ Non-critical findings recorded during implementation. Priority is decided by the
 - **The profile password change redirects without a success notice.** The person sees the same page and has to infer
   that the hash changed. A session-backed flash (without persisting the password) would confirm it; the M2 campaigns
   section already asks for the same mechanism.
-- **A password reset renders the confirmation as the POST response.** Refreshing the page regenerates a new password
-  and re-renders it. That is safer than putting the secret in a redirect or the session store, but the browser will
-  warn about resubmitting the form; a one-shot token in the session would avoid the warning at the cost of storing the
-  plain secret temporarily.
-- **`toggleUserActive` reads the row in the controller and again in the service.** A concurrent change between the two
-  reads makes the toggle act on a stale state. The repository's guarded update stays correct; deriving the desired
-  state inside the service would remove one round trip and the window.
-- **`users.repo.js` repeats the `withTransaction` pattern instead of reusing `src/lib/db.js`.** The latter is bound to
-  the global pool, which tests must not touch. A shared `withTransaction(db, fn)` helper would remove the duplication
-  and the rollback-masks-original-error issue already recorded for `db.js`.
+- **A password reset uses a one-GET session flash.** The POST redirects to `/app/admin/users`, the next GET shows the
+  temporary password and deletes `req.session.flash`; a second GET does not. The plaintext therefore sits in the
+  `sessions` row for the fraction of a second between the redirect and the confirmation render. That is the accepted
+  trade-off for POST/Redirect/GET without putting the secret in the URL; do not extend the flash TTL or persist it.
+- **`toggleUserActive` reads the row in the controller and again in the transaction.** A concurrent change between the
+  two reads makes the toggle act on a stale desired state; the transaction still refuses the last-admin and self cases.
+  Deriving the desired state inside the service would remove one round trip and the window.
+- **Own password change now revokes every other session and keeps the current one.** The controller passes
+  `req.sessionID`, so the browser that submitted the form stays signed in while other devices drop to `/login`. If a
+  future caller cannot supply a session id, the service falls back to deleting all sessions and the redirect ends at
+  the login form; record that behaviour where such a caller is added.
 - **The users table has no pagination and the audit page is the only M2 screen using `.pager`.** The demo has a
   handful of accounts; add pagination or a search field before the roster grows.
-- **The administrator can reset their own password from `/app/admin/users`.** The revocation deletes the acting
-  session too, so the next click sends them to `/login`; it is secure but surprising. Hide the self-reset button or
-  route it through the profile form, which verifies the current password.
+- **The administrator's own reset button is disabled, but the server still accepts a self-reset POST.** A crafted
+  request revokes the acting session because the reset path has no self guard; it is secure but logs the person out.
+  Route self-service resets through the profile form, which verifies the current password.
 - **Creating a user with an administrator-typed password means the plain secret travels in a form body.** TLS covers
   it in production; the alternative (generating every initial password server-side and showing it once) reuses the
   reset flow and avoids the administrator inventing weak passwords.

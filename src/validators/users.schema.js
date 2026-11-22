@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AUDIT_ACTIONS } from '../config/audit-actions.js';
+import { AUDIT_ACTIONS, AUDIT_ENTITIES } from '../config/audit-actions.js';
 
 /** Role codes mirror the CHECK constraint in `001_init.sql`. */
 export const USER_ROLES = Object.freeze(['admin', 'analyst', 'viewer']);
@@ -9,7 +9,6 @@ export const PASSWORD_MIN_LENGTH = 10;
 const MAX_BIGINT_ID = 9223372036854775807n;
 
 const AUDIT_ACTIONS_LIST = Object.freeze(Object.values(AUDIT_ACTIONS));
-const AUDIT_ENTITIES = Object.freeze(['user', 'channel', 'campaign']);
 
 const emailField = z
   .string({ error: 'Укажите email' })

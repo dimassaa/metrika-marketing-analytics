@@ -10,7 +10,6 @@ import {
   userRoleSchema,
 } from '../validators/users.schema.js';
 import { generateTemporaryPassword } from '../services/users.service.js';
-import { auditFilterOptions } from '../services/audit.service.js';
 
 const NOT_FOUND_SEO = buildSeo({
   title: 'Пользователь не найден — Метрика',
@@ -18,6 +17,21 @@ const NOT_FOUND_SEO = buildSeo({
   path: '/app/admin/users',
   noindex: true,
 });
+
+/** Session marker for the one-time password shown after a reset. It is consumed by the next GET and deleted. */
+const PASSWORD_RESET_FLASH = 'password-reset';
+
+/**
+ * Reads and removes the reset flash, so a reload never shows the same temporary password twice.
+ * @param {import('express').Request} req
+ * @returns {{ email: string, temporaryPassword: string } | null}
+ */
+function takePasswordResetFlash(req) {
+  const flash = req.session?.flash;
+  if (!flash || flash.type !== PASSWORD_RESET_FLASH) return null;
+  delete req.session.flash;
+  return { email: flash.targetEmail, temporaryPassword: flash.temporaryPassword };
+}
 
 /** Empty create form, so the template always reads string values instead of undefined. */
 const EMPTY_CREATE_FORM = Object.freeze({ email: '', fullName: '', role: 'viewer', password: '' });
@@ -97,7 +111,7 @@ export function createAdminController({ usersService, auditService, referenceRep
      * @type {import('express').RequestHandler}
      */
     async users(req, res) {
-      await renderUsers(req, res);
+      await renderUsers(req, res, { resetNotice: takePasswordResetFlash(req) });
     },
 
     /**
@@ -190,8 +204,9 @@ export function createAdminController({ usersService, auditService, referenceRep
     },
 
     /**
-     * Generates a one-time password and renders it once. A redirect would force the plain secret through the session
-     * table or the URL, so the response is the confirmation page itself.
+     * Generates a one-time password, stores it in the session for exactly one redirect and hands it to the list
+     * page. A 200 response here would re-run the POST on refresh; the flash keeps GET semantics and never reaches
+     * the audit log.
      * @type {import('express').RequestHandler}
      */
     async resetPassword(req, res) {
@@ -213,9 +228,12 @@ export function createAdminController({ usersService, auditService, referenceRep
         throw error;
       }
 
-      await renderUsers(req, res, {
-        resetNotice: { email: result.user.email, temporaryPassword: result.temporaryPassword },
-      });
+      req.session.flash = {
+        type: PASSWORD_RESET_FLASH,
+        targetEmail: result.user.email,
+        temporaryPassword: result.temporaryPassword,
+      };
+      res.redirect('/app/admin/users');
     },
 
     /**
@@ -228,7 +246,7 @@ export function createAdminController({ usersService, auditService, referenceRep
         auditService.listAuditEntries(filters),
         usersService.listUsersForView(),
       ]);
-      const options = auditFilterOptions();
+      const options = auditService.getFilterOptions();
 
       res.render('pages/audit', {
         ...buildShellLocals(req, { title: 'Аудит', activeNav: 'audit', dataAnchor }),
@@ -257,7 +275,10 @@ export function createAdminController({ usersService, auditService, referenceRep
       }
 
       try {
-        await usersService.changeOwnPassword(req.session.user.id, parsed.data, actorOf(req));
+        await usersService.changeOwnPassword(req.session.user.id, parsed.data, {
+          ...actorOf(req),
+          sessionId: req.sessionID,
+        });
       } catch (error) {
         if (error instanceof NotFoundError) {
           renderNotFound(res);

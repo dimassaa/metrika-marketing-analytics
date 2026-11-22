@@ -33,7 +33,6 @@ function filterParams({ entity = null, userId = null, action = null } = {}) {
  *   entity: string,
  *   entityId: string | null,
  *   payload: Record<string, unknown>,
- *   ip: string | null,
  *   createdAt: Date,
  * }}
  */
@@ -46,7 +45,6 @@ function mapAuditRow(row) {
     entity: row.entity,
     entityId: row.entity_id,
     payload: row.payload ?? {},
-    ip: row.ip,
     createdAt: row.created_at,
   };
 }
@@ -94,7 +92,6 @@ export function createAuditRepository(db) {
                 a.entity,
                 a.entity_id,
                 a.payload,
-                host(a.ip) AS ip,
                 a.created_at
            ${AUDIT_FROM}
            ${AUDIT_FILTERS}

@@ -1,8 +1,10 @@
 import { randomInt } from 'node:crypto';
 import { hash, verify } from '@node-rs/argon2';
 import { AUDIT_ACTIONS } from '../config/audit-actions.js';
+import { withTransaction } from '../lib/db.js';
 import { formatDateRu } from '../lib/dates.js';
 import { NotFoundError, ValidationError } from '../lib/errors.js';
+import { createUsersRepository } from '../repositories/users.repo.js';
 
 const DUPLICATE_EMAIL = 'Пользователь с таким email уже существует';
 const SELF_GUARD = 'Нельзя заблокировать собственную учётную запись или снять с себя роль администратора';
@@ -58,11 +60,12 @@ function toView(user) {
  * the old cookie anonymous; the next login reads the role from the database again.
  *
  * @param {{
+ *   db: { connect: () => Promise<import('pg').PoolClient> },
  *   usersRepository: ReturnType<typeof import('../repositories/users.repo.js').createUsersRepository>,
  *   auditService: ReturnType<typeof import('./audit.service.js').createAuditService>,
  * }} deps
  */
-export function createUsersService({ usersRepository, auditService }) {
+export function createUsersService({ db, usersRepository, auditService }) {
   /**
    * @param {{ id?: string, ip?: string } | null | undefined} actor
    * @param {string} action One of `AUDIT_ACTIONS`.
@@ -157,63 +160,84 @@ export function createUsersService({ usersRepository, auditService }) {
      * @throws {ValidationError} When the actor demotes themselves or removes the last active administrator.
      */
     async changeUserRole(targetId, role, actor) {
-      const target = await usersRepository.findById(targetId);
-      if (!target) throw new NotFoundError('Пользователь не найден');
+      const outcome = await withTransaction(db, async (client) => {
+        const repository = createUsersRepository(client);
+        // Lock the admin set first, in id order, then the target: two concurrent changes wait on the same rows
+        // instead of each holding one target and waiting for the other.
+        const activeAdmins = await repository.lockActiveAdmins();
+        const target = await repository.findByIdForUpdate(targetId);
+        if (!target) throw new NotFoundError('Пользователь не найден');
 
-      if (target.id === actor?.id && target.role === 'admin' && role !== 'admin') {
-        throw new ValidationError(SELF_GUARD);
-      }
-      // An idempotent re-submit must not log the person out by revoking sessions for a role they already have.
-      if (target.role === role) return toView(target);
+        if (target.id === actor?.id && target.role === 'admin' && role !== 'admin') {
+          throw new ValidationError(SELF_GUARD);
+        }
+        // An idempotent re-submit must not log the person out by revoking sessions for a role they already have.
+        if (target.role === role) return { target, updated: toView(target), changed: false };
 
-      const updated = await usersRepository.updateUserRole(targetId, role);
-      if (!updated) {
-        if (target.role === 'admin' && target.isActive && role !== 'admin') {
+        const otherAdmins = activeAdmins.filter((admin) => admin.id !== targetId).length;
+        if (target.role === 'admin' && target.isActive && role !== 'admin' && otherAdmins === 0) {
           throw new ValidationError(LAST_ADMIN_GUARD);
         }
-        throw new NotFoundError('Пользователь не найден');
-      }
 
-      // The role lives in `sess->'user'->>'role'`; leaving the row alive would hide the demotion until the TTL.
-      await usersRepository.deleteUserSessions(targetId);
-      await recordAudit(actor, AUDIT_ACTIONS.USER_ROLE_CHANGE, updated, {
-        previousRole: target.role,
-        role,
+        const updated = await repository.updateRole(targetId, role);
+        if (!updated) throw new NotFoundError('Пользователь не найден');
+        // The role lives in `sess->'user'->>'role'`; leaving the row alive would hide the demotion until the TTL.
+        await repository.deleteUserSessions(targetId);
+        return { target, updated, changed: true };
       });
-      return toView(updated);
+
+      if (outcome.changed) {
+        await recordAudit(actor, AUDIT_ACTIONS.USER_ROLE_CHANGE, outcome.updated, {
+          previousRole: outcome.target.role,
+          role,
+        });
+      }
+      return toView(outcome.updated);
     },
 
     /**
      * @param {string} targetId
-     * @param {boolean} isActive Desired state, derived by the service from the current row.
+     * @param {boolean} isActive Desired state, derived by the controller from the current row.
      * @param {{ id?: string, ip?: string } | null} actor
      * @returns {Promise<object>} Updated account view model.
      * @throws {NotFoundError} When the account does not exist.
      * @throws {ValidationError} When the actor blocks themselves or blocks the last active administrator.
      */
     async toggleUserActive(targetId, isActive, actor) {
-      const target = await usersRepository.findById(targetId);
-      if (!target) throw new NotFoundError('Пользователь не найден');
+      const outcome = await withTransaction(db, async (client) => {
+        const repository = createUsersRepository(client);
+        const activeAdmins = await repository.lockActiveAdmins();
+        const target = await repository.findByIdForUpdate(targetId);
+        if (!target) throw new NotFoundError('Пользователь не найден');
 
-      if (target.id === actor?.id && !isActive) throw new ValidationError(SELF_GUARD);
-      if (target.isActive === isActive) return toView(target);
+        if (target.id === actor?.id && !isActive) throw new ValidationError(SELF_GUARD);
+        if (target.isActive === isActive) return { target, updated: toView(target), changed: false };
 
-      const updated = await usersRepository.setUserActive(targetId, isActive);
-      if (!updated) {
-        if (!isActive && target.role === 'admin' && target.isActive) throw new ValidationError(LAST_ADMIN_GUARD);
-        throw new NotFoundError('Пользователь не найден');
-      }
+        const otherAdmins = activeAdmins.filter((admin) => admin.id !== targetId).length;
+        if (!isActive && target.role === 'admin' && target.isActive && otherAdmins === 0) {
+          throw new ValidationError(LAST_ADMIN_GUARD);
+        }
 
-      if (!isActive) await usersRepository.deleteUserSessions(targetId);
-      await recordAudit(actor, isActive ? AUDIT_ACTIONS.USER_ACTIVATE : AUDIT_ACTIONS.USER_DEACTIVATE, updated, {
-        role: updated.role,
+        const updated = await repository.setActive(targetId, isActive);
+        if (!updated) throw new NotFoundError('Пользователь не найден');
+        if (!isActive) await repository.deleteUserSessions(targetId);
+        return { target, updated, changed: true };
       });
-      return toView(updated);
+
+      if (outcome.changed) {
+        await recordAudit(
+          actor,
+          isActive ? AUDIT_ACTIONS.USER_ACTIVATE : AUDIT_ACTIONS.USER_DEACTIVATE,
+          outcome.updated,
+          { role: outcome.updated.role },
+        );
+      }
+      return toView(outcome.updated);
     },
 
     /**
      * Sets a one-time password and revokes every session of the target, so a person who forgot the password cannot
-     * keep using an old tab. The caller renders `newPassword` once; it is never stored in plain form.
+     * keep using an old tab. The caller stores `temporaryPassword` in a one-GET flash; it is never audited.
      * @param {string} targetId
      * @param {string} newPassword Generated by `generateTemporaryPassword`.
      * @param {{ id?: string, ip?: string } | null} actor
@@ -221,41 +245,57 @@ export function createUsersService({ usersRepository, auditService }) {
      * @throws {NotFoundError} When the account does not exist.
      */
     async resetUserPassword(targetId, newPassword, actor) {
-      const target = await usersRepository.findById(targetId);
-      if (!target) throw new NotFoundError('Пользователь не найден');
+      const outcome = await withTransaction(db, async (client) => {
+        const repository = createUsersRepository(client);
+        const target = await repository.findByIdForUpdate(targetId);
+        if (!target) throw new NotFoundError('Пользователь не найден');
 
-      const passwordHash = await hash(newPassword);
-      const updated = await usersRepository.updateUserPasswordHash(targetId, passwordHash);
-      if (!updated) throw new NotFoundError('Пользователь не найден');
+        const passwordHash = await hash(newPassword);
+        const updated = await repository.updateUserPasswordHash(targetId, passwordHash);
+        if (!updated) throw new NotFoundError('Пользователь не найден');
 
-      await usersRepository.deleteUserSessions(targetId);
-      await recordAudit(actor, AUDIT_ACTIONS.USER_PASSWORD_RESET, target);
-      return { user: toView(target), temporaryPassword: newPassword };
+        await repository.deleteUserSessions(targetId);
+        return target;
+      });
+
+      await recordAudit(actor, AUDIT_ACTIONS.USER_PASSWORD_RESET, outcome);
+      return { user: toView(outcome), temporaryPassword: newPassword };
     },
 
     /**
-     * Changes the caller's own password after verifying the current one. No session is revoked: the brief limits
-     * mandatory revocation to administrative actions, and killing the live session mid-request would make the
-     * person log in again immediately.
+     * Changes the caller's own password after verifying the current one and revokes every *other* session. Keeping
+     * the current session avoids logging the person out of the browser they are using; if the caller cannot name
+     * its session, every session is revoked and the controller's redirect ends at `/login`.
      * @param {string} userId
      * @param {{ currentPassword: string, newPassword: string }} input
-     * @param {{ id?: string, ip?: string } | null} actor
-     * @returns {Promise<void>}
+     * @param {{ id?: string, ip?: string, sessionId?: string } | null} actor
+     * @returns {Promise<{ currentSessionKept: boolean }>}
      * @throws {NotFoundError} When the account vanished.
      * @throws {ValidationError} When the current password does not match.
      */
     async changeOwnPassword(userId, { currentPassword, newPassword }, actor) {
-      const user = await usersRepository.findById(userId);
-      if (!user) throw new NotFoundError('Пользователь не найден');
+      const outcome = await withTransaction(db, async (client) => {
+        const repository = createUsersRepository(client);
+        const user = await repository.findByIdForUpdate(userId);
+        if (!user) throw new NotFoundError('Пользователь не найден');
 
-      const matches = await verify(user.passwordHash, currentPassword);
-      if (!matches) throw new ValidationError(WRONG_CURRENT_PASSWORD);
+        const matches = await verify(user.passwordHash, currentPassword);
+        if (!matches) throw new ValidationError(WRONG_CURRENT_PASSWORD);
 
-      const passwordHash = await hash(newPassword);
-      const updated = await usersRepository.updateUserPasswordHash(userId, passwordHash);
-      if (!updated) throw new NotFoundError('Пользователь не найден');
+        const passwordHash = await hash(newPassword);
+        const updated = await repository.updateUserPasswordHash(userId, passwordHash);
+        if (!updated) throw new NotFoundError('Пользователь не найден');
 
-      await recordAudit(actor, AUDIT_ACTIONS.USER_PASSWORD_CHANGE, user);
+        if (typeof actor?.sessionId === 'string' && actor.sessionId.length > 0) {
+          await repository.deleteUserSessionsExcept(userId, actor.sessionId);
+          return { user, currentSessionKept: true };
+        }
+        await repository.deleteUserSessions(userId);
+        return { user, currentSessionKept: false };
+      });
+
+      await recordAudit(actor, AUDIT_ACTIONS.USER_PASSWORD_CHANGE, outcome.user);
+      return { currentSessionKept: outcome.currentSessionKept };
     },
   };
 }

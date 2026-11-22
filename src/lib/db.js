@@ -23,21 +23,35 @@ export function query(text, params) {
 }
 
 /**
- * Runs `fn` inside a single transaction, passing it the checked-out client so every statement shares one
- * connection. Rolls back when `fn` throws and always returns the client to the pool.
+ * Runs `fn` inside a single transaction on the given pool, passing it the checked-out client so every statement
+ * shares one connection. The database is injected rather than the module-level pool: integration tests pass their
+ * own pool, and production passes the shared one.
+ *
+ * Rolls back when `fn` throws. A rollback failure is attached as `cause` instead of replacing the original error,
+ * because the statement that broke the transaction is the useful diagnostic.
+ *
  * @template T
+ * @param {{ connect: () => Promise<import('pg').PoolClient> }} db
  * @param {(client: import('pg').PoolClient) => Promise<T>} fn
  * @returns {Promise<T>}
  */
-export async function withTransaction(fn) {
-  const client = await pool.connect();
+export async function withTransaction(db, fn) {
+  if (!db || typeof db.connect !== 'function') {
+    throw new TypeError('withTransaction requires a pool-like db with a connect() method');
+  }
+  const client = await db.connect();
   try {
     await client.query('BEGIN');
     const result = await fn(client);
     await client.query('COMMIT');
     return result;
   } catch (error) {
-    await client.query('ROLLBACK');
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackError) {
+      // Keep the original failure in front; the rollback failure is context, not the story.
+      error.cause ??= rollbackError;
+    }
     throw error;
   } finally {
     client.release();

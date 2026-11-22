@@ -157,7 +157,9 @@
                 </form>
                 <form method="post" action="/app/admin/users/<%= user.id %>/reset-password">
                   <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                  <button class="btn btn--ghost btn--sm" type="submit">Сбросить пароль</button>
+                  <button class="btn btn--ghost btn--sm" type="submit" <%= isSelf ? 'disabled' : '' %>>
+                    Сбросить пароль
+                  </button>
                 </form>
               </div>
             </td>
