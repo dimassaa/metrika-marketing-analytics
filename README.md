@@ -23,8 +23,8 @@
 - **M2:** импорт CSV четырёх типов (`daily_stats`, `customers`, `touchpoints`, `orders`) с dry-run, лимитами,
   отчётом по строкам и атомарным откатом при ошибках больше 10%. Экспорт тех же данных в CSV с BOM, фильтрами
   текущего экрана, защитой от formula injection и записью в аудит. Кнопки «Экспорт CSV» есть на экранах каналов и
-  кампаний; статистика и заказы выгружаются только по прямым URL `/app/export/daily_stats.csv` и
-  `/app/export/orders.csv` до появления своих экранов в M3.
+  кампаний; статистика и заказы доступны прямыми ссылками `/app/export/daily_stats.csv` и
+  `/app/export/orders.csv`, отдельные экраны для них не планируются.
 - **M2:** изображения (аватар и OG-обложка) хранятся в PostgreSQL `BYTEA` и отдаются по `/media/:id` и
   `/media/slug/:slug` с `ETag`, `304 Not Modified` и content-addressed `?v=`-ссылкой.
 - PostgreSQL-схема из 15+ таблиц с FK/CHECK/UNIQUE, миграции `001_init.sql`, `002_m2_data.sql`,
