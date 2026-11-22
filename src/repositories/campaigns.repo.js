@@ -98,7 +98,7 @@ export function createCampaignsRepository(db) {
                  OR position(lower($3::text) in lower(cp.code)) > 0)
           GROUP BY cp.id, ch.id
           ${CAMPAIGN_ORDER}
-          LIMIT ${CAMPAIGN_LIST_LIMIT}`,
+          LIMIT ${CAMPAIGN_LIST_LIMIT + 1}`,
         [channelId, status, search],
       );
       return rows.map(mapCampaignRow);

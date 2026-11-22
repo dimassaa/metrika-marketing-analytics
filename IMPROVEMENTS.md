@@ -235,13 +235,9 @@ Non-critical findings recorded during implementation. Priority is decided by the
 
 ## M2 campaigns (task 2 follow-ups)
 
-- **A rejected quick-add form on the channel passport renders the campaign list, not the passport.** The form posts to
-  the single `POST /app/campaigns` endpoint, so the error path has no channel context and re-renders `/app/campaigns`
-  with the submitted values. A channel-scoped error render (or a separate `POST /app/channels/:id/campaigns` handler)
-  would keep the person on the page they were editing.
 - **The campaign list is capped at 200 rows, and the budget/spend totals are summed from that capped set.** No real
-  pagination exists yet; the page says «Показаны первые 200 кампаний» when the cap is hit. Decide whether totals should
-  come from a separate aggregate query once the demo can exceed the cap.
+  pagination exists yet; the page says «Показаны первые 200 кампаний» only when the cap is actually exceeded. Decide
+  whether totals should come from a separate aggregate query once the demo can exceed the cap.
 - **The channel passport campaign table uses the same 200-row cap without telling the reader.** The seeded maximum is
   four campaigns per channel, so it is unreachable today, but the table and the list would disagree if it ever grew.
 - **There is no confirmation message after create, edit or delete.** Every mutation redirects to a list, so the person
@@ -251,10 +247,10 @@ Non-critical findings recorded during implementation. Priority is decided by the
   form.
 - **`campaignUpdateSchema` maps an absent `budgetByn` to NULL.** The current edit form always submits the field, so it
   cannot happen through the UI; a future partial form would silently clear the budget.
-- **An archived channel's campaign can be switched back to `active` through the edit form.** Creation is guarded
-  («нельзя создать кампанию для архивного канала»), but `updateCampaign` does not re-check the channel, so the channel
-  archive invariant from task 1 can be bypassed after the fact. Decide whether `paused`/`finished` only are allowed for
-  an archived channel, or whether activation should also require an active channel.
+- **Every campaign mutation commits, then writes its audit row.** A failed `audit_log` insert therefore leaves the
+  change applied and answers 500; the row and its trail disagree. The same pattern exists in the task-1 channel
+  mutations. Wrap the state change and `auditService.record` in one `withTransaction`, or make audit explicitly
+  best-effort (log the failure, keep the mutation result) so the chosen contract is visible in code.
 - **BIGINT id parsing is duplicated between `channels.controller.js` and `campaigns.controller.js` (plus the filter
   transform in the campaign validator).** A shared `src/lib/ids.js` would remove three copies of the same range rule.
 

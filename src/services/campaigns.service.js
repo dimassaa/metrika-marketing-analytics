@@ -16,6 +16,8 @@ const ARCHIVED_CHANNEL_GUARD =
 const DELETE_GUARD =
   'Нельзя удалить кампанию со статистикой или заказами — переведите её в статус «Завершена»';
 const CAMPAIGN_NOT_FOUND = 'Кампания не найдена';
+const ARCHIVED_CHANNEL_ACTIVATION =
+  'Нельзя активировать кампанию архивного канала: верните канал из архива';
 
 /**
  * Repository row → list/passport view model. Formatting lives here rather than in EJS because templates must not
@@ -50,6 +52,7 @@ function toFormValues(campaign) {
     endedOn: campaign.endedOn ?? '',
     budgetByn: campaign.budgetCents === null ? '' : formatCentsToByn(campaign.budgetCents),
     channelName: campaign.channelName,
+    channelIsActive: campaign.channelIsActive,
   };
 }
 
@@ -118,25 +121,30 @@ export function createCampaignsService({ campaignsRepository, channelsRepository
         search: search === '' ? null : search,
       });
 
+      // The repository fetches LIMIT + 1, so "more than the cap" is distinguishable from "exactly the cap": at 200
+      // rows the page must not claim it hid anything.
+      const limitReached = rows.length > CAMPAIGN_LIST_LIMIT;
+      const visibleRows = limitReached ? rows.slice(0, CAMPAIGN_LIST_LIMIT) : rows;
+
       // Totals are summed from the already-loaded rows: a second aggregate query would count a different snapshot if
       // a campaign changed between the two statements, and the list is capped at 200 rows anyway.
       let budgetSum = 0n;
       let spendSum = 0n;
-      for (const row of rows) {
+      for (const row of visibleRows) {
         if (row.budgetCents !== null) budgetSum += row.budgetCents;
         if (row.spendCents !== null) spendSum += row.spendCents;
       }
 
       return {
         filters: { channelId, status, q: search },
-        campaigns: rows.map(toView),
+        campaigns: visibleRows.map(toView),
         totals: {
-          countLabel: formatInteger(rows.length),
+          countLabel: formatInteger(visibleRows.length),
           budgetLabel: formatCentsToByn(budgetSum),
           spendLabel: formatCentsToByn(spendSum),
         },
         limit: CAMPAIGN_LIST_LIMIT,
-        limitReached: rows.length >= CAMPAIGN_LIST_LIMIT,
+        limitReached,
       };
     },
 
@@ -200,10 +208,17 @@ export function createCampaignsService({ campaignsRepository, channelsRepository
      * @param {{ id?: string, ip?: string } | null} actor
      * @returns {Promise<object>} Updated campaign view model.
      * @throws {NotFoundError} When the campaign does not exist.
+     * @throws {ValidationError} When the campaign is switched back to `active` while its channel is archived.
      */
     async updateCampaign(id, input, actor) {
       const before = await campaignsRepository.findCampaignById(id);
       if (!before) throw new NotFoundError(CAMPAIGN_NOT_FOUND);
+
+      // Task 1 refuses to archive a channel that still has active campaigns. Without this reverse check, editing a
+      // paused campaign back to `active` would recreate that forbidden state and the channel could never be archived.
+      if (input.status === 'active' && before.channelIsActive === false) {
+        throw new ValidationError(ARCHIVED_CHANNEL_ACTIVATION);
+      }
 
       const updated = await campaignsRepository.updateCampaign(id, input);
       if (!updated) throw new NotFoundError(CAMPAIGN_NOT_FOUND);

@@ -5,6 +5,7 @@ import { closeTestPool, getTestPool, resetTestDatabase } from '../helpers/db.js'
 import { loginAs, makeApp } from '../helpers/app.js';
 import { getAppCsrf } from '../helpers/csrf.js';
 import { AUDIT_ACTIONS } from '../../src/config/audit-actions.js';
+import { createCampaignsService } from '../../src/services/campaigns.service.js';
 
 const ANALYST = 'analyst@metrika.by';
 const VIEWER = 'viewer@metrika.by';
@@ -291,6 +292,38 @@ describe('campaign mutations', () => {
     expect(created.ended_on).toBeNull();
   });
 
+  it('renders the channel passport with the error when the quick-add form is rejected', async () => {
+    const agent = await signedIn(ANALYST);
+    const csrf = await getAppCsrf(agent);
+
+    const channel = await agent
+      .post('/app/channels')
+      .type('form')
+      .send({ code: 'quick_reject', name: 'Канал быстрой формы', kind: 'paid', _csrf: csrf });
+    expect(channel.status).toBe(302);
+    const channelIdValue = await channelId('quick_reject');
+
+    const res = await agent.post('/app/campaigns').type('form').send(
+      createPayload({
+        channelId: channelIdValue,
+        code: 'Bad Code!',
+        name: 'Неверный код',
+        from: 'channel',
+        _csrf: csrf,
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.headers['content-type']).toContain('text/html');
+    expect(res.text).toContain('Канал быстрой формы');
+    expect(res.text).toContain('Паспорт канала');
+    expect(res.text).toContain('Кампания не создана');
+    expect(res.text).toContain('Код кампании');
+    // The quick form keeps the submitted values instead of sending the person to the campaign list.
+    expect(res.text).toContain('value="Неверный код"');
+    expect(res.text).toContain(`href="/app/campaigns?channelId=${channelIdValue}"`);
+  });
+
   it('refuses to delete a seeded campaign with statistics and orders', async () => {
     const agent = await signedIn(ANALYST);
     const csrf = await getAppCsrf(agent);
@@ -304,6 +337,70 @@ describe('campaign mutations', () => {
     expect(res.text).toContain('Завершена');
     expect(await campaignRow('instagram_retarget')).toBeDefined();
     expect(await auditActions(seeded.id)).not.toContain(AUDIT_ACTIONS.CAMPAIGN_DELETE);
+  });
+
+  it('refuses to delete a campaign that only has touchpoints', async () => {
+    const agent = await signedIn(ANALYST);
+    const csrf = await getAppCsrf(agent);
+    const instagram = await channelId('instagram');
+
+    await agent.post('/app/campaigns').type('form').send(
+      createPayload({
+        channelId: instagram,
+        code: 'campaign_touch_only',
+        name: 'Кампания только с касаниями',
+        _csrf: csrf,
+      }),
+    );
+    const campaign = await campaignRow('campaign_touch_only');
+
+    const { rows: customers } = await pool.query(
+      `INSERT INTO customers (external_id, first_channel_id, acquired_at)
+       VALUES ('touch_only_customer', $1::bigint, now())
+       RETURNING id::text AS id`,
+      [instagram],
+    );
+    await pool.query(
+      `INSERT INTO touchpoints (customer_id, channel_id, campaign_id, occurred_at)
+       VALUES ($1::bigint, $2::bigint, $3::bigint, now())`,
+      [customers[0].id, instagram, campaign.id],
+    );
+
+    const res = await agent.post(`/app/campaigns/${campaign.id}/delete`).type('form').send({ _csrf: csrf });
+
+    expect(res.status).toBe(400);
+    expect(res.text).toContain('Нельзя удалить кампанию со статистикой или заказами');
+    expect(await campaignRow('campaign_touch_only')).toBeDefined();
+    expect(await auditActions(campaign.id)).not.toContain(AUDIT_ACTIONS.CAMPAIGN_DELETE);
+  });
+
+  it('refuses to delete a campaign referenced only by a customer', async () => {
+    const agent = await signedIn(ANALYST);
+    const csrf = await getAppCsrf(agent);
+    const instagram = await channelId('instagram');
+
+    await agent.post('/app/campaigns').type('form').send(
+      createPayload({
+        channelId: instagram,
+        code: 'campaign_customer_only',
+        name: 'Кампания первого касания',
+        _csrf: csrf,
+      }),
+    );
+    const campaign = await campaignRow('campaign_customer_only');
+
+    await pool.query(
+      `INSERT INTO customers (external_id, first_channel_id, first_campaign_id, acquired_at)
+       VALUES ('campaign_only_customer', $1::bigint, $2::bigint, now())`,
+      [instagram, campaign.id],
+    );
+
+    const res = await agent.post(`/app/campaigns/${campaign.id}/delete`).type('form').send({ _csrf: csrf });
+
+    expect(res.status).toBe(400);
+    expect(res.text).toContain('Нельзя удалить кампанию со статистикой или заказами');
+    expect(await campaignRow('campaign_customer_only')).toBeDefined();
+    expect(await auditActions(campaign.id)).not.toContain(AUDIT_ACTIONS.CAMPAIGN_DELETE);
   });
 
   it('deletes an empty mis-created campaign and audits it', async () => {
@@ -352,6 +449,65 @@ describe('campaign mutations', () => {
     expect(after.name).toBe('Instagram — Reels (пауза)');
     expect(after.budget_cents).toBe('850000');
     expect(await auditActions(before.id)).toContain(AUDIT_ACTIONS.CAMPAIGN_UPDATE);
+  });
+
+  it('refuses to reactivate a campaign whose channel was archived', async () => {
+    const agent = await signedIn(ANALYST);
+    const csrf = await getAppCsrf(agent);
+
+    const channel = await agent
+      .post('/app/channels')
+      .type('form')
+      .send({ code: 'archive_reactivation', name: 'Архив для реактивации', kind: 'paid', _csrf: csrf });
+    expect(channel.status).toBe(302);
+    const channelIdValue = await channelId('archive_reactivation');
+
+    const created = await agent.post('/app/campaigns').type('form').send(
+      createPayload({
+        channelId: channelIdValue,
+        code: 'campaign_archive_reactivate',
+        name: 'Кампания для реактивации',
+        _csrf: csrf,
+      }),
+    );
+    expect(created.status).toBe(302);
+    const campaign = await campaignRow('campaign_archive_reactivate');
+
+    const paused = await agent.post(`/app/campaigns/${campaign.id}`).type('form').send({
+      name: campaign.name,
+      status: 'paused',
+      startedOn: campaign.started_on,
+      endedOn: '',
+      budgetByn: '1 500,00',
+      _csrf: csrf,
+    });
+    expect(paused.status).toBe(302);
+
+    const archive = await agent
+      .post(`/app/channels/${channelIdValue}/archive`)
+      .type('form')
+      .send({ _csrf: csrf });
+    expect(archive.status).toBe(302);
+    const { rows: channelRows } = await pool.query('SELECT is_active FROM channels WHERE id = $1::bigint', [
+      channelIdValue,
+    ]);
+    expect(channelRows[0].is_active).toBe(false);
+
+    const reactivate = await agent.post(`/app/campaigns/${campaign.id}`).type('form').send({
+      name: campaign.name,
+      status: 'active',
+      startedOn: campaign.started_on,
+      endedOn: '',
+      budgetByn: '1 500,00',
+      _csrf: csrf,
+    });
+
+    expect(reactivate.status).toBe(400);
+    expect(reactivate.headers['content-type']).toContain('text/html');
+    expect(reactivate.text).toContain('Нельзя активировать кампанию архивного канала');
+    // The edit card stays open with the archived-channel hint instead of silently saving.
+    expect(reactivate.text).toContain('Канал в архиве');
+    expect((await campaignRow('campaign_archive_reactivate')).status).toBe('paused');
   });
 
   it('forbids campaign creation for a viewer with the styled 403 page', async () => {
@@ -414,5 +570,58 @@ describe('campaign table on the channel passport', () => {
     expect(res.status).toBe(200);
     expect(res.text).toContain('Instagram — ретаргетинг');
     expect(res.text).not.toContain('action="/app/campaigns"');
+  });
+});
+
+describe('campaign list limit', () => {
+  /**
+   * @param {number} index
+   * @returns {Record<string, any>} Repository-shaped campaign row.
+   */
+  function fakeCampaign(index) {
+    return {
+      id: String(index + 1),
+      channelId: '1',
+      code: `campaign_${index}`,
+      name: `Кампания ${index}`,
+      status: 'active',
+      startedOn: '2026-09-01',
+      endedOn: null,
+      budgetCents: 100n,
+      channelName: 'Instagram',
+      channelCode: 'instagram',
+      channelIsActive: true,
+      spendCents: 0n,
+      statsCount: 0,
+    };
+  }
+
+  /**
+   * @param {number} rowCount
+   * @returns {ReturnType<typeof createCampaignsService>}
+   */
+  function serviceWithRows(rowCount) {
+    return createCampaignsService({
+      campaignsRepository: {
+        listCampaigns: async () => Array.from({ length: rowCount }, (_, index) => fakeCampaign(index)),
+      },
+      channelsRepository: {},
+      auditService: {},
+    });
+  }
+
+  it('does not claim truncation at exactly the limit', async () => {
+    const result = await serviceWithRows(200).listCampaignsForView();
+
+    expect(result.limitReached).toBe(false);
+    expect(result.campaigns).toHaveLength(200);
+  });
+
+  it('drops the extra probe row and reports truncation above the limit', async () => {
+    const result = await serviceWithRows(201).listCampaignsForView();
+
+    expect(result.limitReached).toBe(true);
+    expect(result.campaigns).toHaveLength(200);
+    expect(result.totals.countLabel).toBe('200');
   });
 });

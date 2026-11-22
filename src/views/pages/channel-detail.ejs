@@ -173,6 +173,13 @@
         <a class="btn btn--ghost btn--sm" href="/app/campaigns?channelId=<%= channel.id %>">Все кампании</a>
       </div>
 
+      <% if (campaignCreateError) { %>
+      <div class="alert alert--error" role="alert">
+        <p class="alert__title">Кампания не создана</p>
+        <%= campaignCreateError %>
+      </div>
+      <% } %>
+
       <% if (channelCampaigns.length === 0) { %>
       <div class="empty-state">
         <p class="empty-state__title">У канала ещё нет кампаний</p>
@@ -250,6 +257,7 @@
             class="input"
             type="text"
             name="code"
+            value="<%= campaignCreateValues.code %>"
             placeholder="instagram_spring"
             maxlength="60"
             autocomplete="off"
@@ -264,6 +272,7 @@
             class="input"
             type="text"
             name="name"
+            value="<%= campaignCreateValues.name %>"
             placeholder="Весенняя распродажа"
             maxlength="120"
             autocomplete="off"
@@ -273,7 +282,13 @@
 
         <label class="field">
           <span class="field__label">Старт</span>
-          <input class="input" type="date" name="startedOn" value="<%= campaignDefaults.startedOn %>" required>
+          <input
+            class="input"
+            type="date"
+            name="startedOn"
+            value="<%= campaignCreateValues.startedOn %>"
+            required
+          >
         </label>
 
         <label class="field">
@@ -282,6 +297,7 @@
             class="input"
             type="text"
             name="budgetByn"
+            value="<%= campaignCreateValues.budgetByn %>"
             placeholder="1 500,00"
             inputmode="decimal"
             autocomplete="off"

@@ -94,6 +94,12 @@ export function createCampaignsController({ campaignsService, channelsService, r
       channelsService.listChannelsForView(),
     ]);
     const activeChannels = channelList.channels.filter((channel) => channel.isActive);
+    // Only an active channel has an option in the create select; prefilling an archived one would leave the select
+    // showing «Выберите канал» while still submitting the hidden archived id.
+    const filteredChannel =
+      list.filters.channelId === 'all'
+        ? null
+        : activeChannels.find((channel) => channel.id === list.filters.channelId);
 
     res.status(status).render('pages/campaigns', {
       ...buildShellLocals(req, { title: 'Кампании', activeNav: 'campaigns', dataAnchor }),
@@ -108,7 +114,7 @@ export function createCampaignsController({ campaignsService, channelsService, r
       // A new campaign starts today (the data anchor) on the channel the list is filtered by: the two facts the
       // person would otherwise pick by hand.
       createValues: createValues ?? {
-        channelId: list.filters.channelId === 'all' ? '' : list.filters.channelId,
+        channelId: filteredChannel?.id ?? '',
         code: '',
         name: '',
         status: 'active',
@@ -120,6 +126,76 @@ export function createCampaignsController({ campaignsService, channelsService, r
       editError,
       deleteError,
     });
+  }
+
+  /**
+   * Renders the channel passport with a rejected quick-add instead of sending the person to the campaign list. The
+   * campaign table and filters stay exactly as they were before the POST.
+   * @param {import('express').Request} req
+   * @param {import('express').Response} res
+   * @param {string} channelId Validated digit string from the hidden form field.
+   * @param {{ status: number, error: string, values: object }} rejected
+   * @returns {Promise<void>}
+   */
+  async function renderChannelWithCampaignError(req, res, channelId, { status, error, values }) {
+    const dataAnchor = await referenceRepository.getDataAnchor();
+    let detail;
+    try {
+      detail = await channelsService.getChannelDetail(channelId);
+    } catch (detailError) {
+      // The hidden channel id can point at a channel deleted between page load and submit; the list still exists.
+      if (!(detailError instanceof NotFoundError)) throw detailError;
+      await renderList(req, res, { status, createError: error, createValues: values });
+      return;
+    }
+    const channelCampaigns = await campaignsService.listCampaignsForChannel(channelId);
+    res.status(status).render('pages/channel-detail', {
+      ...buildShellLocals(req, { title: detail.channel.name, activeNav: 'channels', dataAnchor }),
+      channel: detail.channel,
+      formValues: detail.form,
+      formError: null,
+      channelCampaigns,
+      campaignDefaults: { startedOn: dataAnchor },
+      campaignCreateError: error,
+      campaignCreateValues: values,
+    });
+  }
+
+  /**
+   * Merges the rejected body over the stored campaign. The body supplies the fields the person edited, while the
+   * stored row supplies the read-only context (code, channel name, channel state) the form never posts.
+   * @param {string} id
+   * @param {Record<string, unknown> | undefined} body
+   * @returns {Promise<{ id: string, values: object }>}
+   */
+  async function editFormValues(id, body) {
+    const current = await campaignsService.getCampaignForm(id);
+    const values = campaignFormValues(body);
+    return {
+      id,
+      values: {
+        ...values,
+        code: current?.values.code ?? '',
+        channelName: current?.values.channelName ?? '',
+        channelIsActive: current?.values.channelIsActive ?? null,
+      },
+    };
+  }
+
+  /**
+   * Sends a rejected create form back to the page it was submitted from: the channel passport for the quick-add
+   * form, the campaign list otherwise.
+   * @param {import('express').Request} req
+   * @param {import('express').Response} res
+   * @param {{ error: string, values: object, fromChannel: boolean, channelId: string | null }} rejected
+   * @returns {Promise<void>}
+   */
+  async function renderCreateError(req, res, { error, values, fromChannel, channelId }) {
+    if (fromChannel) {
+      await renderChannelWithCampaignError(req, res, channelId, { status: 400, error, values });
+      return;
+    }
+    await renderList(req, res, { status: 400, createError: error, createValues: values });
   }
 
   return {
@@ -136,13 +212,14 @@ export function createCampaignsController({ campaignsService, channelsService, r
      * @type {import('express').RequestHandler}
      */
     async create(req, res) {
+      const values = campaignFormValues(req.body);
+      const channelId = parseCampaignId(req.body?.channelId);
+      const fromChannel = req.body?.from === 'channel' && channelId !== null;
+      const retain = { values, fromChannel, channelId };
       const parsed = campaignCreateSchema.safeParse(req.body);
+
       if (!parsed.success) {
-        await renderList(req, res, {
-          status: 400,
-          createError: parsed.error.issues[0]?.message,
-          createValues: campaignFormValues(req.body),
-        });
+        await renderCreateError(req, res, { ...retain, error: parsed.error.issues[0]?.message });
         return;
       }
 
@@ -151,11 +228,7 @@ export function createCampaignsController({ campaignsService, channelsService, r
         created = await campaignsService.createCampaign(parsed.data, actorOf(req));
       } catch (error) {
         if (!(error instanceof ValidationError)) throw error;
-        await renderList(req, res, {
-          status: 400,
-          createError: error.message,
-          createValues: campaignFormValues(req.body),
-        });
+        await renderCreateError(req, res, { ...retain, error: error.message });
         return;
       }
 
@@ -178,7 +251,7 @@ export function createCampaignsController({ campaignsService, channelsService, r
       if (!parsed.success) {
         await renderList(req, res, {
           status: 400,
-          edit: { id, values: campaignFormValues(req.body) },
+          edit: await editFormValues(id, req.body),
           editError: parsed.error.issues[0]?.message,
         });
         return;
@@ -194,7 +267,7 @@ export function createCampaignsController({ campaignsService, channelsService, r
         if (error instanceof ValidationError) {
           await renderList(req, res, {
             status: 400,
-            edit: { id, values: campaignFormValues(req.body) },
+            edit: await editFormValues(id, req.body),
             editError: error.message,
           });
           return;

@@ -209,10 +209,17 @@
         <label class="field">
           <span class="field__label">Статус</span>
           <select class="select" name="status">
-            <option value="active" <%= edit.values.status === 'active' ? 'selected' : '' %>>Активна</option>
+            <option
+              value="active"
+              <%= edit.values.status === 'active' ? 'selected' : '' %>
+              <%= edit.values.channelIsActive === false ? 'disabled' : '' %>
+            >Активна</option>
             <option value="paused" <%= edit.values.status === 'paused' ? 'selected' : '' %>>На паузе</option>
             <option value="finished" <%= edit.values.status === 'finished' ? 'selected' : '' %>>Завершена</option>
           </select>
+          <% if (edit.values.channelIsActive === false) { %>
+          <span class="field__hint">Канал в архиве: активировать кампанию нельзя, пока канал не вернут из архива.</span>
+          <% } %>
         </label>
 
         <label class="field">
