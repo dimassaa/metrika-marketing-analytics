@@ -99,6 +99,67 @@
       </form>
     </div>
 
+    <div class="card card--flat">
+      <div class="card__header">
+        <div>
+          <h3 class="card__title">OG-обложка сайта</h3>
+          <p class="card__meta">
+            Картинка для карточки сайта в соцсетях. Хранится в базе и отдаётся по адресу
+            <code>/media/slug/og-cover</code>; новый файл заменяет прежний, ссылка не меняется.
+          </p>
+        </div>
+      </div>
+
+      <div class="cluster">
+        <% if (ogCoverUrl) { %>
+        <img src="<%= ogCoverUrl %>" alt="Текущая OG-обложка" width="240">
+        <a class="btn btn--ghost btn--sm" href="<%= ogCoverUrl %>" target="_blank" rel="noopener">
+          Открыть обложку
+        </a>
+        <% } else { %>
+        <p class="u-muted">Обложка ещё не загружена.</p>
+        <% } %>
+      </div>
+
+      <form
+        class="inline-form"
+        method="post"
+        action="/api/v1/admin/media/og-cover"
+        enctype="multipart/form-data"
+        data-upload="/api/v1/admin/media/og-cover"
+        data-csrf="<%= csrfToken %>"
+        data-upload-status="og-status"
+        data-reload
+      >
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+
+        <label class="field">
+          <span class="field__label">Новая обложка</span>
+          <input
+            class="file-input"
+            type="file"
+            name="file"
+            accept="image/png,image/jpeg,image/webp"
+            required
+          >
+          <span class="field__hint">PNG, JPEG или WebP, до 1 МБ. SVG отклоняется.</span>
+        </label>
+
+        <div class="cluster">
+          <button class="btn btn--ghost" type="submit">Обновить обложку</button>
+        </div>
+      </form>
+
+      <div class="upload-status" id="og-status" aria-live="polite" hidden></div>
+
+      <noscript>
+        <p class="noscript-note">
+          Загрузка работает через JavaScript: только так браузер отправит файл вместе с защитным токеном. Включите
+          JavaScript и обновите страницу.
+        </p>
+      </noscript>
+    </div>
+
     <div class="table-wrap">
       <table class="table">
         <thead>
@@ -170,3 +231,5 @@
     </div>
   </div>
 </section>
+
+<script src="/js/upload-form.js" defer></script>

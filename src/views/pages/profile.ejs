@@ -42,6 +42,75 @@
     <div class="card card--flat">
       <div class="card__header">
         <div>
+          <h3 class="card__title">Аватар</h3>
+          <p class="card__meta">
+            PNG, JPEG или WebP не больше 1 МБ. Файл хранится в базе и отдаётся по постоянной ссылке
+            <code>/media/…</code>. SVG не принимается: внутри него может быть скрипт.
+          </p>
+        </div>
+      </div>
+
+      <div class="cluster">
+        <% if (avatarUrl) { %>
+        <img
+          class="app-avatar"
+          src="<%= avatarUrl %>"
+          alt="Текущий аватар"
+          width="32"
+          height="32"
+        >
+        <span class="u-muted">
+          Аватар загружен.
+          <a href="<%= avatarUrl %>" target="_blank" rel="noopener">Открыть файл</a>
+        </span>
+        <% } else { %>
+        <span class="app-avatar" aria-hidden="true"><%= initials %></span>
+        <span class="u-muted">Аватар не загружен — в шапке показываем инициалы.</span>
+        <% } %>
+      </div>
+
+      <form
+        class="inline-form"
+        method="post"
+        action="/api/v1/profile/avatar"
+        enctype="multipart/form-data"
+        data-upload="/api/v1/profile/avatar"
+        data-csrf="<%= csrfToken %>"
+        data-upload-status="avatar-status"
+        data-reload
+      >
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+
+        <label class="field">
+          <span class="field__label">Файл изображения</span>
+          <input
+            class="file-input"
+            type="file"
+            name="avatar"
+            accept="image/png,image/jpeg,image/webp"
+            required
+          >
+          <span class="field__hint">До 1 МБ. После загрузки страница обновится и покажет новую картинку.</span>
+        </label>
+
+        <div class="cluster">
+          <button class="btn btn--ghost" type="submit">Загрузить аватар</button>
+        </div>
+      </form>
+
+      <div class="upload-status" id="avatar-status" aria-live="polite" hidden></div>
+
+      <noscript>
+        <p class="noscript-note">
+          Загрузка работает через JavaScript: только так браузер отправит файл вместе с защитным токеном. Включите
+          JavaScript и обновите страницу.
+        </p>
+      </noscript>
+    </div>
+
+    <div class="card card--flat">
+      <div class="card__header">
+        <div>
           <h3 class="card__title">Смена пароля</h3>
           <p class="card__meta">Понадобится текущий пароль. Новый — не короче 10 символов.</p>
         </div>
@@ -90,3 +159,5 @@
     </div>
   </div>
 </section>
+
+<script src="/js/upload-form.js" defer></script>

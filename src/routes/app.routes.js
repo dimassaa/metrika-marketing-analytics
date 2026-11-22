@@ -32,6 +32,7 @@ const PLACEHOLDER_SECTIONS = [
  *   goalsService: ReturnType<typeof import('../services/goals.service.js').createGoalsService>,
  *   importController: ReturnType<typeof import('../controllers/import.controller.js').createImportController>,
  *   exportService: ReturnType<typeof import('../services/export.service.js').createExportService>,
+ *   mediaRepository: ReturnType<typeof import('../repositories/media.repo.js').createMediaRepository>,
  * }} deps
  * @returns {import('express').Router}
  */
@@ -45,9 +46,10 @@ export function createAppRouter({
   goalsService,
   importController,
   exportService,
+  mediaRepository,
 }) {
   const appController = createAppController({ referenceRepository });
-  const adminController = createAdminController({ usersService, auditService, referenceRepository });
+  const adminController = createAdminController({ usersService, auditService, referenceRepository, mediaRepository });
   const channelsController = createChannelsController({ channelsService, campaignsService, referenceRepository });
   const campaignsController = createCampaignsController({ campaignsService, channelsService, referenceRepository });
   const goalsController = createGoalsController({ goalsService, channelsService, referenceRepository });

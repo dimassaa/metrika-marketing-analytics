@@ -9,7 +9,7 @@ import { pinoHttp } from 'pino-http';
 import { HTTP_LOG_SERIALIZERS, logger } from './lib/logger.js';
 import { requestId } from './middleware/requestId.js';
 import { errorHandler, notFound } from './middleware/errors.js';
-import publicRoutes from './routes/public.routes.js';
+import { createPublicRouter } from './routes/public.routes.js';
 import { notFoundPage } from './controllers/public.controller.js';
 import { can } from './config/permissions.js';
 import { createPgSessionStore, createSessionMiddleware } from './lib/session.js';
@@ -23,6 +23,7 @@ import { createCampaignsRepository } from './repositories/campaigns.repo.js';
 import { createGoalsRepository } from './repositories/goals.repo.js';
 import { createImportRepository } from './repositories/import.repo.js';
 import { createExportRepository } from './repositories/export.repo.js';
+import { createMediaRepository } from './repositories/media.repo.js';
 import { createAuthService } from './services/auth.service.js';
 import { createAuditService } from './services/audit.service.js';
 import { createUsersService } from './services/users.service.js';
@@ -31,8 +32,10 @@ import { createCampaignsService } from './services/campaigns.service.js';
 import { createGoalsService } from './services/goals.service.js';
 import { createImportService } from './services/import.service.js';
 import { createExportService } from './services/export.service.js';
+import { createMediaService } from './services/media.service.js';
 import { createAuthController } from './controllers/auth.controller.js';
 import { createImportController } from './controllers/import.controller.js';
+import { createMediaController } from './controllers/media.controller.js';
 import { createAuthRouter } from './routes/auth.routes.js';
 import { createAppRouter } from './routes/app.routes.js';
 import { createApiRouter } from './routes/api.routes.js';
@@ -71,6 +74,7 @@ export function createApp({ db, sessionStore } = {}) {
   const importRepository = createImportRepository(db);
   // Export is read-only; the audit row is written by the controller after the file is built.
   const exportRepository = createExportRepository(db);
+  const mediaRepository = createMediaRepository(db);
   const authService = createAuthService({ usersRepository });
   const auditService = createAuditService({ auditRepository });
   const usersService = createUsersService({ db, usersRepository, auditService });
@@ -79,8 +83,10 @@ export function createApp({ db, sessionStore } = {}) {
   const goalsService = createGoalsService({ db, goalsRepository, auditService });
   const importService = createImportService({ db, importRepository });
   const exportService = createExportService({ exportRepository, referenceRepository });
+  const mediaService = createMediaService({ mediaRepository, auditService });
   const authController = createAuthController({ authService, auditService });
   const importController = createImportController({ importService, referenceRepository });
+  const mediaController = createMediaController({ mediaService });
   const store = sessionStore ?? createPgSessionStore(db);
 
   const app = express();
@@ -144,11 +150,11 @@ export function createApp({ db, sessionStore } = {}) {
     next();
   });
 
-  app.use('/', publicRoutes);
+  app.use('/', createPublicRouter({ mediaController }));
   app.use(createAuthRouter({ authController }));
   // Mounted after `csrfProtection`: every mutating API call carries `X-CSRF-Token`, including multipart uploads,
   // whose body cannot be parsed by the global CSRF middleware.
-  app.use('/api/v1', createApiRouter({ importController }));
+  app.use('/api/v1', createApiRouter({ importController, mediaController }));
   app.use('/app', createAppRouter({
     requireAuth,
     referenceRepository,
@@ -159,6 +165,7 @@ export function createApp({ db, sessionStore } = {}) {
     goalsService,
     importController,
     exportService,
+    mediaRepository,
   }));
 
   app.get('/health', async (req, res) => {

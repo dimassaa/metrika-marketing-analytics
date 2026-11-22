@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requireAuth, requirePermission } from '../middleware/auth.js';
-import { createCsvUploader } from '../middleware/upload.js';
+import { createCsvUploader, createImageUploader } from '../middleware/upload.js';
 import { createImportRateLimiter } from '../middleware/rateLimit.js';
 
 /**
@@ -12,10 +12,11 @@ import { createImportRateLimiter } from '../middleware/rateLimit.js';
  *
  * @param {{
  *   importController: ReturnType<typeof import('../controllers/import.controller.js').createImportController>,
+ *   mediaController: ReturnType<typeof import('../controllers/media.controller.js').createMediaController>,
  * }} deps
  * @returns {import('express').Router}
  */
-export function createApiRouter({ importController }) {
+export function createApiRouter({ importController, mediaController }) {
   const router = Router();
   const importLimiter = createImportRateLimiter();
 
@@ -27,6 +28,23 @@ export function createApiRouter({ importController }) {
     importLimiter,
     ...createCsvUploader(),
     importController.upload,
+  );
+
+  // Every signed-in user owns their avatar; the field name `avatar` is fixed by the profile form.
+  router.post(
+    '/profile/avatar',
+    requireAuth,
+    ...createImageUploader({ field: 'avatar' }),
+    mediaController.uploadAvatar,
+  );
+
+  // The OG cover is site-wide content, so it needs the same permission as user administration, not just a login.
+  router.post(
+    '/admin/media/og-cover',
+    requireAuth,
+    requirePermission('users:manage'),
+    ...createImageUploader({ field: 'file' }),
+    mediaController.uploadOgCover,
   );
 
   return router;

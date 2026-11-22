@@ -51,9 +51,10 @@ function actorOf(req) {
  *   usersService: ReturnType<typeof import('../services/users.service.js').createUsersService>,
  *   auditService: ReturnType<typeof import('../services/audit.service.js').createAuditService>,
  *   referenceRepository: ReturnType<typeof import('../repositories/reference.repo.js').createReferenceRepository>,
+ *   mediaRepository: ReturnType<typeof import('../repositories/media.repo.js').createMediaRepository>,
  * }} deps
  */
-export function createAdminController({ usersService, auditService, referenceRepository }) {
+export function createAdminController({ usersService, auditService, referenceRepository, mediaRepository }) {
   /**
    * @param {import('express').Response} res
    */
@@ -81,6 +82,8 @@ export function createAdminController({ usersService, auditService, referenceRep
       ...user,
       roleLabel: roleLabel(user.role),
     }));
+    // The cover always lives at the stable slug URL; only the existence check needs the database, not the bytes.
+    const ogCover = await mediaRepository.findMediaBySlug('og-cover', { includeBytes: false });
 
     res.status(status).render('pages/admin-users', {
       ...buildShellLocals(req, { title: 'Пользователи', activeNav: 'users', dataAnchor }),
@@ -88,6 +91,7 @@ export function createAdminController({ usersService, auditService, referenceRep
       createError: error,
       createValues: values ?? EMPTY_CREATE_FORM,
       resetNotice,
+      ogCoverUrl: ogCover ? '/media/slug/og-cover' : null,
     });
   }
 
@@ -99,10 +103,15 @@ export function createAdminController({ usersService, auditService, referenceRep
   async function renderProfile(req, res, { status = 200, error = null } = {}) {
     const dataAnchor = await referenceRepository.getDataAnchor();
     const profile = await usersService.getOwnProfile(req.session.user);
+    // Metadata only: the page shows a 32 px preview, so loading the BYTEA here would move the whole file per render.
+    const avatar = await mediaRepository.findMediaBySlug(`avatar-user-${req.session.user.id}`, {
+      includeBytes: false,
+    });
     res.status(status).render('pages/profile', {
       ...buildShellLocals(req, { title: 'Профиль', activeNav: 'profile', dataAnchor }),
       profile: { ...profile, roleLabel: roleLabel(profile.role) },
       passwordError: error,
+      avatarUrl: avatar ? `/media/${avatar.id}` : null,
     });
   }
 

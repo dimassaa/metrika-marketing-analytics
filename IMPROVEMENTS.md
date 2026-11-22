@@ -335,6 +335,24 @@ Non-critical findings recorded during implementation. Priority is decided by the
   seed those rows fail with «Клиент не найден», which is honest but makes the downloaded template look broken. Point
   the template at a self-contained pair, or label the dependency in the template comment, once templates gain comments.
 
+## M2 media assets (task 7 follow-ups)
+
+- **Public media ids are sequential and enumerable.** `/media/:id` exposes every stored picture to anyone who walks
+  the id space. This is accepted for the demo because all images are public by design (avatar and OG cover) and the
+  task brief names it as an explicit limitation; revisit if private uploads ever appear.
+- **The OG cover is stored and served but not yet wired into the landing metadata.** `homePage` is synchronous and
+  static, and `buildSeo` still defaults to `/img/og-cover.svg`; wiring `/media/slug/og-cover` into `og:image` needs a
+  media-aware public controller and is deferred to M6.
+- **The topbar avatar stays initials until M4.** The profile page shows the uploaded picture, but rendering it in the
+  shell would add one `media_assets` lookup to every page and the M4 React shell replaces the topbar anyway.
+- **Image uploads and their audit rows are not one transaction.** A failure after the `media_assets` write would leave
+  an unaudited image. The window is tiny on the local stand; wrap both in `withTransaction` if audit completeness
+  becomes a hard requirement.
+- **Media uploads have no dedicated rate limit.** Each request is capped at 1 MB and the avatar slug is per-user, but a
+  signed-in account can still churn BYTEA writes; add the same limiter as the import route if the stand is exposed.
+- **The image size cap (1 MB) differs from the CSV cap (2 MB) by design.** They are separate upload families with
+  separate messages; keep them separate instead of sharing one `LIMIT_FILE_SIZE` constant.
+
 ## Resolved during the M1 final fix wave
 
 Recorded so the deferred findings do not disappear from history when the open entries above are closed.

@@ -14,6 +14,7 @@
  */
 
 import { pathToFileURL } from 'node:url';
+import { createHash } from 'node:crypto';
 import pg from 'pg';
 import { hash } from '@node-rs/argon2';
 import { env } from '../../src/config/env.js';
@@ -39,6 +40,15 @@ const MIN_ORDER_CENTS = 6000;
 const MAX_ORDER_CENTS = 18000;
 const TOUCHPOINT_SHARE_OF_ACQUISITION_CHANNEL = 0.7;
 const ORDER_SHARE_OF_ACQUISITION_CHANNEL = 0.75;
+
+/**
+ * Deterministic 1×1 RGBA PNG used as the site's OG cover until an admin uploads a real one. Kept as a base64
+ * constant so a fresh `npm run seed` produces `/media/slug/og-cover` with byte-identical content on every run.
+ */
+const OG_COVER_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
 
 /**
  * Tables owned by the demo data. `sessions`, `audit_log`, `import_batches`, `scenarios`, `alerts` and
@@ -332,6 +342,21 @@ export async function seed({ anchorDate, pool: providedPool } = {}) {
     client = await seedPool.connect();
     await client.query('BEGIN');
     await client.query(`TRUNCATE ${TRUNCATE_TABLES.join(', ')} RESTART IDENTITY CASCADE`);
+
+    // The public OG route must work immediately after a seed, before any admin uploads a cover. ON CONFLICT keeps
+    // the statement safe if the table is ever truncated outside this block.
+    const ogCoverChecksum = createHash('sha256').update(OG_COVER_PNG).digest('hex');
+    await client.query(
+      `INSERT INTO media_assets (slug, filename, mime_type, size_bytes, checksum, bytes)
+       VALUES ('og-cover', 'og-cover.png', 'image/png', $1, $2, $3)
+       ON CONFLICT (slug) DO UPDATE
+         SET filename = EXCLUDED.filename,
+             mime_type = EXCLUDED.mime_type,
+             size_bytes = EXCLUDED.size_bytes,
+             checksum = EXCLUDED.checksum,
+             bytes = EXCLUDED.bytes`,
+      [OG_COVER_PNG.length, ogCoverChecksum, OG_COVER_PNG],
+    );
 
     const userRows = await insertBatches(
       client,
