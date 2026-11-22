@@ -66,9 +66,10 @@ export function createGoalsRepository(db) {
      * @returns {Promise<void>}
      */
     async lockGoalScope(metric, channelId) {
-      await db.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [
-        `goal:${metric}:${channelId ?? 'global'}`,
-      ]);
+      // Normalise through BigInt so `007` and `7` name the same scope. Two spellings would otherwise take different
+      // advisory locks and let an overlapping write through.
+      const scope = channelId === null ? 'global' : BigInt(channelId).toString();
+      await db.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [`goal:${metric}:${scope}`]);
     },
 
     /**

@@ -64,34 +64,31 @@ function formatMonths(value) {
 /**
  * @param {string} metric
  * @param {string} value NUMERIC text from the repository.
- * @returns {{ targetLabel: string, targetUnit: string, targetIsByn: boolean }}
+ * @returns {{ targetLabel: string, targetIsByn: boolean }}
  */
 function formatTarget(metric, value) {
   switch (metric) {
     case 'cac':
       return {
         targetLabel: formatCentsToByn(parseBynToCents(value)),
-        targetUnit: METRIC_UNITS.cac,
         targetIsByn: true,
       };
     case 'romi':
-      return { targetLabel: formatPercent(value), targetUnit: METRIC_UNITS.romi, targetIsByn: false };
+      return { targetLabel: formatPercent(value), targetIsByn: false };
     case 'ltv_cac':
-      return { targetLabel: formatRatio(value), targetUnit: METRIC_UNITS.ltv_cac, targetIsByn: false };
+      return { targetLabel: formatRatio(value), targetIsByn: false };
     case 'payback':
       return {
         targetLabel: `${formatMonths(value)} мес.`,
-        targetUnit: METRIC_UNITS.payback,
         targetIsByn: false,
       };
     case 'new_customers':
       return {
         targetLabel: formatInteger(BigInt(String(value).split('.')[0])),
-        targetUnit: METRIC_UNITS.new_customers,
         targetIsByn: false,
       };
     default:
-      return { targetLabel: String(value), targetUnit: '', targetIsByn: false };
+      return { targetLabel: String(value), targetIsByn: false };
   }
 }
 

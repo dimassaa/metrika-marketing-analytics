@@ -1,5 +1,6 @@
 import { buildShellLocals } from './app.controller.js';
 import { NotFoundError, ValidationError } from '../lib/errors.js';
+import { parseBigIntId } from '../lib/ids.js';
 import { buildSeo } from '../lib/seo.js';
 import {
   goalCreateSchema,
@@ -8,29 +9,12 @@ import {
   parseGoalUpdate,
 } from '../validators/goals.schema.js';
 
-const GOAL_ID = /^\d+$/;
-/** Largest value a PostgreSQL BIGINT primary key can hold (2^63 - 1). */
-const MAX_BIGINT_ID = 9223372036854775807n;
-
 const NOT_FOUND_SEO = buildSeo({
   title: 'Цель не найдена — Метрика',
   description: 'Цель не найдена: возможно, ссылка устарела. Вернитесь к списку целей.',
   path: '/app/goals',
   noindex: true,
 });
-
-/**
- * Validates the `:id` route param before it reaches SQL. A digit string above 2^63 - 1 is still digits, but
- * `$1::bigint` would reject it with SQLSTATE 22003 and turn a hand-typed URL into a 500; such ids cannot exist.
- * @param {unknown} value Raw `:id` route param.
- * @returns {string | null} Digit string inside the BIGINT range, or null for non-digits, zero and oversized values.
- */
-function parseGoalId(value) {
-  const id = String(value ?? '');
-  if (!GOAL_ID.test(id)) return null;
-  const numeric = BigInt(id);
-  return numeric >= 1n && numeric <= MAX_BIGINT_ID ? id : null;
-}
 
 /**
  * @param {import('express').Request} req
@@ -72,13 +56,12 @@ export function createGoalsController({ goalsService, channelsService, reference
    *   createValues?: object,
    *   edit?: object | null,
    *   editError?: string | null,
-   *   deleteError?: string | null,
    * }} [options]
    */
   async function renderList(
     req,
     res,
-    { status = 200, filters = {}, createError = null, createValues, edit = null, editError = null, deleteError = null } = {},
+    { status = 200, filters = {}, createError = null, createValues, edit = null, editError = null } = {},
   ) {
     const dataAnchor = await referenceRepository.getDataAnchor();
     const [list, channelList] = await Promise.all([
@@ -93,17 +76,18 @@ export function createGoalsController({ goalsService, channelsService, reference
       metricOptions: list.metricOptions,
       channels: channelList.channels,
       createError,
-      // A new goal starts on the data anchor: the reporting date the person is planning against, not today's clock.
+      // The period is intentionally empty: the seeded global goals end on the data anchor, so prefilling
+      // `anchor..anchor` for the default global CAC goal would overlap them and fail on the first submit. The date
+      // inputs are required, so the person has to choose a real range instead of inheriting a hidden one.
       createValues: createValues ?? {
         metric: 'cac',
         channelId: '',
         targetValue: '',
-        periodStart: dataAnchor,
-        periodEnd: dataAnchor,
+        periodStart: '',
+        periodEnd: '',
       },
       edit,
       editError,
-      deleteError,
     });
   }
 
@@ -175,7 +159,7 @@ export function createGoalsController({ goalsService, channelsService, reference
      * @type {import('express').RequestHandler}
      */
     async update(req, res) {
-      const id = parseGoalId(req.params.id);
+      const id = parseBigIntId(req.params.id);
       if (id === null) {
         renderNotFound(res);
         return;
@@ -222,7 +206,7 @@ export function createGoalsController({ goalsService, channelsService, reference
      * @type {import('express').RequestHandler}
      */
     async delete(req, res) {
-      const id = parseGoalId(req.params.id);
+      const id = parseBigIntId(req.params.id);
       if (id === null) {
         renderNotFound(res);
         return;

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { toDateOnly } from '../lib/dates.js';
 import { ValidationError } from '../lib/errors.js';
+import { parseBigIntId } from '../lib/ids.js';
 import { parseBynToCents } from '../lib/money.js';
 
 /**
@@ -32,10 +33,6 @@ const METRIC_MESSAGES = Object.freeze({
   payback: 'Плановый payback: число месяцев от 0 до 600, не более двух знаков после запятой',
   new_customers: 'Плановое число новых клиентов: целое число не меньше 0',
 });
-
-/** Largest value a PostgreSQL BIGINT primary key can hold (2^63 - 1). */
-const MAX_BIGINT_ID = 9223372036854775807n;
-const ID_PATTERN = /^\d+$/;
 
 /**
  * Validates a `YYYY-MM-DD` calendar date without letting a JS `Date` attach the machine's timezone.
@@ -77,16 +74,12 @@ function toChannelScope(value, ctx) {
   if (value === null || value === undefined) return null;
   const id = String(value).trim();
   if (id === '' || id === 'global') return null;
-  if (!ID_PATTERN.test(id)) {
+  const normalized = parseBigIntId(id);
+  if (normalized === null) {
     ctx.addIssue({ code: 'custom', message: 'Выберите канал цели или оставьте поле пустым' });
     return z.NEVER;
   }
-  const numeric = BigInt(id);
-  if (numeric < 1n || numeric > MAX_BIGINT_ID) {
-    ctx.addIssue({ code: 'custom', message: 'Выберите канал цели или оставьте поле пустым' });
-    return z.NEVER;
-  }
-  return id;
+  return normalized;
 }
 
 const channelField = z
@@ -235,20 +228,12 @@ export const goalFiltersSchema = z.object({
     .string()
     .catch('all')
     .default('all')
-    .transform((value) => {
-      if (!ID_PATTERN.test(value)) return 'all';
-      const numeric = BigInt(value);
-      return numeric >= 1n && numeric <= MAX_BIGINT_ID ? value : 'all';
-    }),
+    .transform((value) => parseBigIntId(value) ?? 'all'),
   metric: z.enum(['all', ...GOAL_METRICS]).catch('all'),
   edit: z
     .unknown()
     .optional()
-    .transform((value) => {
-      if (typeof value !== 'string' || !ID_PATTERN.test(value)) return null;
-      const numeric = BigInt(value);
-      return numeric >= 1n && numeric <= MAX_BIGINT_ID ? value : null;
-    }),
+    .transform((value) => parseBigIntId(value)),
 });
 
 /**

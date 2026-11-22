@@ -130,6 +130,41 @@ describe('goals list', () => {
     // A viewer reads the list but gets no mutation form.
     expect(res.text).not.toContain('name="targetValue"');
   });
+
+  it('leaves the create period empty instead of prefilling an overlapping anchor range', async () => {
+    const agent = await signedIn(ANALYST);
+
+    const res = await agent.get('/app/goals');
+
+    expect(res.status).toBe(200);
+    // The seeded global goals end exactly on the data anchor. Prefilling `anchor..anchor` made the default CAC
+    // goal collide on the first submit, so both required date fields must start empty.
+    expect(res.text).toMatch(/name="periodStart"\s+value=""/);
+    expect(res.text).toMatch(/name="periodEnd"\s+value=""/);
+  });
+
+  it('creates a global goal outside the seeded range without an overlap error', async () => {
+    const agent = await signedIn(ANALYST);
+    const csrf = await getAppCsrf(agent);
+
+    const res = await agent.post('/app/goals').type('form').send(
+      createPayload({
+        metric: 'cac',
+        channelId: '',
+        targetValue: '55',
+        periodStart: '2027-06-01',
+        periodEnd: '2027-06-30',
+        _csrf: csrf,
+      }),
+    );
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/app/goals');
+    const created = await goalRow({ metric: 'cac', channelId: null, periodStart: '2027-06-01' });
+    expect(created).toBeDefined();
+    expect(created.channel_id).toBeNull();
+    expect(created.target_value).toBe('55.00');
+  });
 });
 
 describe('goal mutations', () => {
@@ -239,6 +274,36 @@ describe('goal mutations', () => {
 
     expect(res.status).toBe(302);
     expect(await goalRow({ metric: 'cac', channelId: instagram, periodStart: '2027-01-01' })).toBeDefined();
+  });
+
+  it('serialises two concurrent overlapping creates into one success and one conflict', async () => {
+    const agent = await signedIn(ANALYST);
+    const csrf = await getAppCsrf(agent);
+    const bloggers = await channelId('bloggers');
+
+    const base = {
+      metric: 'cac',
+      channelId: bloggers,
+      targetValue: '41,00',
+      _csrf: csrf,
+    };
+    // Both requests pass the pre-check before either commits. The advisory lock must make the second one see the
+    // first row and answer 400 instead of inserting an overlap.
+    const [first, second] = await Promise.all([
+      agent.post('/app/goals').type('form').send({ ...base, periodStart: '2028-01-01', periodEnd: '2028-02-29' }),
+      agent.post('/app/goals').type('form').send({ ...base, periodStart: '2028-02-01', periodEnd: '2028-03-31' }),
+    ]);
+
+    expect([first.status, second.status].sort()).toEqual([302, 400]);
+    const conflict = first.status === 400 ? first : second;
+    expect(conflict.text).toContain('пересекающийся период');
+
+    const { rows } = await pool.query(
+      `SELECT count(*)::int AS n FROM goals
+        WHERE metric = 'cac' AND channel_id = $1::bigint AND period_start >= '2028-01-01'`,
+      [bloggers],
+    );
+    expect(rows[0].n).toBe(1);
   });
 
   it('rejects an inverted period, a negative amount, a fractional customer count and an unknown metric', async () => {
@@ -453,5 +518,13 @@ describe('goal mutations', () => {
     expect(created.channel_id).toBeNull();
     expect(created.target_value).toBe('500.00');
     expect(await auditActions(created.id)).toContain(AUDIT_ACTIONS.GOAL_CREATE);
+
+    // The journal line must identify the goal by metric/plan/period, not by an opaque id alone.
+    const journal = await agent.get('/app/audit?entity=goal');
+    expect(journal.status).toBe(200);
+    expect(journal.text).toContain('Метрика: Новые клиенты');
+    expect(journal.text).toContain('План: 500.00');
+    expect(journal.text).toContain('Начало: 2027-04-01');
+    expect(journal.text).toContain('Окончание: 2027-04-30');
   });
 });

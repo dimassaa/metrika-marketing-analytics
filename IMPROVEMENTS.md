@@ -270,6 +270,10 @@ Non-critical findings recorded during implementation. Priority is decided by the
   bypassing `goals.service.js` can still create an overlap. A `btree_gist` exclusion constraint on
   `(metric, COALESCE(channel_id, 0), daterange(period_start, period_end, '[]'))` would move the rule into the
   database, but requires a new migration and the `btree_gist` extension, which was outside this task's file list.
+- **The overlap lookup cannot use `goals_unique_idx`.** `channel_id IS NOT DISTINCT FROM $2` plus the interval
+  comparison makes the index unusable, so PostgreSQL scans the goals table on every create/edit. At demo volume
+  (single-digit rows) this is irrelevant; an exclusion constraint with `btree_gist` would both enforce the rule and
+  index it. Recorded so the cost is not mistaken for an oversight when the table grows.
 - **The task brief names `002_m2_data.sql` as the source of the goal index.** That migration does not exist in the
   repository; the whole `goals` table, including `goals_unique_idx`, already ships in `001_init.sql`. The brief should
   be corrected before the next task repeats the reference.
@@ -279,9 +283,9 @@ Non-critical findings recorded during implementation. Priority is decided by the
   avoids a 404 for a page that still exists, but a short «цель не найдена» notice would explain the missing form.
 - **Goal create/edit/delete redirect without a success notice.** The same flash-style mechanism requested for
   campaigns and the profile would confirm the change; today the person has to find the row again.
-- **The metric and channel are immutable after creation, but the create schema is also used to validate the hidden
-  scope on edit.** The update path re-reads the goal to learn its metric before parsing the target, which costs one
-  extra `SELECT`; acceptable for a form, and it keeps unit rules in one validator.
+- **The update path re-reads the goal to learn its metric before parsing the target.** That costs one extra `SELECT`;
+  acceptable for a form, and it keeps unit rules in one validator instead of trusting a hidden form field for the
+  metric.
 
 ## M2 users, profile and audit (task 3 follow-ups)
 

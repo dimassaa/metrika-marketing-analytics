@@ -43,13 +43,6 @@
       </p>
     </div>
 
-    <% if (deleteError) { %>
-    <div class="alert alert--error" role="alert">
-      <p class="alert__title">Цель не удалена</p>
-      <%= deleteError %>
-    </div>
-    <% } %>
-
     <% if (can('goals:manage')) { %>
     <div class="card card--flat">
       <div class="card__header">

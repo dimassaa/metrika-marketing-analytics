@@ -43,6 +43,17 @@ const ENTITY_LABELS = Object.freeze({
 const ROLE_LABELS = Object.freeze({ admin: 'администратор', analyst: 'аналитик', viewer: 'наблюдатель' });
 
 /**
+ * Russian labels for goal metric codes in the audit summary. The codes stay English in the database and payload.
+ */
+const GOAL_METRIC_LABELS = Object.freeze({
+  cac: 'CAC',
+  romi: 'ROMI',
+  ltv_cac: 'LTV:CAC',
+  payback: 'Payback',
+  new_customers: 'Новые клиенты',
+});
+
+/**
  * Payload keys that may be rendered. Everything else stays in the database: a future writer that puts a token or a
  * password into `payload` must not leak it just because the journal screen renders JSON.
  */
@@ -53,6 +64,11 @@ const DETAIL_KEYS = Object.freeze([
   ['name', 'Название'],
   ['code', 'Код'],
   ['filename', 'Файл'],
+  // Goal mutations carry these four fields and nothing else, so the journal line reads as a sentence about the plan.
+  ['metric', 'Метрика'],
+  ['targetValue', 'План'],
+  ['periodStart', 'Начало'],
+  ['periodEnd', 'Окончание'],
 ]);
 
 const dateTimeFormatter = new Intl.DateTimeFormat('en-US', {
@@ -93,9 +109,12 @@ function summarisePayload(payload) {
   for (const [key, label] of DETAIL_KEYS) {
     const value = payload?.[key];
     if (value === null || value === undefined || value === '') continue;
-    const text = key === 'role' ? ROLE_LABELS[value] ?? String(value) : String(value);
+    let text = String(value);
+    if (key === 'role') text = ROLE_LABELS[value] ?? text;
+    if (key === 'metric') text = GOAL_METRIC_LABELS[value] ?? text;
     parts.push(`${label}: ${text}`);
-    if (parts.length === 3) break;
+    // Four fields keep a goal line complete (metric, plan, start, end) while remaining one visual line.
+    if (parts.length === 4) break;
   }
   return parts.join(' · ');
 }
