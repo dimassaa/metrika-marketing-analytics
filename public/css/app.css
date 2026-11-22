@@ -557,6 +557,11 @@ hr {
   line-height: 1.5;
 }
 
+/* A field is a stretch column; a status badge directly inside it must hug its text instead of becoming a full bar. */
+.field > .badge {
+  align-self: flex-start;
+}
+
 .input,
 .select,
 .textarea {
@@ -931,6 +936,21 @@ input[type='file'] {
 .alert__title {
   color: var(--color-ink-black);
   font-weight: 500;
+}
+
+/* One-time password after a reset: monospace and selectable as a whole, because it is shown exactly once. */
+.temp-password {
+  display: inline-block;
+  margin-inline: var(--spacing-4);
+  padding: 2px var(--spacing-8);
+  border: 1px solid var(--color-stone-border);
+  border-radius: var(--radius-input);
+  background-color: var(--color-stone-canvas);
+  color: var(--color-ink-black);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  user-select: all;
 }
 
 /* Highlight span — the single inline color treatment in a headline. */

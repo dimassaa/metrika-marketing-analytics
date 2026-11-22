@@ -1,0 +1,125 @@
+<section class="app-section">
+  <div class="stack stack--lg">
+    <div class="stack stack--sm">
+      <h2>Журнал действий</h2>
+      <p class="u-muted">
+        Каждое изменение данных и доступов записывается с автором и временем по Минску. Записи не редактируются и
+        не удаляются из интерфейса.
+      </p>
+    </div>
+
+    <div class="toolbar">
+      <form class="filter-bar" method="get" action="/app/audit" aria-label="Фильтры журнала">
+        <label class="field">
+          <span class="field__label">Раздел</span>
+          <select class="select" name="entity">
+            <option value="all" <%= journal.filters.entity === 'all' ? 'selected' : '' %>>Все</option>
+            <% entityOptions.forEach((option) => { %>
+            <option value="<%= option.value %>" <%= journal.filters.entity === option.value ? 'selected' : '' %>>
+              <%= option.label %>
+            </option>
+            <% }) %>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Автор</span>
+          <select class="select" name="userId">
+            <option value="all" <%= journal.filters.userId === 'all' ? 'selected' : '' %>>Все</option>
+            <% filterUsers.forEach((user) => { %>
+            <option value="<%= user.id %>" <%= journal.filters.userId === user.id ? 'selected' : '' %>>
+              <%= user.email %>
+            </option>
+            <% }) %>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Действие</span>
+          <select class="select" name="action">
+            <option value="all" <%= journal.filters.action === 'all' ? 'selected' : '' %>>Все</option>
+            <% actionOptions.forEach((option) => { %>
+            <option value="<%= option.value %>" <%= journal.filters.action === option.value ? 'selected' : '' %>>
+              <%= option.label %>
+            </option>
+            <% }) %>
+          </select>
+        </label>
+
+        <button class="btn btn--ghost btn--sm" type="submit">Показать</button>
+        <a class="btn btn--ghost btn--sm" href="/app/audit">Сбросить фильтры</a>
+      </form>
+    </div>
+
+    <p class="u-muted">
+      Найдено записей: <span class="u-numeric"><%= journal.total %></span> · страница
+      <span class="u-numeric"><%= journal.page %></span> из <span class="u-numeric"><%= journal.pageCount %></span>
+    </p>
+
+    <% if (journal.entries.length === 0) { %>
+    <div class="empty-state">
+      <p class="empty-state__title">По этому фильтру записей нет</p>
+      <p class="empty-state__text">Измените раздел, автора или действие — или вернитесь к полному журналу.</p>
+      <div class="empty-state__actions">
+        <a class="btn btn--ghost" href="/app/audit">Сбросить фильтры</a>
+      </div>
+    </div>
+    <% } else { %>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">Дата</th>
+            <th scope="col">Кто</th>
+            <th scope="col">Действие</th>
+            <th scope="col">Раздел</th>
+            <th scope="col">Объект</th>
+            <th scope="col">Детали</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% journal.entries.forEach((entry) => { %>
+          <tr>
+            <td class="u-numeric u-nowrap"><%= entry.createdAtLabel %></td>
+            <td><%= entry.actorLabel %></td>
+            <td>
+              <%= entry.actionLabel %>
+              <span class="u-muted u-nowrap"><code><%= entry.action %></code></span>
+            </td>
+            <td><%= entry.entityLabel %></td>
+            <td class="u-numeric"><%= entry.entityId ?? '—' %></td>
+            <td>
+              <% if (entry.detail) { %><%= entry.detail %><% } else { %><span class="u-muted">—</span><% } %>
+            </td>
+          </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+    <% } %>
+
+    <% if (journal.pageCount > 1) { %>
+    <nav class="pager" aria-label="Страницы журнала">
+      <span>Страница <%= journal.page %> из <%= journal.pageCount %></span>
+      <div class="cluster">
+        <% if (journal.page > 1) { %>
+        <a
+          class="btn btn--ghost btn--sm"
+          href="/app/audit?entity=<%= encodeURIComponent(journal.filters.entity) %>&amp;userId=<%= encodeURIComponent(journal.filters.userId) %>&amp;action=<%= encodeURIComponent(journal.filters.action) %>&amp;page=<%= journal.page - 1 %>"
+        >
+          Назад
+        </a>
+        <% } %>
+        <% if (journal.page < journal.pageCount) { %>
+        <a
+          class="btn btn--ghost btn--sm"
+          href="/app/audit?entity=<%= encodeURIComponent(journal.filters.entity) %>&amp;userId=<%= encodeURIComponent(journal.filters.userId) %>&amp;action=<%= encodeURIComponent(journal.filters.action) %>&amp;page=<%= journal.page + 1 %>"
+        >
+          Вперёд
+        </a>
+        <% } %>
+      </div>
+    </nav>
+    <% } %>
+  </div>
+</section>

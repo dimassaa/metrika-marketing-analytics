@@ -22,6 +22,7 @@ import { createChannelsRepository } from './repositories/channels.repo.js';
 import { createCampaignsRepository } from './repositories/campaigns.repo.js';
 import { createAuthService } from './services/auth.service.js';
 import { createAuditService } from './services/audit.service.js';
+import { createUsersService } from './services/users.service.js';
 import { createChannelsService } from './services/channels.service.js';
 import { createCampaignsService } from './services/campaigns.service.js';
 import { createAuthController } from './controllers/auth.controller.js';
@@ -54,6 +55,7 @@ export function createApp({ db, sessionStore } = {}) {
   const campaignsRepository = createCampaignsRepository(db);
   const authService = createAuthService({ usersRepository });
   const auditService = createAuditService({ auditRepository });
+  const usersService = createUsersService({ usersRepository, auditService });
   const channelsService = createChannelsService({ channelsRepository, auditService });
   const campaignsService = createCampaignsService({ campaignsRepository, channelsRepository, auditService });
   const authController = createAuthController({ authService, auditService });
@@ -124,8 +126,9 @@ export function createApp({ db, sessionStore } = {}) {
   app.use(createAuthRouter({ authController }));
   app.use('/app', createAppRouter({
     requireAuth,
-    usersRepository,
     referenceRepository,
+    usersService,
+    auditService,
     channelsService,
     campaignsService,
   }));

@@ -254,6 +254,42 @@ Non-critical findings recorded during implementation. Priority is decided by the
 - **BIGINT id parsing is duplicated between `channels.controller.js` and `campaigns.controller.js` (plus the filter
   transform in the campaign validator).** A shared `src/lib/ids.js` would remove three copies of the same range rule.
 
+## M2 users, profile and audit (task 3 follow-ups)
+
+- **`requireAuth` does not re-validate `users.is_active`/`role` on every request; session revocation is the mechanism.**
+  Deactivation, role change and password reset delete the user's rows from `sessions`, which is why the old cookie
+  stops working immediately. A database-side role change made outside these endpoints (or an interrupted revocation)
+  would still be honoured until the session TTL; if that matters, add one indexed `SELECT is_active, role FROM users`
+  to `requireAuth`, at the cost of a query on every render.
+- **The audit timestamp formatter lives in `src/services/audit.service.js`.** `src/lib/dates.js` owns Minsk calendar
+  formatting but has no date-time function; the journal needed `DD.MM.YYYY HH:mm`, so a local `Intl` formatter was
+  added rather than widening this task's file ownership. Move it to `dates.js` with `formatDateTimeRu` when that module
+  is next touched.
+- **The audit journal's actor filter scans `sess->'user'->>'id'` only for revocation, but the journal itself queries
+  `audit_log.user_id`, which is unindexed.** Fine for the demo's row count; add an index on `audit_log(user_id,
+  created_at DESC)` if the journal becomes a daily tool.
+- **The profile password change redirects without a success notice.** The person sees the same page and has to infer
+  that the hash changed. A session-backed flash (without persisting the password) would confirm it; the M2 campaigns
+  section already asks for the same mechanism.
+- **A password reset renders the confirmation as the POST response.** Refreshing the page regenerates a new password
+  and re-renders it. That is safer than putting the secret in a redirect or the session store, but the browser will
+  warn about resubmitting the form; a one-shot token in the session would avoid the warning at the cost of storing the
+  plain secret temporarily.
+- **`toggleUserActive` reads the row in the controller and again in the service.** A concurrent change between the two
+  reads makes the toggle act on a stale state. The repository's guarded update stays correct; deriving the desired
+  state inside the service would remove one round trip and the window.
+- **`users.repo.js` repeats the `withTransaction` pattern instead of reusing `src/lib/db.js`.** The latter is bound to
+  the global pool, which tests must not touch. A shared `withTransaction(db, fn)` helper would remove the duplication
+  and the rollback-masks-original-error issue already recorded for `db.js`.
+- **The users table has no pagination and the audit page is the only M2 screen using `.pager`.** The demo has a
+  handful of accounts; add pagination or a search field before the roster grows.
+- **The administrator can reset their own password from `/app/admin/users`.** The revocation deletes the acting
+  session too, so the next click sends them to `/login`; it is secure but surprising. Hide the self-reset button or
+  route it through the profile form, which verifies the current password.
+- **Creating a user with an administrator-typed password means the plain secret travels in a form body.** TLS covers
+  it in production; the alternative (generating every initial password server-side and showing it once) reuses the
+  reset flow and avoids the administrator inventing weak passwords.
+
 ## Resolved during the M1 final fix wave
 
 Recorded so the deferred findings do not disappear from history when the open entries above are closed.

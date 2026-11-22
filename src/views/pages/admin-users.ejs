@@ -3,34 +3,164 @@
     <div class="stack stack--sm">
       <h2>Команда стенда</h2>
       <p class="u-muted">
-        Всего пользователей: <%= users.length %>. Роли проверяются на сервере. Создание и блокировка аккаунтов
-        появятся на следующем этапе — сейчас таблица доступна только для чтения.
+        Всего пользователей: <%= users.length %>. Роли проверяются на сервере. Блокировка и смена роли сразу
+        завершают активные сессии аккаунта, поэтому старые вкладки перестают работать.
       </p>
+    </div>
+
+    <% if (resetNotice) { %>
+    <div class="alert alert--success" role="status">
+      <p class="alert__title">Пароль сброшен</p>
+      <p>
+        Временный пароль для <strong><%= resetNotice.email %></strong>:
+        <code class="temp-password"><%= resetNotice.temporaryPassword %></code>
+      </p>
+      <p class="u-muted">
+        Скопируйте его сейчас: страница не сохраняет пароль, а при обновлении он будет заменён новым.
+      </p>
+    </div>
+    <% } %>
+
+    <% if (createError) { %>
+    <div class="alert alert--error" role="alert">
+      <p class="alert__title">Пользователь не создан</p>
+      <%= createError %>
+    </div>
+    <% } %>
+
+    <div class="card card--flat">
+      <div class="card__header">
+        <div>
+          <h3 class="card__title">Новый пользователь</h3>
+          <p class="card__meta">
+            Передайте временный пароль лично. Сменить его сотрудник сможет в разделе «Профиль».
+          </p>
+        </div>
+      </div>
+
+      <form class="inline-form" method="post" action="/app/admin/users">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+
+        <label class="field">
+          <span class="field__label">Почта</span>
+          <input
+            class="input"
+            type="email"
+            name="email"
+            value="<%= createValues.email %>"
+            placeholder="name@metrika.by"
+            maxlength="254"
+            autocomplete="off"
+            required
+          >
+        </label>
+
+        <label class="field">
+          <span class="field__label">Имя</span>
+          <input
+            class="input"
+            type="text"
+            name="fullName"
+            value="<%= createValues.fullName %>"
+            placeholder="Анна Ковалёва"
+            maxlength="120"
+            autocomplete="off"
+            required
+          >
+        </label>
+
+        <label class="field">
+          <span class="field__label">Роль</span>
+          <select class="select" name="role">
+            <option value="viewer" <%= createValues.role === 'viewer' ? 'selected' : '' %>>Наблюдатель</option>
+            <option value="analyst" <%= createValues.role === 'analyst' ? 'selected' : '' %>>Аналитик</option>
+            <option value="admin" <%= createValues.role === 'admin' ? 'selected' : '' %>>Администратор</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Временный пароль</span>
+          <input
+            class="input"
+            type="password"
+            name="password"
+            value=""
+            minlength="10"
+            maxlength="128"
+            autocomplete="new-password"
+            required
+          >
+          <span class="field__hint">Не короче 10 символов; не повторяйте пароль администратора</span>
+        </label>
+
+        <div class="cluster">
+          <button class="btn btn--primary" type="submit">Создать пользователя</button>
+        </div>
+      </form>
     </div>
 
     <div class="table-wrap">
       <table class="table">
         <thead>
           <tr>
-            <th scope="col">Email</th>
+            <th scope="col">Почта</th>
             <th scope="col">Имя</th>
             <th scope="col">Роль</th>
             <th scope="col">Статус</th>
             <th scope="col">Последний вход</th>
+            <th scope="col">Новая роль</th>
+            <th scope="col"><span class="u-visually-hidden">Действия</span></th>
           </tr>
         </thead>
         <tbody>
           <% users.forEach((user) => { %>
+          <% const isSelf = user.id === currentUser.id; %>
           <tr>
-            <td><%= user.email %></td>
+            <td>
+              <%= user.email %>
+              <% if (isSelf) { %><span class="u-muted u-nowrap">· вы</span><% } %>
+            </td>
             <td><%= user.fullName %></td>
             <td><%= user.roleLabel %></td>
             <td>
               <span class="badge <%= user.isActive ? 'badge--healthy' : 'badge--neutral' %>">
-                <%= user.isActive ? 'Активен' : 'Заблокирован' %>
+                <%= user.statusLabel %>
               </span>
             </td>
             <td class="u-numeric"><%= user.lastLoginLabel %></td>
+            <td>
+              <form class="row-actions" method="post" action="/app/admin/users/<%= user.id %>/role">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                <label class="u-visually-hidden" for="role-<%= user.id %>">Новая роль для <%= user.email %></label>
+                <select class="select" id="role-<%= user.id %>" name="role" <%= isSelf ? 'disabled' : '' %>>
+                  <option value="viewer" <%= user.role === 'viewer' ? 'selected' : '' %>>Наблюдатель</option>
+                  <option value="analyst" <%= user.role === 'analyst' ? 'selected' : '' %>>Аналитик</option>
+                  <option value="admin" <%= user.role === 'admin' ? 'selected' : '' %>>Администратор</option>
+                </select>
+                <button class="btn btn--ghost btn--sm" type="submit" <%= isSelf ? 'disabled' : '' %>>
+                  Сменить
+                </button>
+              </form>
+            </td>
+            <td>
+              <div class="row-actions">
+                <form method="post" action="/app/admin/users/<%= user.id %>/toggle-active">
+                  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                  <button
+                    class="btn <%= user.isActive ? 'btn--danger' : 'btn--ghost' %> btn--sm"
+                    type="submit"
+                    <%= isSelf ? 'disabled' : '' %>
+                    aria-label="<%= user.isActive ? 'Заблокировать' : 'Разблокировать' %>: <%= user.email %>"
+                  >
+                    <%= user.isActive ? 'Заблокировать' : 'Разблокировать' %>
+                  </button>
+                </form>
+                <form method="post" action="/app/admin/users/<%= user.id %>/reset-password">
+                  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                  <button class="btn btn--ghost btn--sm" type="submit">Сбросить пароль</button>
+                </form>
+              </div>
+            </td>
           </tr>
           <% }) %>
         </tbody>

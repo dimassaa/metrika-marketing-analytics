@@ -109,6 +109,24 @@ describe('app shell RBAC', () => {
     expect(rows).toContain('Администратор');
     expect(rows).toContain('Аналитик');
     expect(rows).toContain('Наблюдатель');
+    // The M1 placeholder wording must be gone now that the screen manages accounts.
+    expect(res.text).not.toContain('следующем этапе');
+  });
+
+  it('serves the audit journal and the profile instead of the old placeholders', async () => {
+    const admin = await signedIn(ADMIN);
+    const audit = await admin.get('/app/audit');
+
+    expect(audit.status).toBe(200);
+    expect(audit.text).toContain('Журнал действий');
+    expect(audit.text).not.toContain('следующем этапе');
+
+    const viewer = await signedIn(VIEWER);
+    const profile = await viewer.get('/app/profile');
+
+    expect(profile.status).toBe(200);
+    expect(profile.text).toContain('Смена пароля');
+    expect(profile.text).not.toContain('следующем этапе');
   });
 
   it('shows the data anchor taken from the latest daily stats date', async () => {

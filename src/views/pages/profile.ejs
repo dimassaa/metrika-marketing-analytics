@@ -1,0 +1,92 @@
+<section class="app-section">
+  <div class="stack stack--lg">
+    <div class="stack stack--sm">
+      <h2>Профиль</h2>
+      <p class="u-muted">Данные вашей учётной записи и смена пароля. Почту и роль меняет администратор.</p>
+    </div>
+
+    <div class="card card--flat">
+      <div class="card__header">
+        <div>
+          <h3 class="card__title">Учётная запись</h3>
+          <p class="card__meta">Роль определяет доступные разделы и действия.</p>
+        </div>
+      </div>
+
+      <div class="grid grid--2">
+        <div class="field">
+          <span class="field__label">Почта</span>
+          <span><%= profile.email %></span>
+        </div>
+        <div class="field">
+          <span class="field__label">Имя</span>
+          <span><%= profile.fullName %></span>
+        </div>
+        <div class="field">
+          <span class="field__label">Роль</span>
+          <span><%= profile.roleLabel %></span>
+        </div>
+        <div class="field">
+          <span class="field__label">Статус</span>
+          <span class="badge <%= profile.isActive ? 'badge--healthy' : 'badge--neutral' %>">
+            <%= profile.statusLabel %>
+          </span>
+        </div>
+        <div class="field">
+          <span class="field__label">Последний вход</span>
+          <span class="u-numeric"><%= profile.lastLoginLabel %></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card card--flat">
+      <div class="card__header">
+        <div>
+          <h3 class="card__title">Смена пароля</h3>
+          <p class="card__meta">Понадобится текущий пароль. Новый — не короче 10 символов.</p>
+        </div>
+      </div>
+
+      <% if (passwordError) { %>
+      <div class="alert alert--error" role="alert">
+        <p class="alert__title">Пароль не изменён</p>
+        <%= passwordError %>
+      </div>
+      <% } %>
+
+      <form class="inline-form" method="post" action="/app/profile/password">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+
+        <label class="field">
+          <span class="field__label">Текущий пароль</span>
+          <input
+            class="input"
+            type="password"
+            name="currentPassword"
+            autocomplete="current-password"
+            maxlength="1024"
+            required
+          >
+        </label>
+
+        <label class="field">
+          <span class="field__label">Новый пароль</span>
+          <input
+            class="input"
+            type="password"
+            name="newPassword"
+            minlength="10"
+            maxlength="128"
+            autocomplete="new-password"
+            required
+          >
+          <span class="field__hint">Минимум 10 символов, без пробелов в начале и конце</span>
+        </label>
+
+        <div class="cluster">
+          <button class="btn btn--primary" type="submit">Сменить пароль</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</section>

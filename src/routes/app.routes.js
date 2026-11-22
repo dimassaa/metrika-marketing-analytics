@@ -7,8 +7,8 @@ import { createCampaignsController } from '../controllers/campaigns.controller.j
 
 /**
  * Sections that exist in the sidebar but render the honest «Раздел появится на следующем этапе» placeholder until
- * their milestone. Profile is guarded by `requireAuth` only: every signed-in role owns their own profile page.
- * Channels and campaigns left this list when their real routes landed; keeping them here would shadow them.
+ * their milestone. Profile, audit and users left this list when their real routes landed; keeping them here would
+ * shadow them.
  */
 const PLACEHOLDER_SECTIONS = [
   { slug: 'cohorts', title: 'Когорты' },
@@ -16,7 +16,6 @@ const PLACEHOLDER_SECTIONS = [
   { slug: 'scenarios', title: 'Сценарии' },
   { slug: 'alerts', title: 'Алерты' },
   { slug: 'goals', title: 'Цели' },
-  { slug: 'profile', title: 'Профиль' },
 ];
 
 /**
@@ -24,8 +23,9 @@ const PLACEHOLDER_SECTIONS = [
  * is enforced by `requirePermission` on the server, because a hidden sidebar link is presentation, not access control.
  * @param {{
  *   requireAuth: import('express').RequestHandler,
- *   usersRepository: ReturnType<typeof import('../repositories/users.repo.js').createUsersRepository>,
  *   referenceRepository: ReturnType<typeof import('../repositories/reference.repo.js').createReferenceRepository>,
+ *   usersService: ReturnType<typeof import('../services/users.service.js').createUsersService>,
+ *   auditService: ReturnType<typeof import('../services/audit.service.js').createAuditService>,
  *   channelsService: ReturnType<typeof import('../services/channels.service.js').createChannelsService>,
  *   campaignsService: ReturnType<typeof import('../services/campaigns.service.js').createCampaignsService>,
  * }} deps
@@ -33,13 +33,14 @@ const PLACEHOLDER_SECTIONS = [
  */
 export function createAppRouter({
   requireAuth,
-  usersRepository,
   referenceRepository,
+  usersService,
+  auditService,
   channelsService,
   campaignsService,
 }) {
   const appController = createAppController({ referenceRepository });
-  const adminController = createAdminController({ usersRepository, referenceRepository });
+  const adminController = createAdminController({ usersService, auditService, referenceRepository });
   const channelsController = createChannelsController({ channelsService, campaignsService, referenceRepository });
   const campaignsController = createCampaignsController({ campaignsService, channelsService, referenceRepository });
   const router = Router();
@@ -83,12 +84,33 @@ export function createAppRouter({
     title: 'Импорт',
     activeNav: 'import',
   }));
-  router.get('/audit', requireAuth, requirePermission('audit:view'), appController.comingSoon({
-    title: 'Аудит',
-    activeNav: 'audit',
-  }));
+
+  // Every signed-in role owns their profile; user administration and the journal are admin-only on the server.
+  router.get('/profile', requireAuth, adminController.profile);
+  router.post('/profile/password', requireAuth, adminController.changePassword);
+
+  router.get('/audit', requireAuth, requirePermission('audit:view'), adminController.audit);
 
   router.get('/admin/users', requireAuth, requirePermission('users:manage'), adminController.users);
+  router.post('/admin/users', requireAuth, requirePermission('users:manage'), adminController.createUser);
+  router.post(
+    '/admin/users/:id/role',
+    requireAuth,
+    requirePermission('users:manage'),
+    adminController.changeRole,
+  );
+  router.post(
+    '/admin/users/:id/toggle-active',
+    requireAuth,
+    requirePermission('users:manage'),
+    adminController.toggleActive,
+  );
+  router.post(
+    '/admin/users/:id/reset-password',
+    requireAuth,
+    requirePermission('users:manage'),
+    adminController.resetPassword,
+  );
 
   return router;
 }
