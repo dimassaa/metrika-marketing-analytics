@@ -34,7 +34,7 @@ const HEALTH_ROW = {
   ltv12Cents: '14903',
   ltvLabel: '149,03',
   romiPct: 635.46,
-  romiLabel: '635,46%',
+  romiLabel: '+635,5%',
   paybackMonths: 3.5,
   paybackLabel: '3,5 мес.',
   ltvCacRatio: 3.424,

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ValidationError } from '../../src/lib/errors.js';
 import { createGoalsProgressService } from '../../src/services/metrics/goals-progress.service.js';
+import { deriveHealth } from '../../src/services/metrics/romi.service.js';
 
 const ANCHOR = '2026-11-21';
 /** A short reporting period. Only goals that start and end exactly here are comparable with the fact. */
@@ -19,7 +20,7 @@ const BLENDED = {
   ltv12Cents: '14345',
   ltvLabel: '143,45',
   romiPct: 100,
-  romiLabel: '100,0%',
+  romiLabel: '+100,0%',
   paybackMonths: 3.5,
   paybackLabel: '3,5 мес.',
   ltvCacRatio: 3.4,
@@ -38,7 +39,7 @@ const CHANNEL_ROW = {
   cacCents: '7000',
   cacLabel: '70,00',
   romiPct: 80,
-  romiLabel: '80,0%',
+  romiLabel: '+80,0%',
   ltvCacRatio: 2.5,
   ratioLabel: '2,500',
 };
@@ -115,7 +116,21 @@ describe('goals progress', () => {
   });
 
   it('compares the fact with the target per direction and labels the gap in the metric unit', async () => {
-    const { service } = serviceWith();
+    // The exact comparison reads the kopeck fields, so this fixture is internally consistent: spend 1 000,00 with
+    // revenue 2 000,00 is ROMI 100 %, LTV12 204,00 over CAC 60,00 is LTV:CAC 3,4.
+    const { service } = serviceWith({
+      blended: {
+        ...BLENDED,
+        spendCents: '100000',
+        revenueCents: '200000',
+        cacCents: '6000',
+        ltv12Cents: '20400',
+        romiPct: 100,
+        romiLabel: '+100,0%',
+        ltvCacRatio: 3.4,
+        ratioLabel: '3,400',
+      },
+    });
 
     const { rows } = await service.getGoalsProgress({ anchor: ANCHOR, ...PERIOD });
     const byId = new Map(rows.map((row) => [row.goalId, row]));
@@ -131,8 +146,8 @@ describe('goals progress', () => {
     expect(byId.get('2')).toMatchObject({
       status: 'off_track',
       favorable: false,
-      fact: { value: 100, unit: 'percent', label: '100,0%' },
-      deviation: { abs: 20, pct: -16.67, label: '20,0%' },
+      fact: { value: 100, unit: 'percent', label: '+100,0%' },
+      deviation: { abs: 20, pct: -16.67, label: '+20,0%' },
     });
     // LTV:CAC 3,4 against 3,0 is on track; the gap is negative because the fact exceeds the plan. The target keeps
     // the two decimals of the M2 goal list.
@@ -221,6 +236,124 @@ describe('goals progress', () => {
       status: 'off_track',
       fact: { value: 0, unit: 'count', label: '0' },
       deviation: { abs: 20 },
+    });
+  });
+
+  it('marks a ratio goal off track when the displayed 3,000 is exactly 2,9996', async () => {
+    const row = {
+      ...BLENDED,
+      spendCents: '100000',
+      revenueCents: '100000',
+      cacCents: '10000',
+      ltv12Cents: '29996',
+      romiPct: 0,
+      romiLabel: '0,0%',
+      ltvCacRatio: 3,
+      ratioLabel: '3,000',
+      status: deriveHealth({
+        cacCents: 10000n,
+        ltv12Cents: 29996n,
+        revenueCents: 100000n,
+        spendCents: 100000n,
+      }),
+    };
+    // The health report already calls the channel `watch`; the goal must not promote it to `on_track` because its
+    // display rounded 2.9996 to 3,000.
+    expect(row.status).toBe('watch');
+
+    const { service } = serviceWith({
+      blended: row,
+      goals: [
+        { id: 'ratio', metric: 'ltv_cac', channelId: null, targetValue: '3.00', periodStart: PERIOD.from, periodEnd: PERIOD.to, channelName: null, channelCode: null },
+      ],
+    });
+    const { rows } = await service.getGoalsProgress({ anchor: ANCHOR, ...PERIOD });
+
+    expect(rows[0]).toMatchObject({
+      status: 'off_track',
+      favorable: false,
+      fact: { value: 3, label: '3,000' },
+      deviation: { abs: 0.0004, label: '0,000' },
+    });
+    // The percentage keeps the direction even though no human could read it in the label.
+    expect(rows[0].deviation.pct).toBeLessThan(0);
+  });
+
+  it('marks a payback goal off track when the displayed 12 is exactly 12,004', async () => {
+    const row = {
+      ...BLENDED,
+      spendCents: '100000',
+      revenueCents: '100000',
+      cacCents: '12004',
+      ltv12Cents: '12000',
+      romiPct: 0,
+      romiLabel: '0,0%',
+      ltvCacRatio: 1,
+      ratioLabel: '1,000',
+      paybackMonths: 12,
+      paybackLabel: '12 мес.',
+      status: deriveHealth({
+        cacCents: 12004n,
+        ltv12Cents: 12000n,
+        revenueCents: 100000n,
+        spendCents: 100000n,
+      }),
+    };
+    // payback > 12 implies ratio < 1, so the health report is `risk`, not `watch`.
+    expect(row.status).toBe('risk');
+
+    const { service } = serviceWith({
+      blended: row,
+      goals: [
+        { id: 'payback', metric: 'payback', channelId: null, targetValue: '12.00', periodStart: PERIOD.from, periodEnd: PERIOD.to, channelName: null, channelCode: null },
+      ],
+    });
+    const { rows } = await service.getGoalsProgress({ anchor: ANCHOR, ...PERIOD });
+
+    expect(rows[0]).toMatchObject({
+      status: 'off_track',
+      favorable: false,
+      fact: { value: 12, label: '12 мес.' },
+      deviation: { abs: 0.004, label: '0,004 мес.' },
+    });
+    expect(rows[0].deviation.pct).toBeGreaterThan(0);
+  });
+
+  it('marks a ROMI goal off track when the displayed 0,0% is exactly −0,004%', async () => {
+    const row = {
+      ...BLENDED,
+      spendCents: '100000',
+      revenueCents: '99996',
+      cacCents: '10000',
+      ltv12Cents: '29996',
+      romiPct: 0,
+      romiLabel: '0,0%',
+      ltvCacRatio: 3,
+      ratioLabel: '3,000',
+      status: deriveHealth({
+        cacCents: 10000n,
+        ltv12Cents: 29996n,
+        revenueCents: 99996n,
+        spendCents: 100000n,
+      }),
+    };
+    // A negative ROMI outranks every other clause, so the health report is `risk`.
+    expect(row.status).toBe('risk');
+
+    const { service } = serviceWith({
+      blended: row,
+      goals: [
+        { id: 'romi', metric: 'romi', channelId: null, targetValue: '0.00', periodStart: PERIOD.from, periodEnd: PERIOD.to, channelName: null, channelCode: null },
+      ],
+    });
+    const { rows } = await service.getGoalsProgress({ anchor: ANCHOR, ...PERIOD });
+
+    expect(rows[0]).toMatchObject({
+      status: 'off_track',
+      favorable: false,
+      fact: { value: 0, label: '0,0%' },
+      // The gap is directional ("behind" is positive), so 0.004 is kept exact even though the label rounds to zero.
+      deviation: { abs: 0.004, pct: null, label: '+0,0%' },
     });
   });
 

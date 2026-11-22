@@ -436,6 +436,53 @@ Recorded so the deferred findings do not disappear from history when the open en
 
 ## Metrics engine (M3)
 
+### M3 final whole-branch review
+
+Fixed in the final M3 fix wave:
+
+- **Goal progress decided on display-rounded facts.** `goals-progress.service.js` now rebuilds the exact
+  ROMI/payback/LTV:CAC guard values from the health row's kopeck fields with `computeRomi`, `computePayback` and
+  `computeLtvCac`. Status, `favorable` and the directional `deviation.abs` use those values; `fact.value` and every
+  label stay at display precision. A goal can no longer read `on_track` while health says `watch`/`risk`.
+- **ROMI labels used two decimals and could hide a tiny negative as `0,0%`.** `src/lib/format.js` now exports
+  `formatRomi`: signed, one decimal, typographic minus, and a tiny negative reads `−<0,1%` instead of a positive
+  zero. The raw API value keeps two decimals.
+- **`health.watchRatio` and `health.romiRiskBelow` were unused.** `deriveHealth` now uses both in exact bigint
+  cross-multiplications, so the spec thresholds have one source again.
+- **Event-time day bounds stopped at `.999`.** `metrics.repo.js` now uses the half-open
+  `[minskDayStart(from), minskDayStart(to + 1 day))` bound for every `timestamptz` predicate, matching attribution
+  and cohorts; a sub-millisecond event on the last day can no longer be dropped.
+
+Still open:
+
+- **The health report has no single snapshot across its four reads.** CAC, cohort LTV, attribution and the channel
+  dimension are consecutive calls; a concurrent import can move one number between them, so rows can mix two
+  moments. The cohort service already opens a repeatable-read snapshot for its own reads; extending one snapshot
+  across all four would require a shared transaction and is deferred to the concurrency pass.
+- **Attribution duplicates the ROMI formula inline.** `buildModelView` computes
+  `centsPercent(revenueCents - spendCents, spendCents)` instead of `computeRomi`. The two agree today, but a change
+  to guard digits or the zero-spend rule would drift. Route it through the shared helper when the attribution
+  view-model is next touched.
+- **Ranking normalises display-rounded criteria.** CAC is exact, but ROMI, LTV:CAC and the customer count come from
+  the health row after display rounding, so `2.9996` and `3.0000` rank identically. This is a ranking semantics
+  decision, not a quick fix: either pass exact guard values into the ranking or document that scores intentionally
+  use display precision.
+- **A free channel cannot be ranked.** CAC `0n` makes LTV:CAC undefined, so the channel is excluded as
+  `missing_criterion` even when it acquired customers at zero cost. This follows the free-channel `no_data` ruling;
+  if such a channel should rank, it needs an explicit "free" score rather than a fabricated ratio.
+- **`null` and `undefined` defaults are not uniform.** Some service inputs default with `??`, others check
+  `=== null` only, so a partial view-model can leak `undefined` where a consumer tests for `null`. Unify the input
+  contract in the next metrics change.
+- **Ranking and dashboard stay last-touch for M4.** Both read the health default model. A model selector is a
+  possible M4 addition; until then a last-touch score must not be labelled as first-touch or linear.
+  `getRankingReport` already has the health service's `attributionModel` parameter to forward when that lands.
+- **Dashboard channel/campaign filters are an M4 service extension (BO-13), not an M3 defect.** The weekly query
+  already accepts `channelIds`; the summary does not expose filters. Wiring them is additive and should not create
+  a second aggregation path.
+- **Free channels legitimately show «Мало данных».** Email and SEO acquire customers at zero spend: CAC is `free`
+  (`0n`) while ROMI is undefined and LTV:CAC has a zero denominator, so health is `no_data`. This is the literal
+  metrics-spec ruling, pinned by the T7 integration suite; changing it needs an owner decision.
+
 - **A free channel can never be `healthy`.** Email and SEO have customers but `spend = 0`, so CAC is `0n` (`free`),
   while ROMI is `null` by metrics spec §3.2; health §3.4 then falls back to `no_data` even though the channel acquired
   customers at zero cost. This is the literal spec ruling and must not be changed silently — it needs an owner

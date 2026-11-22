@@ -2,7 +2,7 @@ import { METRICS_CONFIG } from '../../config/metrics.js';
 import { isoWeekStart, toDateOnly } from '../../lib/dates.js';
 import { ValidationError } from '../../lib/errors.js';
 import { parseBigIntId } from '../../lib/ids.js';
-import { centsPercent, centsToApi, percentChange } from '../../lib/metrics-math.js';
+import { centsPercent, centsToApi } from '../../lib/metrics-math.js';
 
 const DAY_MS = 86_400_000;
 const ATTRIBUTION_MODELS = METRICS_CONFIG.attribution.models;
@@ -426,7 +426,7 @@ export function createAttributionService({ attributionRepository, metricsReposit
           // names plus `deltaModel` make the base models explicit instead of relying on a comment.
           deltaModel: 'linear',
           deltaLinearVsLastCents: centsToApi(linearCents - lastTouchCents),
-          deltaLinearVsLastPct: percentChange(Number(linearCents), Number(lastTouchCents)),
+          deltaLinearVsLastPct: centsPercent(linearCents - lastTouchCents, lastTouchCents),
         };
       });
 

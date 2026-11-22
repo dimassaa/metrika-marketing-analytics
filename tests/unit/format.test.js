@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatMonths, formatRatio } from '../../src/lib/format.js';
+import { formatMonths, formatRatio, formatRomi } from '../../src/lib/format.js';
 
 describe('formatMonths', () => {
   it('drops trailing zeros instead of showing a fake precision', () => {
@@ -31,6 +31,29 @@ describe('formatMonths', () => {
   it('rejects non-numeric input instead of printing it as a label', () => {
     expect(() => formatMonths('abc')).toThrow(TypeError);
     expect(() => formatMonths(Number.NaN)).toThrow(TypeError);
+  });
+});
+
+describe('formatRomi', () => {
+  it('shows a signed one-decimal percentage per metrics spec §3.2', () => {
+    expect(formatRomi(713.11)).toBe('+713,1%');
+    expect(formatRomi(-8.11)).toBe('\u22128,1%');
+    expect(formatRomi(0)).toBe('0,0%');
+  });
+
+  it('never turns a tiny negative value into a positive zero', () => {
+    const label = formatRomi(-0.004);
+    expect(label).toBe('\u2212<0,1%');
+    expect(label.startsWith('\u2212')).toBe(true);
+    expect(label).not.toBe('0,0%');
+    expect(label).not.toBe('\u22120,0%');
+  });
+
+  it('keeps a missing value honest and rejects non-numeric input', () => {
+    expect(formatRomi(null)).toBe('—');
+    expect(formatRomi(undefined)).toBe('—');
+    expect(() => formatRomi('abc')).toThrow(TypeError);
+    expect(() => formatRomi(Number.NaN)).toThrow(TypeError);
   });
 });
 

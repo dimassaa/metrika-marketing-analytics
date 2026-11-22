@@ -1,6 +1,6 @@
 import { METRICS_CONFIG } from '../../config/metrics.js';
 import { ValidationError } from '../../lib/errors.js';
-import { formatCentsToByn, formatMonths, formatPercent, formatRatio } from '../../lib/format.js';
+import { formatCentsToByn, formatMonths, formatRatio, formatRomi } from '../../lib/format.js';
 import { HEALTH_STATUS_LABELS } from '../../lib/metrics-labels.js';
 import {
   assertFiniteOrNull,
@@ -143,10 +143,12 @@ export function deriveHealth({ cacCents, ltv12Cents, revenueCents, spendCents } 
   // ROMI is undefined without spend, so none of the other metrics can speak for the channel.
   if (spendCents === 0n) return 'no_data';
 
-  const { healthyRatio, healthyPaybackMax, watchPaybackMax } = METRICS_CONFIG.health;
+  const { healthyRatio, watchRatio, romiRiskBelow, healthyPaybackMax, watchPaybackMax } = METRICS_CONFIG.health;
 
-  if (revenueCents < spendCents) return 'risk';
-  if (cacCents > 0n && ltv12Cents < cacCents) return 'risk';
+  // ROMI < romiRiskBelow without a division: (revenue - spend) * 100 < threshold * spend. The threshold is an
+  // integer percentage, so cross-multiplying keeps the comparison exact for every kopeck count.
+  if ((revenueCents - spendCents) * 100n < BigInt(romiRiskBelow) * spendCents) return 'risk';
+  if (cacCents > 0n && ltv12Cents < BigInt(watchRatio) * cacCents) return 'risk';
   if (cacCents * MONTHS_PER_YEAR > BigInt(watchPaybackMax) * ltv12Cents) return 'risk';
 
   if (cacCents > 0n && ltv12Cents < BigInt(healthyRatio) * cacCents) return 'watch';
@@ -208,7 +210,7 @@ function buildRow({
     ltv12Cents: centsToApi(ltv12Cents),
     ltvLabel: formatCentsToByn(ltv12Cents),
     romiPct,
-    romiLabel: formatPercent(romiPct),
+    romiLabel: formatRomi(romiPct),
     paybackMonths,
     // A missing payback is a dash, not "— мес.": the suffix belongs to a real month count.
     paybackLabel: paybackMonths === null ? formatMonths(null) : `${formatMonths(paybackMonths)} мес.`,

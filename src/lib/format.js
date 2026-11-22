@@ -69,6 +69,36 @@ export function formatPercent(value, { signed = false } = {}) {
 }
 
 /**
+ * Renders ROMI with the UI contract of metrics spec §3.2: signed and one decimal (`+713,1%`, `−0,1%`).
+ *
+ * A negative value that rounds to zero at one decimal must never read as `0,0%` or as a positive zero: it becomes
+ * `−<0,1%`, which keeps the sign and says "less than a tenth of a percent". The raw API value keeps two decimals;
+ * this formatter is display-only.
+ *
+ * @param {string | number | null | undefined} value ROMI percentage.
+ * @returns {string} Ready-to-display signed percentage, or `—` for NULL.
+ * @throws {TypeError} When the value is not a finite number.
+ */
+export function formatRomi(value) {
+  if (value === null || value === undefined || value === '') return EM_DASH;
+
+  const numeric = typeof value === 'string' ? Number(value.trim().replace(',', '.')) : Number(value);
+  if (!Number.isFinite(numeric)) {
+    throw new TypeError(`formatRomi expected a finite number, got ${JSON.stringify(value)}`);
+  }
+
+  const rounded = roundNumber(numeric, 1);
+  if (rounded === 0) {
+    // Exact zero is a measured zero. A tiny negative is not zero and must keep its direction.
+    if (numeric === 0) return '0,0%';
+    return numeric < 0 ? `${MINUS}<0,1%` : '+0,0%';
+  }
+
+  const sign = rounded < 0 ? MINUS : '+';
+  return `${sign}${Math.abs(rounded).toFixed(1).replace('.', ',')}%`;
+}
+
+/**
  * Expands exponent notation into a plain decimal so `formatMonths` never shows `1e-7` to a user. The exponent is
  * bounded: a value needing more than 100 zeros on either side of the decimal point is not a month count, and
  * expanding it would allocate a pointless string.

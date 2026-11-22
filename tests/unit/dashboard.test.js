@@ -23,7 +23,7 @@ const BLENDED = {
   ltv12Cents: '14345',
   ltvLabel: '143,45',
   romiPct: 713.11,
-  romiLabel: '713,11%',
+  romiLabel: '+713,1%',
   paybackMonths: 3.66,
   paybackLabel: '3,66 мес.',
   ltvCacRatio: 3.278,
@@ -92,7 +92,7 @@ describe('dashboard summary', () => {
       cacCents: '4376',
       cacLabel: '43,76',
       romiPct: 713.11,
-      romiLabel: '713,11%',
+      romiLabel: '+713,1%',
     });
     expect(summary.period).toEqual({ from: PERIOD.from, to: PERIOD.to, days: 30, anchor: ANCHOR });
   });

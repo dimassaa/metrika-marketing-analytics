@@ -1,7 +1,13 @@
-import { minskDayEnd, minskDayStart } from '../lib/dates.js';
+import { addDays, minskDayStart } from '../lib/dates.js';
 import { ValidationError } from '../lib/errors.js';
 import { parseBigIntId } from '../lib/ids.js';
 import { centsFromDb } from '../lib/money.js';
+
+/*
+ * Event-time bounds are half-open: `[minskDayStart(from), minskDayStart(to + 1 day))`. `minskDayEnd` stops at
+ * `.999`, so an inclusive `<=` silently drops a sub-millisecond row that still belongs to `to`. Calendar
+ * `stat_date` columns stay inclusive (`BETWEEN`), because they carry no time of day.
+ */
 
 /**
  * Read-only CAC inputs: spend per channel/campaign from `daily_stats` and new customers from `customers`.
@@ -65,7 +71,7 @@ export function createMetricsRepository(db) {
                   count(*)::int AS new_customers
              FROM customers cu
             WHERE cu.first_order_at >= $3::timestamptz
-              AND cu.first_order_at <= $4::timestamptz
+              AND cu.first_order_at < $4::timestamptz
             GROUP BY cu.first_channel_id
          )
          SELECT c.id::text AS channel_id,
@@ -77,7 +83,7 @@ export function createMetricsRepository(db) {
            LEFT JOIN spend s ON s.channel_id = c.id
            LEFT JOIN customer_counts n ON n.channel_id = c.id
           ORDER BY c.code`,
-        [from, to, minskDayStart(from), minskDayEnd(to)],
+        [from, to, minskDayStart(from), minskDayStart(addDays(to, 1))],
       );
 
       return rows.map((row) => ({
@@ -127,7 +133,7 @@ export function createMetricsRepository(db) {
                   count(*)::int AS new_customers
              FROM customers cu
             WHERE cu.first_order_at >= $5::timestamptz
-              AND cu.first_order_at <= $6::timestamptz
+              AND cu.first_order_at < $6::timestamptz
               AND cu.first_campaign_id IS NOT NULL
             GROUP BY cu.first_campaign_id
          )
@@ -143,7 +149,7 @@ export function createMetricsRepository(db) {
           WHERE ($3::bigint IS NULL OR cp.channel_id = $3::bigint)
             AND ($4::bigint IS NULL OR cp.id = $4::bigint)
           ORDER BY cp.code`,
-        [from, to, scopedChannelId, scopedCampaignId, minskDayStart(from), minskDayEnd(to)],
+        [from, to, scopedChannelId, scopedCampaignId, minskDayStart(from), minskDayStart(addDays(to, 1))],
       );
 
       return rows.map((row) => ({
@@ -171,8 +177,8 @@ export function createMetricsRepository(db) {
                 (SELECT count(*)::int
                    FROM customers cu
                   WHERE cu.first_order_at >= $3::timestamptz
-                    AND cu.first_order_at <= $4::timestamptz) AS new_customers`,
-        [from, to, minskDayStart(from), minskDayEnd(to)],
+                    AND cu.first_order_at < $4::timestamptz) AS new_customers`,
+        [from, to, minskDayStart(from), minskDayStart(addDays(to, 1))],
       );
 
       const row = rows[0] ?? {};
@@ -228,7 +234,7 @@ export function createMetricsRepository(db) {
                   count(*)::int AS new_customers
              FROM customers cu
             WHERE cu.first_order_at >= $4::timestamptz
-              AND cu.first_order_at <= $5::timestamptz
+              AND cu.first_order_at < $5::timestamptz
               AND ($3::bigint[] IS NULL OR cu.first_channel_id = ANY($3::bigint[]))
             GROUP BY 1
          )
@@ -240,7 +246,7 @@ export function createMetricsRepository(db) {
           WHERE coalesce(s.week_start, n.week_start) >= $1::date
             AND coalesce(s.week_start, n.week_start) + 6 <= $2::date
           ORDER BY 1`,
-        [from, to, scopedChannelIds, minskDayStart(from), minskDayEnd(to)],
+        [from, to, scopedChannelIds, minskDayStart(from), minskDayStart(addDays(to, 1))],
       );
 
       return rows.map((row) => ({
@@ -283,7 +289,7 @@ export function createMetricsRepository(db) {
              FROM customers cu
             WHERE cu.first_channel_id = $1::bigint
               AND cu.first_order_at >= $4::timestamptz
-              AND cu.first_order_at <= $5::timestamptz
+              AND cu.first_order_at < $5::timestamptz
          ),
          channel_orders AS (
            SELECT count(*)::int AS orders
@@ -291,13 +297,13 @@ export function createMetricsRepository(db) {
              JOIN customers cu ON cu.id = o.customer_id
             WHERE cu.first_channel_id = $1::bigint
               AND o.occurred_at >= $4::timestamptz
-              AND o.occurred_at <= $5::timestamptz
+              AND o.occurred_at < $5::timestamptz
          )
          SELECT s.impressions, s.clicks, s.leads, a.new_customers, o.orders
            FROM stats s
            CROSS JOIN acquired a
            CROSS JOIN channel_orders o`,
-        [scopedChannelId, from, to, minskDayStart(from), minskDayEnd(to)],
+        [scopedChannelId, from, to, minskDayStart(from), minskDayStart(addDays(to, 1))],
       );
 
       const row = rows[0] ?? {};
