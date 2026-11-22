@@ -26,6 +26,8 @@ const minskFormatter = new Intl.DateTimeFormat('en-US', {
 });
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+/** Month lengths in a non-leap year; February is adjusted in `daysInMonth`. */
+const MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 /**
  * @param {number} value
@@ -139,6 +141,40 @@ export function addDays(date, days) {
 export function startOfMonth(date) {
   const { year, month } = parseDateOnly(date);
   return `${year}-${pad2(month)}-01`;
+}
+
+/**
+ * Adds a number of calendar months, clamping the day to the target month's last day.
+ *
+ * A cohort month is always the first day, but goal periods and the payback estimate shift arbitrary dates. Naive
+ * `setMonth` arithmetic would roll `2026-01-31` into March instead of clamping to `2026-02-28`, so the month index
+ * and the clamped day are computed explicitly on calendar parts.
+ *
+ * @param {string} date `YYYY-MM-DD`.
+ * @param {number} months Signed number of months.
+ * @returns {string} `YYYY-MM-DD`.
+ * @throws {TypeError} When `months` is not an integer.
+ * @throws {RangeError} When `date` is not a real calendar date.
+ */
+export function addMonths(date, months) {
+  if (!Number.isInteger(months)) {
+    throw new TypeError(`expected an integer month shift, got ${JSON.stringify(months)}`);
+  }
+  const { year, month, day } = parseDateOnly(date);
+  const monthIndex = year * 12 + (month - 1) + months;
+  const targetYear = Math.floor(monthIndex / 12);
+  const targetMonth = (((monthIndex % 12) + 12) % 12) + 1;
+  return `${targetYear}-${pad2(targetMonth)}-${pad2(Math.min(day, daysInMonth(targetYear, targetMonth)))}`;
+}
+
+/**
+ * @param {number} year Full calendar year.
+ * @param {number} month 1–12.
+ * @returns {number} Days in that month, honouring the Gregorian leap-year rule.
+ */
+function daysInMonth(year, month) {
+  if (month !== 2) return MONTH_DAYS[month - 1];
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28;
 }
 
 /**
