@@ -282,6 +282,10 @@ function mergeCompanyCohorts(entries) {
  * at all — the spec's denominator is the cohort size, and dropping a zero-margin cohort would quietly inflate the
  * channel average. Incomplete cohorts are excluded entirely; the matrix shows them with the `isComplete` flag.
  *
+ * A channel with completed cohorts but no observed margin row anywhere returns `ltvCents: null` and
+ * `insufficient_history`, keeping its real `customerCount`: `0 / N` is not evidence of zero LTV. Once at least one
+ * margin row exists the average is numeric, including a genuine zero margin.
+ *
  * The channel list comes from the `channels` table, so a channel with spend but no customers yet is still returned
  * with `ltvCents: null` and `insufficient_history`; LTV:CAC can then left-join CAC rows. Inactive channels are
  * included for the same reason: historical LTV must remain available after a channel is archived.
@@ -306,16 +310,26 @@ function mergeCompanyCohorts(entries) {
  *   completed channel-cohorts.
  */
 function buildChannelLtv(entries, channels, { anchor, horizonMonths }) {
-  /** @type {Map<string, { channelId: string, channelCode: string, totalCents: bigint, customers: number, cohorts: number }>} */
+  /** @type {Map<string, { channelId: string, channelCode: string, totalCents: bigint, customers: number, cohorts: number, hasMargin: boolean }>} */
   const byChannel = new Map(
     channels.map((channel) => [
       channel.channelId,
-      { channelId: channel.channelId, channelCode: channel.channelCode, totalCents: 0n, customers: 0, cohorts: 0 },
+      {
+        channelId: channel.channelId,
+        channelCode: channel.channelCode,
+        totalCents: 0n,
+        customers: 0,
+        cohorts: 0,
+        // A completed cohort contributes its N even without margin rows, but then the channel has no observed
+        // revenue to divide: `0 / N` must stay "no data", not a fabricated zero.
+        hasMargin: false,
+      },
     ]),
   );
   const completedMonths = new Set();
   let totalCents = 0n;
   let totalCustomers = 0;
+  let hasAnyMargin = false;
 
   for (const entry of entries) {
     const channel = byChannel.get(entry.channelId);
@@ -326,13 +340,15 @@ function buildChannelLtv(entries, channels, { anchor, horizonMonths }) {
     // Completeness is a calendar fact; computing it directly avoids summing the cohort once more just to read it.
     if (addMonths(entry.cohortMonth, horizonMonths) > anchor) continue;
 
-    const { totalCents: cohortCents } = sumHorizonMargins(entry.marginsByOffset, horizonMonths);
+    const { totalCents: cohortCents, hasMargin } = sumHorizonMargins(entry.marginsByOffset, horizonMonths);
     channel.totalCents += cohortCents;
     channel.customers += entry.cohortSize;
     channel.cohorts += 1;
+    channel.hasMargin ||= hasMargin;
     completedMonths.add(entry.cohortMonth);
     totalCents += cohortCents;
     totalCustomers += entry.cohortSize;
+    hasAnyMargin ||= hasMargin;
   }
 
   const rows = [...byChannel.values()]
@@ -340,19 +356,19 @@ function buildChannelLtv(entries, channels, { anchor, horizonMonths }) {
     .map((channel) => ({
       channelId: channel.channelId,
       channelCode: channel.channelCode,
-      ltvCents: centsToApi(channel.customers > 0 ? divideCents(channel.totalCents, channel.customers) : null),
+      ltvCents: centsToApi(channel.hasMargin ? divideCents(channel.totalCents, channel.customers) : null),
       customerCount: channel.customers,
       cohortCount: channel.cohorts,
-      status: channel.customers > 0 ? 'ok' : 'insufficient_history',
+      status: channel.hasMargin ? 'ok' : 'insufficient_history',
     }));
 
   return {
     rows,
     blended: {
-      ltvCents: centsToApi(totalCustomers > 0 ? divideCents(totalCents, totalCustomers) : null),
+      ltvCents: centsToApi(hasAnyMargin ? divideCents(totalCents, totalCustomers) : null),
       customerCount: totalCustomers,
       cohortCount: completedMonths.size,
-      status: totalCustomers > 0 ? 'ok' : 'insufficient_history',
+      status: hasAnyMargin ? 'ok' : 'insufficient_history',
     },
   };
 }

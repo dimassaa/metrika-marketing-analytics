@@ -408,6 +408,42 @@ describe('createLtvService', () => {
     expect(report.excludedIncomplete).toEqual([]);
   });
 
+  it('does not fabricate a zero when every completed cohort has no observed margin', async () => {
+    const repository = repositoryFixture({
+      sizes: [
+        { cohortMonth: '2025-06-01', channelId: '1', channelCode: 'instagram', cohortSize: 100 },
+        { cohortMonth: '2025-07-01', channelId: '1', channelCode: 'instagram', cohortSize: 100 },
+      ],
+      margins: [],
+    });
+    const service = createLtvService({ cohortsRepository: repository });
+
+    const report = await service.getChannelLtv({ anchor: '2027-01-20', horizonMonths: 12 });
+
+    // The cohort sizes are real and completed, so they stay in customerCount/cohortCount. But `0 / 200` without a
+    // single observed margin row is no data, not a 0,00 BYN LTV that would look like a measured result.
+    expect(report.rows).toEqual([
+      {
+        channelId: '1',
+        channelCode: 'instagram',
+        ltvCents: null,
+        customerCount: 200,
+        cohortCount: 2,
+        status: 'insufficient_history',
+      },
+    ]);
+    expect(report.blended).toEqual({
+      ltvCents: null,
+      customerCount: 200,
+      cohortCount: 2,
+      status: 'insufficient_history',
+    });
+
+    const matrix = await service.getCohortMatrix({ anchor: '2027-01-20', horizonMonths: 12 });
+    expect(matrix.channelLtv).toEqual(report.rows);
+    expect(matrix.cohorts.map((cohort) => cohort.ltvCents)).toEqual([null, null]);
+  });
+
   it('distinguishes a real zero margin from missing margin data', async () => {
     const repository = repositoryFixture({
       sizes: [
@@ -428,6 +464,10 @@ describe('createLtvService', () => {
     expect(zero.cells[0]).toEqual({ monthOffset: 0, retentionPct: 100, cumLtvCents: '0' });
     expect(missing).toMatchObject({ ltvCents: null, ltvLabel: '—' });
     expect(missing.cells[0]).toEqual({ monthOffset: 0, retentionPct: 0, cumLtvCents: null });
+
+    // The channel saw one real (zero) margin row; the February cohort is not complete yet, so only January counts.
+    const channelReport = await service.getChannelLtv({ anchor: '2027-01-20', horizonMonths: 12 });
+    expect(channelReport.rows[0]).toMatchObject({ ltvCents: '0', customerCount: 10, cohortCount: 1, status: 'ok' });
   });
 
   it('returns channels without customers so cac rows can be left-joined', async () => {
