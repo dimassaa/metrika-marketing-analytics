@@ -7,6 +7,20 @@ import { resolvePeriod } from '../../lib/periods.js';
 const GROUPINGS = Object.freeze(['channel', 'campaign']);
 
 /**
+ * Validates an optional BIGINT filter. `null`/`undefined` means "no filter"; anything else must be a real id.
+ * @param {unknown} value
+ * @param {string} label Russian noun used in the error (`канала`, `кампании`).
+ * @returns {string | null}
+ * @throws {ValidationError} When a supplied value is not a BIGINT id.
+ */
+function parseOptionalId(value, label) {
+  if (value === null || value === undefined) return null;
+  const id = parseBigIntId(value);
+  if (id === null) throw new ValidationError(`Некорректный идентификатор ${label}`);
+  return id;
+}
+
+/**
  * CAC for one channel, campaign or the whole company (metrics spec §1).
  *
  * The division happens in `bigint`: `Math.round(Number(spend) / customers)` would lose kopecks above 2^53 and
@@ -59,8 +73,9 @@ function toRow(input, groupBy) {
 }
 
 /**
- * CAC report builder. Express, `req` and the pool are invisible here: the service receives a repository and a
- * validated period, and returns a view-model that M4 can serialise directly.
+ * CAC report builder. Express, `req` and the pool are invisible here: the service receives a repository and an
+ * anchor-relative period request, resolves the window through the shared resolver, and returns a view-model that M4
+ * can serialise directly.
  *
  * @param {{
  *   metricsRepository: ReturnType<typeof import('../../repositories/metrics.repo.js').createMetricsRepository>,
@@ -70,11 +85,14 @@ export function createCacService({ metricsRepository }) {
   return {
     /**
      * @param {{
+     *   anchor?: string | null,
      *   from?: string | null,
      *   to?: string | null,
-     *   groupBy?: 'channel' | 'campaign',
+     *   days?: number,
      *   channelId?: string | null,
-     * }} [request]
+     *   campaignId?: string | null,
+     *   groupBy?: 'channel' | 'campaign',
+     * }} [request] `anchor` is the data anchor used for the default window and for clamping a future `to`.
      * @returns {Promise<{
      *   period: { from: string, to: string, days: number },
      *   blended: {
@@ -86,22 +104,29 @@ export function createCacService({ metricsRepository }) {
      *   },
      *   rows: object[],
      * }>}
-     * @throws {ValidationError} When the period, grouping or channel filter is invalid.
+     * @throws {ValidationError} When the anchor/period, grouping or an active filter is invalid.
      */
-    async getCacReport({ from = null, to = null, groupBy = 'channel', channelId = null } = {}) {
+    async getCacReport({
+      anchor = null,
+      from = null,
+      to = null,
+      days,
+      channelId = null,
+      campaignId = null,
+      groupBy = 'channel',
+    } = {}) {
       if (!GROUPINGS.includes(groupBy)) {
         throw new ValidationError('Неизвестная группировка CAC');
       }
 
-      const scopedChannelId = channelId === null || channelId === undefined ? null : parseBigIntId(channelId);
-      if (channelId !== null && channelId !== undefined && scopedChannelId === null) {
-        throw new ValidationError('Некорректный идентификатор канала');
-      }
+      // Filters are validated only when they reach SQL. Grouping by channel returns every channel, so a stray
+      // channelId or campaignId there is ignored instead of failing a request that would not use it.
+      const scopedChannelId = groupBy === 'campaign' ? parseOptionalId(channelId, 'канала') : null;
+      const scopedCampaignId = groupBy === 'campaign' ? parseOptionalId(campaignId, 'кампании') : null;
 
-      // The CAC service is called with an already resolved period in M4; resolving against `to` here still validates
-      // the bounds and computes the real inclusive day count, so a direct API caller cannot report a 90-day label
-      // over a one-day range.
-      const period = resolvePeriod({ anchor: to, from, to });
+      // The anchor is supplied by M4 from `getDataAnchor()`. It is required even with explicit bounds because the
+      // resolver owns the "data ends at the anchor" rule and a future `to` must be clamped, not trusted.
+      const period = resolvePeriod({ anchor, from, to, days });
       const bounds = { from: period.from, to: period.to };
 
       const [totals, inputs] =
@@ -112,7 +137,11 @@ export function createCacService({ metricsRepository }) {
             ])
           : await Promise.all([
               metricsRepository.totals(bounds),
-              metricsRepository.listCampaignCacInputs({ ...bounds, channelId: scopedChannelId }),
+              metricsRepository.listCampaignCacInputs({
+                ...bounds,
+                channelId: scopedChannelId,
+                campaignId: scopedCampaignId,
+              }),
             ]);
 
       const blendedCac = computeCac(totals);

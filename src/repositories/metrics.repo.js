@@ -90,20 +90,24 @@ export function createMetricsRepository(db) {
     },
 
     /**
-     * Campaign inputs, optionally limited to one channel. New customers are grouped by `first_campaign_id`, so a
-     * campaign never borrows customers attributed to a different campaign or channel.
+     * Campaign inputs, optionally limited to one channel and/or one campaign. New customers are grouped by
+     * `first_campaign_id`, so a campaign never borrows customers attributed to a different campaign or channel.
      *
-     * @param {{ from: string, to: string, channelId?: string | null }} filters
+     * @param {{ from: string, to: string, channelId?: string | null, campaignId?: string | null }} filters
      * @returns {Promise<Array<{
      *   campaignId: string, channelId: string, campaignCode: string, campaignName: string,
      *   spendCents: bigint, newCustomers: number,
      * }>>}
-     * @throws {ValidationError} When `channelId` is not a BIGINT id.
+     * @throws {ValidationError} When `channelId` or `campaignId` is not a BIGINT id.
      */
-    async listCampaignCacInputs({ from, to, channelId = null }) {
+    async listCampaignCacInputs({ from, to, channelId = null, campaignId = null }) {
       const scopedChannelId = channelId === null || channelId === undefined ? null : parseBigIntId(channelId);
       if (channelId !== null && channelId !== undefined && scopedChannelId === null) {
         throw new ValidationError('Некорректный идентификатор канала');
+      }
+      const scopedCampaignId = campaignId === null || campaignId === undefined ? null : parseBigIntId(campaignId);
+      if (campaignId !== null && campaignId !== undefined && scopedCampaignId === null) {
+        throw new ValidationError('Некорректный идентификатор кампании');
       }
 
       const { rows } = await db.query(
@@ -115,14 +119,15 @@ export function createMetricsRepository(db) {
                ON ds.campaign_id = cp.id
               AND ds.stat_date BETWEEN $1::date AND $2::date
             WHERE ($3::bigint IS NULL OR cp.channel_id = $3::bigint)
+              AND ($4::bigint IS NULL OR cp.id = $4::bigint)
             GROUP BY cp.id
          ),
          customer_counts AS (
            SELECT cu.first_campaign_id AS campaign_id,
                   count(*)::int AS new_customers
              FROM customers cu
-            WHERE cu.first_order_at >= $4::timestamptz
-              AND cu.first_order_at <= $5::timestamptz
+            WHERE cu.first_order_at >= $5::timestamptz
+              AND cu.first_order_at <= $6::timestamptz
               AND cu.first_campaign_id IS NOT NULL
             GROUP BY cu.first_campaign_id
          )
@@ -136,8 +141,9 @@ export function createMetricsRepository(db) {
            LEFT JOIN spend s ON s.campaign_id = cp.id
            LEFT JOIN customer_counts n ON n.campaign_id = cp.id
           WHERE ($3::bigint IS NULL OR cp.channel_id = $3::bigint)
+            AND ($4::bigint IS NULL OR cp.id = $4::bigint)
           ORDER BY cp.code`,
-        [from, to, scopedChannelId, minskDayStart(from), minskDayEnd(to)],
+        [from, to, scopedChannelId, scopedCampaignId, minskDayStart(from), minskDayEnd(to)],
       );
 
       return rows.map((row) => ({

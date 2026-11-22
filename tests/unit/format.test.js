@@ -17,6 +17,13 @@ describe('formatMonths', () => {
     expect(formatMonths(12.5)).not.toContain('%');
   });
 
+  it('never emits exponent notation for tiny or exponent inputs', () => {
+    expect(formatMonths(1e-7)).toBe('0,0000001');
+    expect(formatMonths('1.5e-7')).toBe('0,00000015');
+    expect(formatMonths('1e+21')).toBe('1000000000000000000000');
+    expect(formatMonths('-1e-7')).toBe('\u22120,0000001');
+  });
+
   it('uses the typographic minus for negative months', () => {
     expect(formatMonths('-1.50')).toBe('\u22121,5');
   });
@@ -53,5 +60,6 @@ describe('formatRatio', () => {
     expect(() => formatRatio('abc')).toThrow(TypeError);
     expect(() => formatRatio(2.5, { decimals: -1 })).toThrow(TypeError);
     expect(() => formatRatio(2.5, { decimals: 1.5 })).toThrow(TypeError);
+    expect(() => formatRatio(2.5, { decimals: 13 })).toThrow(/between 0 and 12/);
   });
 });

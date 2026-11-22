@@ -71,6 +71,10 @@ export function centsToBynDecimal(cents) {
  * Divides two bigint amounts and rounds the ratio half up away from zero without routing the division through a
  * float. The numerator and denominator may each be negative; the result keeps the mathematical sign.
  *
+ * The final `Number` conversion is exact only while the scaled bigint is at most 2^53; a larger ratio is
+ * approximate. That is acceptable here because ratios are view-model numbers, never money: CAC and all balances
+ * remain bigint kopecks.
+ *
  * @param {bigint} numerator
  * @param {bigint} denominator
  * @param {number} [decimals] Result precision, 0–12.

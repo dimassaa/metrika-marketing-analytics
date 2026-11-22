@@ -69,6 +69,39 @@ export function formatPercent(value, { signed = false } = {}) {
 }
 
 /**
+ * Expands exponent notation into a plain decimal so `formatMonths` never shows `1e-7` to a user. The exponent is
+ * bounded: a value needing more than 100 zeros on either side of the decimal point is not a month count, and
+ * expanding it would allocate a pointless string.
+ *
+ * @param {string} text Decimal with a dot, possibly in exponent form.
+ * @returns {string} Plain decimal with a dot.
+ * @throws {TypeError} When the exponent is outside the supported range.
+ */
+function expandExponent(text) {
+  const match = /^([+-]?)(\d+)(?:\.(\d+))?[eE]([+-]?\d+)$/.exec(text);
+  if (!match) return text;
+
+  const [, sign, whole, fraction = '', exponentText] = match;
+  const exponent = Number(exponentText);
+  if (!Number.isSafeInteger(exponent) || Math.abs(exponent) > 100) {
+    throw new TypeError(`formatMonths exponent is out of range: ${JSON.stringify(text)}`);
+  }
+
+  const digits = `${whole}${fraction}`;
+  const point = whole.length + exponent;
+  let plain;
+  if (point <= 0) {
+    plain = `0.${'0'.repeat(-point)}${digits}`;
+  } else if (point >= digits.length) {
+    plain = `${digits}${'0'.repeat(point - digits.length)}`;
+  } else {
+    plain = `${digits.slice(0, point)}.${digits.slice(point)}`;
+  }
+  plain = plain.replace(/^0+(?=\d)/, '');
+  return sign === '-' ? `-${plain}` : plain;
+}
+
+/**
  * Renders a month count without fake precision: `12`, `12,5`, `—`. Used by payback and LTV horizons, where a whole
  * month must not read as `12,00` and a percentage formatter would add a misleading `%`.
  *
@@ -79,10 +112,11 @@ export function formatPercent(value, { signed = false } = {}) {
 export function formatMonths(value) {
   if (value === null || value === undefined || value === '') return EM_DASH;
 
-  const text = (typeof value === 'string' ? value.trim() : String(value)).replace(',', '.');
-  if (!Number.isFinite(Number(text))) {
+  const raw = (typeof value === 'string' ? value.trim() : String(value)).replace(',', '.');
+  if (!Number.isFinite(Number(raw))) {
     throw new TypeError(`formatMonths expected a finite number, got ${JSON.stringify(value)}`);
   }
+  const text = expandExponent(raw);
 
   const negative = text.startsWith('-');
   const unsigned = text.replace(/^[+-]/, '');
@@ -93,7 +127,8 @@ export function formatMonths(value) {
 }
 
 /**
- * Renders a coefficient with a fixed number of decimals and a comma: `2,999`, `2,50`.
+ * Renders a coefficient with a fixed number of decimals and a comma: `2,999`, `2,50`. The precision bounds and the
+ * error message come from `roundNumber`, so this formatter cannot accept more digits than the arithmetic supports.
  *
  * @param {string | number | null | undefined} value Ratio value, e.g. LTV:CAC.
  * @param {{ decimals?: number }} [options] Decimal places, default 3 per metrics spec §0.
@@ -102,9 +137,6 @@ export function formatMonths(value) {
  */
 export function formatRatio(value, { decimals = 3 } = {}) {
   if (value === null || value === undefined || value === '') return EM_DASH;
-  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 20) {
-    throw new TypeError(`formatRatio decimals must be an integer between 0 and 20, got ${String(decimals)}`);
-  }
 
   const numeric = typeof value === 'string' ? Number(value.trim().replace(',', '.')) : Number(value);
   if (!Number.isFinite(numeric)) {

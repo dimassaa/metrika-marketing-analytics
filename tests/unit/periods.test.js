@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ValidationError } from '../../src/lib/errors.js';
-import { addDays } from '../../src/lib/dates.js';
+import { addDays, minskDayStart } from '../../src/lib/dates.js';
 import { DEFAULT_PERIOD_DAYS, resolvePeriod } from '../../src/lib/periods.js';
 
 describe('resolvePeriod', () => {
@@ -61,5 +61,11 @@ describe('resolvePeriod', () => {
     expect(() => resolvePeriod({ anchor: '2026-11-22', days: 0 })).toThrow(ValidationError);
     expect(() => resolvePeriod({ anchor: '2026-11-22', days: -7 })).toThrow(ValidationError);
     expect(() => resolvePeriod({ anchor: '2026-11-22', days: 1.5 })).toThrow(ValidationError);
+  });
+});
+
+describe('Minsk day bounds', () => {
+  it('starts 2026-11-22 at 21:00Z on 2026-11-21 (UTC+3)', () => {
+    expect(minskDayStart('2026-11-22').toISOString()).toBe('2026-11-21T21:00:00.000Z');
   });
 });

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ValidationError } from '../../src/lib/errors.js';
 import { computeCac, createCacService } from '../../src/services/metrics/cac.service.js';
 
-const PERIOD = { from: '2026-10-01', to: '2026-10-31' };
+const PERIOD = { anchor: '2026-11-21', from: '2026-10-01', to: '2026-10-31' };
 
 describe('computeCac', () => {
   it('divides spend by new customers and rounds to the kopeck half up', () => {
@@ -83,7 +83,7 @@ describe('createCacService', () => {
 
     const report = await service.getCacReport(PERIOD);
 
-    expect(repository.listChannelCacInputs).toHaveBeenCalledWith(PERIOD);
+    expect(repository.listChannelCacInputs).toHaveBeenCalledWith({ from: '2026-10-01', to: '2026-10-31' });
     expect(report.period).toEqual({ from: '2026-10-01', to: '2026-10-31', days: 31 });
     expect(report.blended).toEqual({
       spendCents: '900000',
@@ -131,7 +131,12 @@ describe('createCacService', () => {
 
     const report = await service.getCacReport({ ...PERIOD, groupBy: 'campaign' });
 
-    expect(repository.listCampaignCacInputs).toHaveBeenCalledWith({ ...PERIOD, channelId: null });
+    expect(repository.listCampaignCacInputs).toHaveBeenCalledWith({
+      from: '2026-10-01',
+      to: '2026-10-31',
+      channelId: null,
+      campaignId: null,
+    });
     expect(report.rows).toEqual([
       {
         key: 'campaign:7',
@@ -147,23 +152,57 @@ describe('createCacService', () => {
     ]);
   });
 
-  it('passes a validated channel filter to the campaign query', async () => {
+  it('passes validated campaign filters to the campaign query', async () => {
     const { service, repository } = serviceWith();
 
-    await service.getCacReport({ ...PERIOD, groupBy: 'campaign', channelId: '007' });
+    await service.getCacReport({ ...PERIOD, groupBy: 'campaign', channelId: '007', campaignId: '0007' });
 
-    expect(repository.listCampaignCacInputs).toHaveBeenCalledWith({ ...PERIOD, channelId: '7' });
+    expect(repository.listCampaignCacInputs).toHaveBeenCalledWith({
+      from: '2026-10-01',
+      to: '2026-10-31',
+      channelId: '7',
+      campaignId: '7',
+    });
   });
 
-  it('rejects an unknown grouping, a bad channel id and a reversed period', async () => {
+  it('resolves the default window, a future end date and a from-only range against the anchor', async () => {
+    const { service } = serviceWith();
+
+    await expect(service.getCacReport({ anchor: '2026-11-21' })).resolves.toMatchObject({
+      period: { from: '2026-10-23', to: '2026-11-21', days: 30 },
+    });
+    await expect(service.getCacReport({ anchor: '2026-11-21', to: '2026-12-01' })).resolves.toMatchObject({
+      period: { from: '2026-10-23', to: '2026-11-21', days: 30 },
+    });
+    await expect(service.getCacReport({ anchor: '2026-11-21', from: '2026-10-01' })).resolves.toMatchObject({
+      period: { from: '2026-10-01', to: '2026-11-21', days: 52 },
+    });
+    await expect(service.getCacReport({ anchor: '2026-11-21', days: 90 })).resolves.toMatchObject({
+      period: { from: '2026-08-24', to: '2026-11-21', days: 90 },
+    });
+  });
+
+  it('ignores a channel filter when grouping by channel', async () => {
+    const { service, repository } = serviceWith();
+
+    await expect(service.getCacReport({ ...PERIOD, channelId: 'not-an-id' })).resolves.toBeDefined();
+    expect(repository.listChannelCacInputs).toHaveBeenCalledWith({ from: '2026-10-01', to: '2026-10-31' });
+  });
+
+  it('rejects an unknown grouping, a bad filter for the active grouping, a missing anchor and a bad period', async () => {
     const { service } = serviceWith();
 
     await expect(service.getCacReport({ ...PERIOD, groupBy: 'day' })).rejects.toThrow(ValidationError);
     await expect(service.getCacReport({ ...PERIOD, groupBy: 'campaign', channelId: 'abc' })).rejects.toThrow(
       ValidationError,
     );
-    await expect(service.getCacReport({ from: '2026-10-31', to: '2026-10-01' })).rejects.toThrow(ValidationError);
-    await expect(service.getCacReport({ from: '2026-10-01' })).rejects.toThrow(ValidationError);
+    await expect(service.getCacReport({ ...PERIOD, groupBy: 'campaign', campaignId: 'abc' })).rejects.toThrow(
+      ValidationError,
+    );
+    await expect(service.getCacReport({ from: '2026-10-01', to: '2026-10-31' })).rejects.toThrow(ValidationError);
+    await expect(service.getCacReport({ anchor: '2026-11-21', from: '2026-10-31', to: '2026-10-01' })).rejects.toThrow(
+      ValidationError,
+    );
   });
 
   it('never leaks NaN or Infinity into the view model', async () => {

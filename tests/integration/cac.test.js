@@ -43,7 +43,7 @@ afterAll(async () => {
 
 describe('CAC against the seeded stand', () => {
   it('reports the Instagram channel from spend and first-touch customers', async () => {
-    const report = await cacService.getCacReport({ from: FROM, to: TO });
+    const report = await cacService.getCacReport({ anchor: ANCHOR, from: FROM, to: TO });
 
     expect(report.period).toEqual({ from: FROM, to: TO, days: 30 });
     expect(report.rows.find((row) => row.channelId === channelIds.instagram)).toMatchObject({
@@ -58,9 +58,10 @@ describe('CAC against the seeded stand', () => {
     });
   });
 
-  it('computes the blended CAC from company totals, not from per-channel averages', async () => {
-    const report = await cacService.getCacReport({ from: FROM, to: TO });
+  it('computes the blended CAC from company totals, not from per-channel averages, using the default anchor window', async () => {
+    const report = await cacService.getCacReport({ anchor: ANCHOR });
 
+    expect(report.period).toEqual({ from: FROM, to: TO, days: 30 });
     expect(report.blended).toEqual({
       spendCents: '1150770',
       newCustomers: 263,
@@ -71,7 +72,7 @@ describe('CAC against the seeded stand', () => {
   });
 
   it('attributes a campaign only to customers whose first campaign it was', async () => {
-    const report = await cacService.getCacReport({ from: FROM, to: TO, groupBy: 'campaign' });
+    const report = await cacService.getCacReport({ anchor: ANCHOR, from: FROM, to: TO, groupBy: 'campaign' });
 
     expect(report.rows.find((row) => row.campaignId === campaignIds.instagram_retarget)).toMatchObject({
       key: `campaign:${campaignIds.instagram_retarget}`,
@@ -83,10 +84,24 @@ describe('CAC against the seeded stand', () => {
       cacLabel: '65,22',
       status: 'ok',
     });
+
+    const filtered = await cacService.getCacReport({
+      anchor: ANCHOR,
+      from: FROM,
+      to: TO,
+      groupBy: 'campaign',
+      campaignId: campaignIds.instagram_retarget,
+    });
+    expect(filtered.rows).toHaveLength(1);
+    expect(filtered.rows[0]).toMatchObject({
+      campaignId: campaignIds.instagram_retarget,
+      newCustomers: 13,
+      cacCents: '6522',
+    });
   });
 
   it('marks an owned channel with customers but no spend as free', async () => {
-    const report = await cacService.getCacReport({ from: FROM, to: TO });
+    const report = await cacService.getCacReport({ anchor: ANCHOR, from: FROM, to: TO });
 
     expect(report.rows.find((row) => row.channelId === channelIds.email)).toMatchObject({
       spendCents: '0',
@@ -109,7 +124,7 @@ describe('CAC against the seeded stand', () => {
       const input = inputs.find((row) => row.channelId === channelId);
       expect(input).toMatchObject({ spendCents: 0n, newCustomers: 0 });
 
-      const report = await cacService.getCacReport({ from: FROM, to: TO });
+      const report = await cacService.getCacReport({ anchor: ANCHOR, from: FROM, to: TO });
       expect(report.rows.find((row) => row.channelId === channelId)).toMatchObject({
         spendCents: '0',
         newCustomers: 0,

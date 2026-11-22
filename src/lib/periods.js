@@ -1,8 +1,12 @@
+import { METRICS_CONFIG } from '../config/metrics.js';
 import { addDays, toDateOnly } from './dates.js';
 import { ValidationError } from './errors.js';
 
-/** Reporting window fixed by metrics spec §0.1: 30 calendar days counted back from the data anchor. */
-export const DEFAULT_PERIOD_DAYS = 30;
+/**
+ * Reporting window fixed by metrics spec §0.1: 30 calendar days counted back from the data anchor.
+ * The value comes from `METRICS_CONFIG` so the service default and the UI period options cannot disagree.
+ */
+export const DEFAULT_PERIOD_DAYS = METRICS_CONFIG.periods.defaultDays;
 
 const DAY_MS = 86_400_000;
 
