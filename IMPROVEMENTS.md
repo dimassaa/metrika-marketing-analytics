@@ -281,8 +281,8 @@ Non-critical findings recorded during implementation. Priority is decided by the
   Deriving the desired state inside the service would remove one round trip and the window.
 - **Own password change now revokes every other session and keeps the current one.** The controller passes
   `req.sessionID`, so the browser that submitted the form stays signed in while other devices drop to `/login`. If a
-  future caller cannot supply a session id, the service falls back to deleting all sessions and the redirect ends at
-  the login form; record that behaviour where such a caller is added.
+  future caller cannot supply a session id, the service falls back to deleting all sessions; the controller still
+  redirects to `/app/profile` and `requireAuth` then sends the anonymous request to the login form.
 - **The users table has no pagination and the audit page is the only M2 screen using `.pager`.** The demo has a
   handful of accounts; add pagination or a search field before the roster grows.
 - **The administrator's own reset button is disabled, but the server still accepts a self-reset POST.** A crafted

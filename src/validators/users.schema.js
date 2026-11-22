@@ -64,7 +64,9 @@ export function parseUserId(value) {
   const id = String(value ?? '');
   if (!/^\d+$/.test(id)) return null;
   const numeric = BigInt(id);
-  return numeric >= 1n && numeric <= MAX_BIGINT_ID ? id : null;
+  // Normalise once: a route such as `007` updates user 7, and every row id from pg is already `7`, so the service
+  // must compare the same spelling when it checks the last admin.
+  return numeric >= 1n && numeric <= MAX_BIGINT_ID ? numeric.toString() : null;
 }
 
 /**

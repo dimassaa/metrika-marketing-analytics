@@ -427,6 +427,45 @@ describe('user administration', () => {
     expect(demote.status).toBe(302);
   });
 
+  it('normalises zero-padded ids before applying the last-admin guard', async () => {
+    const admin = await signedIn(ADMIN);
+    const csrf = await getAppCsrf(admin);
+    const adminId = (await userRow(ADMIN)).id;
+    const juniorId = (await userRow(JUNIOR)).id;
+    const paddedId = juniorId.padStart(juniorId.length + 2, '0');
+
+    const promote = await admin
+      .post(`/app/admin/users/${juniorId}/role`)
+      .type('form')
+      .send({ role: 'admin', _csrf: csrf });
+    expect(promote.status).toBe(302);
+
+    // The actor keeps an admin session, but the database knows only the target as an active admin. Both paths must
+    // resolve `007` to the same row id (`7`) and refuse to remove the last administrator.
+    await pool.query('UPDATE users SET is_active = false WHERE id = $1::bigint', [adminId]);
+    try {
+      const demote = await admin
+        .post(`/app/admin/users/${paddedId}/role`)
+        .type('form')
+        .send({ role: 'viewer', _csrf: csrf });
+      expect(demote.status).toBe(400);
+      expect(demote.text).toContain('без активного администратора');
+
+      const deactivate = await admin
+        .post(`/app/admin/users/${paddedId}/toggle-active`)
+        .type('form')
+        .send({ _csrf: csrf });
+      expect(deactivate.status).toBe(400);
+      expect(deactivate.text).toContain('без активного администратора');
+
+      const junior = await userRow(JUNIOR);
+      expect(junior.role).toBe('admin');
+      expect(junior.is_active).toBe(true);
+    } finally {
+      await pool.query('UPDATE users SET is_active = true WHERE id = $1::bigint', [adminId]);
+    }
+  });
+
   it('deactivates a user, revokes the live session and blocks the login until reactivation', async () => {
     const juniorId = (await userRow(JUNIOR)).id;
     const junior = await signedIn(JUNIOR, JUNIOR_PASSWORD);

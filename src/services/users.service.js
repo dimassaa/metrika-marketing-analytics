@@ -264,8 +264,9 @@ export function createUsersService({ db, usersRepository, auditService }) {
 
     /**
      * Changes the caller's own password after verifying the current one and revokes every *other* session. Keeping
-     * the current session avoids logging the person out of the browser they are using; if the caller cannot name
-     * its session, every session is revoked and the controller's redirect ends at `/login`.
+     * the current session avoids logging the person out of the browser they are using. If the caller cannot name its
+     * session, every session is revoked: the controller still redirects to `/app/profile`, and `requireAuth` sends the
+     * now-anonymous request to `/login` on that next request.
      * @param {string} userId
      * @param {{ currentPassword: string, newPassword: string }} input
      * @param {{ id?: string, ip?: string, sessionId?: string } | null} actor
