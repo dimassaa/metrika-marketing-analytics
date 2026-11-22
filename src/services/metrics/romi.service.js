@@ -210,7 +210,9 @@ function buildRow({
     ltv12Cents: centsToApi(ltv12Cents),
     ltvLabel: formatCentsToByn(ltv12Cents),
     romiPct,
-    romiLabel: formatRomi(romiPct),
+    // The label is built from the guard value, not from the two-decimal API field: a tiny negative must not be
+    // formatted from `0` and thereby lose its sign.
+    romiLabel: formatRomi(romiExact),
     paybackMonths,
     // A missing payback is a dash, not "— мес.": the suffix belongs to a real month count.
     paybackLabel: paybackMonths === null ? formatMonths(null) : `${formatMonths(paybackMonths)} мес.`,

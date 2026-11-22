@@ -357,8 +357,9 @@ describe('createChannelHealthService', () => {
 
     // 29 996 / 10 000 = 2.9996: the display rounds to 3,000, the status must not become healthy.
     expect(watch).toMatchObject({ ltvCacRatio: 3, ratioLabel: '3,000', status: 'watch', statusLabel: 'Наблюдать' });
-    // -4 c of 100 000 c is -0.004 %: the display rounds to 0,0%, the status must stay risk.
-    expect(risk).toMatchObject({ romiPct: 0, romiLabel: '0,0%', status: 'risk', statusLabel: 'Риск' });
+    // -4 c of 100 000 c is -0.004 %: the API value rounds to 0, but the label is built from the exact guard value
+    // and must keep the sign instead of reading `0,0%`.
+    expect(risk).toMatchObject({ romiPct: 0, romiLabel: '\u2212<0,1%', status: 'risk', statusLabel: 'Риск' });
     expect(empty).toMatchObject({
       cacCents: null,
       cacLabel: '—',
@@ -373,6 +374,21 @@ describe('createChannelHealthService', () => {
       status: 'no_data',
       statusLabel: 'Мало данных',
     });
+  });
+
+  it('labels a negative ROMI from the exact guard value, not the zeroed API field', async () => {
+    const { service } = serviceWith({
+      channels: [{ id: '2', code: 'risk', name: 'Риск' }],
+      cacRows: [{ channelId: '2', spendCents: '100000', newCustomers: 20, cacCents: '5000' }],
+      ltvRows: [{ channelId: '2', channelCode: 'risk', ltvCents: '15000' }],
+      revenueRows: [{ channelId: '2', channelCode: 'risk', revenueCents: '99996' }],
+    });
+
+    const report = await service.getChannelHealthReport(PERIOD);
+
+    // The API keeps two decimals, so `romiPct` is 0; the display label is formatted from `-0.004` and keeps the
+    // negative direction instead of collapsing to `0,0%`.
+    expect(report.rows[0]).toMatchObject({ romiPct: 0, romiLabel: '\u2212<0,1%', status: 'risk' });
   });
 
   it('shows a free channel as no_data but still labels its payback and ratio honestly', async () => {

@@ -319,7 +319,7 @@ describe('goals progress', () => {
     expect(rows[0].deviation.pct).toBeGreaterThan(0);
   });
 
-  it('marks a ROMI goal off track when the displayed 0,0% is exactly −0,004%', async () => {
+  it('marks a ROMI goal off track when the API value is 0 and the label is −<0,1%', async () => {
     const row = {
       ...BLENDED,
       spendCents: '100000',
@@ -327,7 +327,7 @@ describe('goals progress', () => {
       cacCents: '10000',
       ltv12Cents: '29996',
       romiPct: 0,
-      romiLabel: '0,0%',
+      romiLabel: '−<0,1%',
       ltvCacRatio: 3,
       ratioLabel: '3,000',
       status: deriveHealth({
@@ -351,7 +351,7 @@ describe('goals progress', () => {
     expect(rows[0]).toMatchObject({
       status: 'off_track',
       favorable: false,
-      fact: { value: 0, label: '0,0%' },
+      fact: { value: 0, label: '−<0,1%' },
       // The gap is directional ("behind" is positive), so 0.004 is kept exact even though the label rounds to zero.
       deviation: { abs: 0.004, pct: null, label: '+0,0%' },
     });
