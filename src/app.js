@@ -19,9 +19,11 @@ import { createUsersRepository } from './repositories/users.repo.js';
 import { createReferenceRepository } from './repositories/reference.repo.js';
 import { createAuditRepository } from './repositories/audit.repo.js';
 import { createChannelsRepository } from './repositories/channels.repo.js';
+import { createCampaignsRepository } from './repositories/campaigns.repo.js';
 import { createAuthService } from './services/auth.service.js';
 import { createAuditService } from './services/audit.service.js';
 import { createChannelsService } from './services/channels.service.js';
+import { createCampaignsService } from './services/campaigns.service.js';
 import { createAuthController } from './controllers/auth.controller.js';
 import { createAuthRouter } from './routes/auth.routes.js';
 import { createAppRouter } from './routes/app.routes.js';
@@ -49,9 +51,11 @@ export function createApp({ db, sessionStore } = {}) {
   const referenceRepository = createReferenceRepository(db);
   const auditRepository = createAuditRepository(db);
   const channelsRepository = createChannelsRepository(db);
+  const campaignsRepository = createCampaignsRepository(db);
   const authService = createAuthService({ usersRepository });
   const auditService = createAuditService({ auditRepository });
   const channelsService = createChannelsService({ channelsRepository, auditService });
+  const campaignsService = createCampaignsService({ campaignsRepository, channelsRepository, auditService });
   const authController = createAuthController({ authService, auditService });
   const store = sessionStore ?? createPgSessionStore(db);
 
@@ -118,7 +122,13 @@ export function createApp({ db, sessionStore } = {}) {
 
   app.use('/', publicRoutes);
   app.use(createAuthRouter({ authController }));
-  app.use('/app', createAppRouter({ requireAuth, usersRepository, referenceRepository, channelsService }));
+  app.use('/app', createAppRouter({
+    requireAuth,
+    usersRepository,
+    referenceRepository,
+    channelsService,
+    campaignsService,
+  }));
 
   app.get('/health', async (req, res) => {
     res.set('Cache-Control', 'no-store');

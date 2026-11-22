@@ -3,14 +3,14 @@ import { requirePermission } from '../middleware/auth.js';
 import { createAppController } from '../controllers/app.controller.js';
 import { createAdminController } from '../controllers/admin.controller.js';
 import { createChannelsController } from '../controllers/channels.controller.js';
+import { createCampaignsController } from '../controllers/campaigns.controller.js';
 
 /**
  * Sections that exist in the sidebar but render the honest «Раздел появится на следующем этапе» placeholder until
  * their milestone. Profile is guarded by `requireAuth` only: every signed-in role owns their own profile page.
- * Channels left this list when its real routes landed; keeping it here would shadow them.
+ * Channels and campaigns left this list when their real routes landed; keeping them here would shadow them.
  */
 const PLACEHOLDER_SECTIONS = [
-  { slug: 'campaigns', title: 'Кампании' },
   { slug: 'cohorts', title: 'Когорты' },
   { slug: 'attribution', title: 'Атрибуция' },
   { slug: 'scenarios', title: 'Сценарии' },
@@ -27,13 +27,21 @@ const PLACEHOLDER_SECTIONS = [
  *   usersRepository: ReturnType<typeof import('../repositories/users.repo.js').createUsersRepository>,
  *   referenceRepository: ReturnType<typeof import('../repositories/reference.repo.js').createReferenceRepository>,
  *   channelsService: ReturnType<typeof import('../services/channels.service.js').createChannelsService>,
+ *   campaignsService: ReturnType<typeof import('../services/campaigns.service.js').createCampaignsService>,
  * }} deps
  * @returns {import('express').Router}
  */
-export function createAppRouter({ requireAuth, usersRepository, referenceRepository, channelsService }) {
+export function createAppRouter({
+  requireAuth,
+  usersRepository,
+  referenceRepository,
+  channelsService,
+  campaignsService,
+}) {
   const appController = createAppController({ referenceRepository });
   const adminController = createAdminController({ usersRepository, referenceRepository });
-  const channelsController = createChannelsController({ channelsService, referenceRepository });
+  const channelsController = createChannelsController({ channelsService, campaignsService, referenceRepository });
+  const campaignsController = createCampaignsController({ campaignsService, channelsService, referenceRepository });
   const router = Router();
 
   router.get('/', requireAuth, (req, res) => {
@@ -52,6 +60,18 @@ export function createAppRouter({ requireAuth, usersRepository, referenceReposit
     requireAuth,
     requirePermission('channels:manage'),
     channelsController.archive,
+  );
+
+  // Reading campaigns is open to viewers, mutations to analysts and admins. `/delete` is declared with its own
+  // permission even though it shares the path prefix with the edit POST: hiding the button is not access control.
+  router.get('/campaigns', requireAuth, requirePermission('campaigns:view'), campaignsController.list);
+  router.post('/campaigns', requireAuth, requirePermission('campaigns:manage'), campaignsController.create);
+  router.post('/campaigns/:id', requireAuth, requirePermission('campaigns:manage'), campaignsController.update);
+  router.post(
+    '/campaigns/:id/delete',
+    requireAuth,
+    requirePermission('campaigns:manage'),
+    campaignsController.delete,
   );
 
   for (const { slug, title } of PLACEHOLDER_SECTIONS) {

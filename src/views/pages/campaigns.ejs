@@ -1,0 +1,332 @@
+<section class="app-section">
+  <div class="stack stack--lg">
+    <div class="stack stack--sm">
+      <h2>Кампании</h2>
+      <p class="u-muted">
+        Кампании связывают расход и заказы с каналом привлечения. Бюджет — план в белорусских рублях, расход
+        считается по загруженной статистике. Завершённая или приостановленная кампания остаётся в истории и
+        отчётах.
+      </p>
+    </div>
+
+    <div class="toolbar">
+      <form class="filter-bar" method="get" action="/app/campaigns" aria-label="Фильтры кампаний">
+        <label class="field">
+          <span class="field__label">Канал</span>
+          <select class="select" name="channelId">
+            <option value="all" <%= filters.channelId === 'all' ? 'selected' : '' %>>Все каналы</option>
+            <% channels.forEach((channel) => { %>
+            <option value="<%= channel.id %>" <%= filters.channelId === channel.id ? 'selected' : '' %>>
+              <%= channel.name %><%= channel.isActive ? '' : ' (в архиве)' %>
+            </option>
+            <% }) %>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Статус</span>
+          <select class="select" name="status">
+            <option value="all" <%= filters.status === 'all' ? 'selected' : '' %>>Все</option>
+            <option value="active" <%= filters.status === 'active' ? 'selected' : '' %>>Активные</option>
+            <option value="paused" <%= filters.status === 'paused' ? 'selected' : '' %>>На паузе</option>
+            <option value="finished" <%= filters.status === 'finished' ? 'selected' : '' %>>Завершённые</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Поиск</span>
+          <input
+            class="input"
+            type="search"
+            name="q"
+            value="<%= filters.q %>"
+            placeholder="Название или код"
+            maxlength="80"
+            autocomplete="off"
+          >
+        </label>
+
+        <button class="btn btn--ghost btn--sm" type="submit">Показать</button>
+      </form>
+
+      <div class="cluster" aria-label="Итоги по выбранным кампаниям">
+        <span class="u-muted">Кампаний: <strong class="u-numeric"><%= totals.countLabel %></strong></span>
+        <span class="u-muted">
+          Бюджет: <strong class="u-numeric"><%= totals.budgetLabel %> <span class="byn">BYN</span></strong>
+        </span>
+        <span class="u-muted">
+          Расход: <strong class="u-numeric"><%= totals.spendLabel %> <span class="byn">BYN</span></strong>
+        </span>
+      </div>
+    </div>
+
+    <% if (deleteError) { %>
+    <div class="alert alert--error" role="alert">
+      <p class="alert__title">Кампания не удалена</p>
+      <%= deleteError %>
+    </div>
+    <% } %>
+
+    <% if (can('campaigns:manage')) { %>
+    <div class="card card--flat">
+      <div class="card__header">
+        <div>
+          <h3 class="card__title">Новая кампания</h3>
+          <p class="card__meta">
+            Код задаётся один раз: по нему статистика и заказы связываются с кампанией. Кампанию можно создать
+            только для активного канала.
+          </p>
+        </div>
+      </div>
+
+      <% if (createError) { %>
+      <div class="alert alert--error" role="alert">
+        <p class="alert__title">Кампания не создана</p>
+        <%= createError %>
+      </div>
+      <% } %>
+
+      <form class="inline-form" method="post" action="/app/campaigns">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+
+        <label class="field">
+          <span class="field__label">Канал</span>
+          <select class="select" name="channelId" required>
+            <option value="">Выберите канал</option>
+            <% activeChannels.forEach((channel) => { %>
+            <option value="<%= channel.id %>" <%= createValues.channelId === channel.id ? 'selected' : '' %>>
+              <%= channel.name %>
+            </option>
+            <% }) %>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Код</span>
+          <input
+            class="input"
+            type="text"
+            name="code"
+            value="<%= createValues.code %>"
+            placeholder="instagram_spring"
+            maxlength="60"
+            autocomplete="off"
+            required
+          >
+          <span class="field__hint">Строчные латинские буквы, цифры и подчёркивание</span>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Название</span>
+          <input
+            class="input"
+            type="text"
+            name="name"
+            value="<%= createValues.name %>"
+            placeholder="Instagram — весенняя распродажа"
+            maxlength="120"
+            autocomplete="off"
+            required
+          >
+        </label>
+
+        <label class="field">
+          <span class="field__label">Статус</span>
+          <select class="select" name="status">
+            <option value="active" <%= createValues.status === 'active' ? 'selected' : '' %>>Активна</option>
+            <option value="paused" <%= createValues.status === 'paused' ? 'selected' : '' %>>На паузе</option>
+            <option value="finished" <%= createValues.status === 'finished' ? 'selected' : '' %>>Завершена</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Старт</span>
+          <input class="input" type="date" name="startedOn" value="<%= createValues.startedOn %>" required>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Окончание</span>
+          <input class="input" type="date" name="endedOn" value="<%= createValues.endedOn %>">
+          <span class="field__hint">Можно оставить пустым</span>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Бюджет</span>
+          <input
+            class="input"
+            type="text"
+            name="budgetByn"
+            value="<%= createValues.budgetByn %>"
+            placeholder="1 500,00"
+            inputmode="decimal"
+            autocomplete="off"
+          >
+          <span class="field__hint">В белорусских рублях, можно оставить пустым</span>
+        </label>
+
+        <div class="cluster">
+          <button class="btn btn--primary" type="submit">Добавить кампанию</button>
+        </div>
+      </form>
+    </div>
+    <% } %>
+
+    <% if (can('campaigns:manage') && edit) { %>
+    <div class="card card--flat">
+      <div class="card__header">
+        <div>
+          <h3 class="card__title">Изменить кампанию</h3>
+          <p class="card__meta">
+            <%= edit.values.name %> · <span class="u-muted"><%= edit.values.code %></span><% if (edit.values.channelName) { %> · <%= edit.values.channelName %><% } %>
+          </p>
+        </div>
+        <a class="btn btn--ghost btn--sm" href="/app/campaigns">Закрыть</a>
+      </div>
+
+      <% if (editError) { %>
+      <div class="alert alert--error" role="alert">
+        <p class="alert__title">Изменение не применено</p>
+        <%= editError %>
+      </div>
+      <% } %>
+
+      <form class="inline-form" method="post" action="/app/campaigns/<%= edit.id %>">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+
+        <label class="field">
+          <span class="field__label">Название</span>
+          <input
+            class="input"
+            type="text"
+            name="name"
+            value="<%= edit.values.name %>"
+            maxlength="120"
+            autocomplete="off"
+            required
+          >
+        </label>
+
+        <label class="field">
+          <span class="field__label">Статус</span>
+          <select class="select" name="status">
+            <option value="active" <%= edit.values.status === 'active' ? 'selected' : '' %>>Активна</option>
+            <option value="paused" <%= edit.values.status === 'paused' ? 'selected' : '' %>>На паузе</option>
+            <option value="finished" <%= edit.values.status === 'finished' ? 'selected' : '' %>>Завершена</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Старт</span>
+          <input class="input" type="date" name="startedOn" value="<%= edit.values.startedOn %>" required>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Окончание</span>
+          <input class="input" type="date" name="endedOn" value="<%= edit.values.endedOn %>">
+        </label>
+
+        <label class="field">
+          <span class="field__label">Бюджет</span>
+          <input
+            class="input"
+            type="text"
+            name="budgetByn"
+            value="<%= edit.values.budgetByn %>"
+            placeholder="1 500,00"
+            inputmode="decimal"
+            autocomplete="off"
+          >
+          <span class="field__hint">В белорусских рублях; пустое поле означает «бюджет не задан»</span>
+        </label>
+
+        <div class="cluster">
+          <button class="btn btn--ghost" type="submit">Сохранить</button>
+        </div>
+      </form>
+
+      <form class="inline-form" method="post" action="/app/campaigns/<%= edit.id %>/delete">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <div class="cluster">
+          <button class="btn btn--danger btn--sm" type="submit">Удалить кампанию</button>
+          <span class="field__hint">
+            Удалить можно только пустую кампанию без статистики, заказов и точек касания. Если данные уже есть —
+            переведите её в статус «Завершена».
+          </span>
+        </div>
+      </form>
+    </div>
+    <% } %>
+
+    <% if (campaigns.length === 0) { %>
+    <div class="empty-state">
+      <p class="empty-state__title">По этому фильтру кампаний нет</p>
+      <p class="empty-state__text">Измените канал, статус или поисковый запрос — или вернитесь к полному списку.</p>
+      <div class="empty-state__actions">
+        <a class="btn btn--ghost" href="/app/campaigns">Сбросить фильтры</a>
+      </div>
+    </div>
+    <% } else { %>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">Кампания</th>
+            <th scope="col">Канал</th>
+            <th scope="col">Статус</th>
+            <th scope="col">Старт</th>
+            <th scope="col">Окончание</th>
+            <th scope="col" class="u-right">Бюджет</th>
+            <th scope="col" class="u-right">Расход</th>
+            <th scope="col" class="u-right">Дней статистики</th>
+            <th scope="col"><span class="u-visually-hidden">Действия</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <% campaigns.forEach((campaign) => { %>
+          <tr>
+            <td>
+              <%= campaign.name %>
+              <span class="u-muted u-nowrap">· <%= campaign.code %></span>
+            </td>
+            <td><a href="/app/channels/<%= campaign.channelId %>"><%= campaign.channelName ?? '—' %></a></td>
+            <td>
+              <span class="badge badge--<%= campaign.statusTone %>"><%= campaign.statusLabel %></span>
+            </td>
+            <td class="u-nowrap u-numeric"><%= campaign.startedOnLabel %></td>
+            <td class="u-nowrap u-numeric"><%= campaign.endedOnLabel ?? '—' %></td>
+            <td class="u-right u-nowrap">
+              <% if (campaign.budgetLabel === null) { %>
+              <span class="u-muted">—</span>
+              <% } else { %>
+              <%= campaign.budgetLabel %> <span class="byn">BYN</span>
+              <% } %>
+            </td>
+            <td class="u-right u-nowrap">
+              <% if (campaign.spendLabel === null) { %>
+              <span class="u-muted">—</span>
+              <% } else { %>
+              <%= campaign.spendLabel %> <span class="byn">BYN</span>
+              <% } %>
+            </td>
+            <td class="u-right u-numeric"><%= campaign.statsCountLabel %></td>
+            <td>
+              <% if (can('campaigns:manage')) { %>
+              <div class="row-actions">
+                <a class="btn btn--ghost btn--sm" href="/app/campaigns?edit=<%= campaign.id %>">Изменить</a>
+              </div>
+              <% } %>
+            </td>
+          </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+
+    <% if (limitReached) { %>
+    <p class="pager">
+      <span>Показаны первые <%= limit %> кампаний. Уточните канал, статус или запрос, чтобы сузить список.</span>
+    </p>
+    <% } %>
+    <% } %>
+  </div>
+</section>

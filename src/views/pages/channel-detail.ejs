@@ -160,5 +160,144 @@
         <% } %>
       </div>
     </div>
+
+    <div class="card card--flat stack">
+      <div class="card__header">
+        <div>
+          <h3 class="card__title">Кампании канала</h3>
+          <p class="card__meta">
+            Бюджет — план в белорусских рублях, расход считается по загруженной статистике. Кампания остаётся в
+            истории, даже когда она на паузе или завершена.
+          </p>
+        </div>
+        <a class="btn btn--ghost btn--sm" href="/app/campaigns?channelId=<%= channel.id %>">Все кампании</a>
+      </div>
+
+      <% if (channelCampaigns.length === 0) { %>
+      <div class="empty-state">
+        <p class="empty-state__title">У канала ещё нет кампаний</p>
+        <p class="empty-state__text">
+          Добавьте кампанию — и статистика, заказы и точки касания начнут связываться с этим каналом.
+        </p>
+      </div>
+      <% } else { %>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">Кампания</th>
+              <th scope="col">Статус</th>
+              <th scope="col">Старт</th>
+              <th scope="col">Окончание</th>
+              <th scope="col" class="u-right">Бюджет</th>
+              <th scope="col" class="u-right">Расход</th>
+              <th scope="col"><span class="u-visually-hidden">Действия</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <% channelCampaigns.forEach((campaign) => { %>
+            <tr>
+              <td>
+                <%= campaign.name %>
+                <span class="u-muted u-nowrap">· <%= campaign.code %></span>
+              </td>
+              <td><span class="badge badge--<%= campaign.statusTone %>"><%= campaign.statusLabel %></span></td>
+              <td class="u-nowrap u-numeric"><%= campaign.startedOnLabel %></td>
+              <td class="u-nowrap u-numeric"><%= campaign.endedOnLabel ?? '—' %></td>
+              <td class="u-right u-nowrap">
+                <% if (campaign.budgetLabel === null) { %>
+                <span class="u-muted">—</span>
+                <% } else { %>
+                <%= campaign.budgetLabel %> <span class="byn">BYN</span>
+                <% } %>
+              </td>
+              <td class="u-right u-nowrap">
+                <% if (campaign.spendLabel === null) { %>
+                <span class="u-muted">—</span>
+                <% } else { %>
+                <%= campaign.spendLabel %> <span class="byn">BYN</span>
+                <% } %>
+              </td>
+              <td>
+                <% if (can('campaigns:manage')) { %>
+                <div class="row-actions">
+                  <a class="btn btn--ghost btn--sm" href="/app/campaigns?edit=<%= campaign.id %>">Изменить</a>
+                </div>
+                <% } %>
+              </td>
+            </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+      <% } %>
+
+      <% if (can('campaigns:manage') && channel.isActive) { %>
+      <div class="stack stack--sm">
+        <h4 class="card__title">Добавить кампанию</h4>
+        <p class="card__meta">Канал уже выбран. Код кампании задаётся один раз и не меняется.</p>
+      </div>
+
+      <form class="inline-form" method="post" action="/app/campaigns">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <input type="hidden" name="channelId" value="<%= channel.id %>">
+        <input type="hidden" name="status" value="active">
+        <input type="hidden" name="from" value="channel">
+
+        <label class="field">
+          <span class="field__label">Код</span>
+          <input
+            class="input"
+            type="text"
+            name="code"
+            placeholder="instagram_spring"
+            maxlength="60"
+            autocomplete="off"
+            required
+          >
+          <span class="field__hint">Строчные латинские буквы, цифры и подчёркивание</span>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Название</span>
+          <input
+            class="input"
+            type="text"
+            name="name"
+            placeholder="Весенняя распродажа"
+            maxlength="120"
+            autocomplete="off"
+            required
+          >
+        </label>
+
+        <label class="field">
+          <span class="field__label">Старт</span>
+          <input class="input" type="date" name="startedOn" value="<%= campaignDefaults.startedOn %>" required>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Бюджет</span>
+          <input
+            class="input"
+            type="text"
+            name="budgetByn"
+            placeholder="1 500,00"
+            inputmode="decimal"
+            autocomplete="off"
+          >
+          <span class="field__hint">В белорусских рублях, можно оставить пустым</span>
+        </label>
+
+        <div class="cluster">
+          <button class="btn btn--ghost" type="submit">Добавить кампанию</button>
+        </div>
+      </form>
+      <% } else if (can('campaigns:manage')) { %>
+      <p class="u-muted">
+        Канал в архиве: новые кампании по нему создать нельзя. Верните канал из архива на карточке настроек.
+      </p>
+      <% } %>
+    </div>
   </div>
 </section>

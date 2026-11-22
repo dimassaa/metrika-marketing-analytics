@@ -233,6 +233,31 @@ Non-critical findings recorded during implementation. Priority is decided by the
   create case and reused by the update and archive cases, so running a single case in isolation fails. If the file
   grows, create the fixture in `beforeEach` (or a helper) and keep the archive toggle test separate.
 
+## M2 campaigns (task 2 follow-ups)
+
+- **A rejected quick-add form on the channel passport renders the campaign list, not the passport.** The form posts to
+  the single `POST /app/campaigns` endpoint, so the error path has no channel context and re-renders `/app/campaigns`
+  with the submitted values. A channel-scoped error render (or a separate `POST /app/channels/:id/campaigns` handler)
+  would keep the person on the page they were editing.
+- **The campaign list is capped at 200 rows, and the budget/spend totals are summed from that capped set.** No real
+  pagination exists yet; the page says «Показаны первые 200 кампаний» when the cap is hit. Decide whether totals should
+  come from a separate aggregate query once the demo can exceed the cap.
+- **The channel passport campaign table uses the same 200-row cap without telling the reader.** The seeded maximum is
+  four campaigns per channel, so it is unreachable today, but the table and the list would disagree if it ever grew.
+- **There is no confirmation message after create, edit or delete.** Every mutation redirects to a list, so the person
+  has to find the row to know it worked. Add a flash-style notice (query-free, session-backed) in the next list pass.
+- **The edit card is driven by `?edit=<id>` and silently disappears for a stale or non-numeric id.** That is better
+  than a 404 for a page that still shows the list, but a short «кампания не найдена» notice would explain the missing
+  form.
+- **`campaignUpdateSchema` maps an absent `budgetByn` to NULL.** The current edit form always submits the field, so it
+  cannot happen through the UI; a future partial form would silently clear the budget.
+- **An archived channel's campaign can be switched back to `active` through the edit form.** Creation is guarded
+  («нельзя создать кампанию для архивного канала»), but `updateCampaign` does not re-check the channel, so the channel
+  archive invariant from task 1 can be bypassed after the fact. Decide whether `paused`/`finished` only are allowed for
+  an archived channel, or whether activation should also require an active channel.
+- **BIGINT id parsing is duplicated between `channels.controller.js` and `campaigns.controller.js` (plus the filter
+  transform in the campaign validator).** A shared `src/lib/ids.js` would remove three copies of the same range rule.
+
 ## Resolved during the M1 final fix wave
 
 Recorded so the deferred findings do not disappear from history when the open entries above are closed.

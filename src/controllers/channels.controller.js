@@ -56,10 +56,11 @@ function actorOf(req) {
  * Channel screens. Handlers translate HTTP only: parse with Zod, call one service method, render or redirect.
  * @param {{
  *   channelsService: ReturnType<typeof import('../services/channels.service.js').createChannelsService>,
+ *   campaignsService: ReturnType<typeof import('../services/campaigns.service.js').createCampaignsService>,
  *   referenceRepository: ReturnType<typeof import('../repositories/reference.repo.js').createReferenceRepository>,
  * }} deps
  */
-export function createChannelsController({ channelsService, referenceRepository }) {
+export function createChannelsController({ channelsService, campaignsService, referenceRepository }) {
   /**
    * @param {import('express').Response} res
    */
@@ -99,11 +100,15 @@ export function createChannelsController({ channelsService, referenceRepository 
   async function renderDetail(req, res, id, { status = 200, error = null, values } = {}) {
     const dataAnchor = await referenceRepository.getDataAnchor();
     const detail = await channelsService.getChannelDetail(id);
+    // The passport shows this channel's campaigns and the quick-add form posts back into the campaigns controller.
+    const channelCampaigns = await campaignsService.listCampaignsForChannel(id);
     res.status(status).render('pages/channel-detail', {
       ...buildShellLocals(req, { title: detail.channel.name, activeNav: 'channels', dataAnchor }),
       channel: detail.channel,
       formValues: values ?? detail.form,
       formError: error,
+      channelCampaigns,
+      campaignDefaults: { startedOn: dataAnchor },
     });
   }
 
