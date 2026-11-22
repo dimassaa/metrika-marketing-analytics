@@ -15,3 +15,18 @@ export async function getCsrf(agent, path = '/login') {
   }
   return match[1];
 }
+
+/**
+ * Reads the CSRF token of an authenticated session from the sidebar logout form.
+ *
+ * Application forms carry the same session token, so one read per test is enough for any number of POSTs. The
+ * helper stays separate from `getCsrf` because the two read different pages for different reasons: the login form
+ * is anonymous, this one requires a signed-in session.
+ *
+ * @param {import('supertest').SuperAgentTest} agent Cookie-keeping agent that has already logged in.
+ * @param {string} [path] Authenticated page that renders the app shell.
+ * @returns {Promise<string>} Token ready to be sent as `_csrf` or `x-csrf-token`.
+ */
+export async function getAppCsrf(agent, path = '/app/dashboard') {
+  return getCsrf(agent, path);
+}

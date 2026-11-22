@@ -1,0 +1,164 @@
+<section class="app-section">
+  <div class="stack stack--lg">
+    <div class="cluster">
+      <a class="btn btn--ghost btn--sm" href="/app/channels">К списку каналов</a>
+    </div>
+
+    <div class="cluster">
+      <h2><%= channel.name %></h2>
+      <span class="badge <%= channel.isActive ? 'badge--healthy' : 'badge--neutral' %>">
+        <%= channel.statusLabel %>
+      </span>
+    </div>
+
+    <div class="grid grid--2">
+      <div class="card card--flat stack">
+        <div class="stack stack--sm">
+          <h3 class="card__title">Паспорт канала</h3>
+          <p class="card__meta">Код и тип определяют, как кампании и импорт связываются с каналом.</p>
+        </div>
+
+        <div class="table-wrap">
+          <table class="table">
+            <tbody>
+              <tr>
+                <th scope="row">Код</th>
+                <td><span class="u-muted"><%= channel.code %></span></td>
+              </tr>
+              <tr>
+                <th scope="row">Тип</th>
+                <td><%= channel.kindLabel %></td>
+              </tr>
+              <tr>
+                <th scope="row">Статус</th>
+                <td><%= channel.statusLabel %></td>
+              </tr>
+              <tr>
+                <th scope="row">Целевой CAC</th>
+                <td class="u-right">
+                  <% if (channel.targetCacLabel === null) { %>
+                  <span class="u-muted">—</span>
+                  <% } else { %>
+                  <span class="u-nowrap"><%= channel.targetCacLabel %> <span class="byn">BYN</span></span>
+                  <% } %>
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Целевой ROMI</th>
+                <td class="u-right"><%= channel.targetRomiLabel %></td>
+              </tr>
+              <tr>
+                <th scope="row">Активных кампаний</th>
+                <td class="u-right"><%= channel.activeCampaignCount %></td>
+              </tr>
+              <tr>
+                <th scope="row">Всего кампаний</th>
+                <td class="u-right"><%= channel.campaignCount %></td>
+              </tr>
+              <tr>
+                <th scope="row">Создан</th>
+                <td class="u-right u-numeric"><%= channel.createdAtLabel %></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card card--flat stack">
+        <% if (can('channels:manage')) { %>
+        <div class="stack stack--sm">
+          <h3 class="card__title">Настройки канала</h3>
+          <p class="card__meta">Целевые значения показываются в отчётах рядом с фактом.</p>
+        </div>
+
+        <% if (formError) { %>
+        <div class="alert alert--error" role="alert">
+          <p class="alert__title">Изменение не применено</p>
+          <%= formError %>
+        </div>
+        <% } %>
+
+        <form class="stack" method="post" action="/app/channels/<%= channel.id %>">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+
+          <label class="field">
+            <span class="field__label">Название</span>
+            <input
+              class="input"
+              type="text"
+              name="name"
+              value="<%= formValues.name %>"
+              maxlength="100"
+              autocomplete="off"
+              required
+            >
+          </label>
+
+          <label class="field">
+            <span class="field__label">Тип</span>
+            <select class="select" name="kind">
+              <option value="paid" <%= formValues.kind === 'paid' ? 'selected' : '' %>>Платный</option>
+              <option value="owned" <%= formValues.kind === 'owned' ? 'selected' : '' %>>Собственный</option>
+              <option value="earned" <%= formValues.kind === 'earned' ? 'selected' : '' %>>Заработанный</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span class="field__label">Целевой CAC</span>
+            <input
+              class="input"
+              type="text"
+              name="targetCacByn"
+              value="<%= formValues.targetCacByn %>"
+              placeholder="38,50"
+              inputmode="decimal"
+              autocomplete="off"
+            >
+            <span class="field__hint">В белорусских рублях; пустое поле означает «цель не задана»</span>
+          </label>
+
+          <label class="field">
+            <span class="field__label">Целевой ROMI</span>
+            <input
+              class="input"
+              type="text"
+              name="targetRomiPct"
+              value="<%= formValues.targetRomiPct %>"
+              placeholder="115"
+              inputmode="decimal"
+              autocomplete="off"
+            >
+            <span class="field__hint">В процентах, от 0 до 10 000</span>
+          </label>
+
+          <div class="cluster">
+            <button class="btn btn--primary" type="submit">Сохранить</button>
+          </div>
+        </form>
+
+        <div class="stack stack--sm">
+          <h3 class="card__title">Архив</h3>
+          <p class="card__meta">
+            Архивный канал нельзя выбрать для новой кампании, но его история остаётся в отчётах. Канал с активными
+            кампаниями архивировать нельзя: сначала остановите или завершите их.
+          </p>
+          <form method="post" action="/app/channels/<%= channel.id %>/archive">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <button class="btn <%= channel.isActive ? 'btn--danger' : 'btn--ghost' %> btn--sm" type="submit">
+              <%= channel.isActive ? 'Архивировать канал' : 'Вернуть из архива' %>
+            </button>
+          </form>
+        </div>
+        <% } else { %>
+        <div class="stack stack--sm">
+          <h3 class="card__title">Настройки канала</h3>
+          <p class="u-muted">
+            Менять название, тип и целевые значения могут аналитик и администратор. Паспорт канала доступен всем
+            ролям.
+          </p>
+        </div>
+        <% } %>
+      </div>
+    </div>
+  </div>
+</section>

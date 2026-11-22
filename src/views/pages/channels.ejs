@@ -1,0 +1,194 @@
+<section class="app-section">
+  <div class="stack stack--lg">
+    <div class="stack stack--sm">
+      <h2>Каналы привлечения</h2>
+      <p class="u-muted">
+        Целевые CAC и ROMI заданы в белорусских рублях и процентах. Архивный канал остаётся в истории и отчётах,
+        но новые кампании по нему создать нельзя.
+      </p>
+    </div>
+
+    <div class="toolbar">
+      <form class="filter-bar" method="get" action="/app/channels" aria-label="Фильтры каналов">
+        <label class="field">
+          <span class="field__label">Статус</span>
+          <select class="select" name="status">
+            <option value="all" <%= filters.status === 'all' ? 'selected' : '' %>>Все</option>
+            <option value="active" <%= filters.status === 'active' ? 'selected' : '' %>>Активные</option>
+            <option value="archived" <%= filters.status === 'archived' ? 'selected' : '' %>>В архиве</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Тип</span>
+          <select class="select" name="kind">
+            <option value="all" <%= filters.kind === 'all' ? 'selected' : '' %>>Все типы</option>
+            <option value="paid" <%= filters.kind === 'paid' ? 'selected' : '' %>>Платные</option>
+            <option value="owned" <%= filters.kind === 'owned' ? 'selected' : '' %>>Собственные</option>
+            <option value="earned" <%= filters.kind === 'earned' ? 'selected' : '' %>>Заработанные</option>
+          </select>
+        </label>
+
+        <button class="btn btn--ghost btn--sm" type="submit">Показать</button>
+      </form>
+    </div>
+
+    <% if (can('channels:manage')) { %>
+    <div class="card card--flat">
+      <div class="card__header">
+        <div>
+          <h3 class="card__title">Новый канал</h3>
+          <p class="card__meta">Код задаётся один раз: по нему кампании и импорт связываются с каналом.</p>
+        </div>
+      </div>
+
+      <% if (createError) { %>
+      <div class="alert alert--error" role="alert">
+        <p class="alert__title">Канал не создан</p>
+        <%= createError %>
+      </div>
+      <% } %>
+
+      <form class="inline-form" method="post" action="/app/channels">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+
+        <label class="field">
+          <span class="field__label">Код</span>
+          <input
+            class="input"
+            type="text"
+            name="code"
+            value="<%= createValues.code %>"
+            placeholder="viber_ads"
+            maxlength="40"
+            autocomplete="off"
+            required
+          >
+          <span class="field__hint">Строчные латинские буквы, цифры и подчёркивание</span>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Название</span>
+          <input
+            class="input"
+            type="text"
+            name="name"
+            value="<%= createValues.name %>"
+            placeholder="Viber Ads"
+            maxlength="100"
+            autocomplete="off"
+            required
+          >
+        </label>
+
+        <label class="field">
+          <span class="field__label">Тип</span>
+          <select class="select" name="kind">
+            <option value="paid" <%= createValues.kind === 'paid' ? 'selected' : '' %>>Платный</option>
+            <option value="owned" <%= createValues.kind === 'owned' ? 'selected' : '' %>>Собственный</option>
+            <option value="earned" <%= createValues.kind === 'earned' ? 'selected' : '' %>>Заработанный</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Целевой CAC</span>
+          <input
+            class="input"
+            type="text"
+            name="targetCacByn"
+            value="<%= createValues.targetCacByn %>"
+            placeholder="38,50"
+            inputmode="decimal"
+            autocomplete="off"
+          >
+          <span class="field__hint">В белорусских рублях, можно оставить пустым</span>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Целевой ROMI</span>
+          <input
+            class="input"
+            type="text"
+            name="targetRomiPct"
+            value="<%= createValues.targetRomiPct %>"
+            placeholder="115"
+            inputmode="decimal"
+            autocomplete="off"
+          >
+          <span class="field__hint">В процентах, от 0 до 10 000</span>
+        </label>
+
+        <div class="cluster">
+          <button class="btn btn--primary" type="submit">Добавить канал</button>
+        </div>
+      </form>
+    </div>
+    <% } %>
+
+    <% if (channels.length === 0) { %>
+    <div class="empty-state">
+      <p class="empty-state__title">По этому фильтру каналов нет</p>
+      <p class="empty-state__text">Измените статус или тип канала — или вернитесь к полному списку.</p>
+      <div class="empty-state__actions">
+        <a class="btn btn--ghost" href="/app/channels">Сбросить фильтры</a>
+      </div>
+    </div>
+    <% } else { %>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">Канал</th>
+            <th scope="col">Тип</th>
+            <th scope="col">Статус</th>
+            <th scope="col" class="u-right">Целевой CAC</th>
+            <th scope="col" class="u-right">Целевой ROMI</th>
+            <th scope="col" class="u-right">Кампании</th>
+            <th scope="col"><span class="u-visually-hidden">Действия</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <% channels.forEach((channel) => { %>
+          <tr>
+            <td>
+              <a href="/app/channels/<%= channel.id %>"><%= channel.name %></a>
+              <span class="u-muted u-nowrap">· <%= channel.code %></span>
+            </td>
+            <td><%= channel.kindLabel %></td>
+            <td>
+              <span class="badge <%= channel.isActive ? 'badge--healthy' : 'badge--neutral' %>">
+                <%= channel.statusLabel %>
+              </span>
+            </td>
+            <td class="u-right">
+              <% if (channel.targetCacLabel === null) { %>
+              <span class="u-muted">—</span>
+              <% } else { %>
+              <span class="u-nowrap"><%= channel.targetCacLabel %> <span class="byn">BYN</span></span>
+              <% } %>
+            </td>
+            <td class="u-right"><%= channel.targetRomiLabel %></td>
+            <td class="u-right u-nowrap" title="Активные из всех кампаний канала">
+              <%= channel.activeCampaignCount %> / <%= channel.campaignCount %>
+            </td>
+            <td>
+              <div class="row-actions">
+                <a class="btn btn--ghost btn--sm" href="/app/channels/<%= channel.id %>">Открыть</a>
+                <% if (can('channels:manage')) { %>
+                <form method="post" action="/app/channels/<%= channel.id %>/archive">
+                  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                  <button class="btn btn--ghost btn--sm" type="submit">
+                    <%= channel.isActive ? 'В архив' : 'Вернуть' %>
+                  </button>
+                </form>
+                <% } %>
+              </div>
+            </td>
+          </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+    <% } %>
+  </div>
+</section>

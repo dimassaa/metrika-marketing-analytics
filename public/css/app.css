@@ -628,6 +628,9 @@ input[type='file'] {
 
 /* Tables — data is the product; numbers right-aligned and tabular. */
 .table-wrap {
+  /* The relative anchor matters: visually hidden labels inside a wide table are absolutely positioned against the
+     initial containing block otherwise, escape this scroller and widen the whole page on narrow screens. */
+  position: relative;
   width: 100%;
   overflow-x: auto;
   border: 1px solid var(--color-stone-border);
@@ -681,6 +684,65 @@ input[type='file'] {
 .table .u-numeric,
 .table .u-right {
   text-align: right;
+}
+
+/* List tools shared by every M2 management screen: one filter row above the table, compact row actions, and a
+   form grid that keeps labels above inputs. Structure stays hairline-only; no new colors or shadows. */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--spacing-12);
+}
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--spacing-12);
+}
+
+.filter-bar .field {
+  min-width: 160px;
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--spacing-4);
+}
+
+.row-actions form {
+  margin: 0;
+}
+
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-8);
+  color: var(--color-warm-gray);
+  font-size: 13px;
+}
+
+.inline-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  align-items: start;
+  gap: var(--spacing-12);
+  margin-top: var(--spacing-16);
+}
+
+/* The submit sits on its own row: every field is a label + control pair of a different height, so a shared grid
+   cell would misalign the button with the tallest hint. */
+.inline-form .cluster {
+  grid-column: 1 / -1;
+  align-items: flex-end;
+  margin-top: var(--spacing-4);
 }
 
 /* Status badges — a dot and colored text, never a filled chip. */
