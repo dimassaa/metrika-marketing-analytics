@@ -519,8 +519,22 @@ Recorded so the deferred findings do not disappear from history when the open en
   every channel, so under `enable_seqscan=off` PostgreSQL picks `customers_first_order_idx` for the
   `first_order_at` window. `customers_channel_first_order_idx` serves the channel-scoped read
   (`getChannelFunnel` and the passport/dashboard channel card), which filters `first_channel_id` first. Both paths
-  are asserted in `tests/integration/metrics.performance.test.js`; the composite is not redundant with the two
-  single-column indexes because it returns the per-channel rows already ordered by acquisition date.
+  are asserted in `tests/integration/metrics.performance.test.js`. Migration 005 drops `customers_first_channel_idx`:
+  the composite's leading column covers every channel-only predicate, so keeping the single-column index would add
+  write cost and planner choice without serving a new access pattern.
+- **The health report still loads the channel dimension twice.** `getAttributionReport` reads `channels` for its
+  comparison rows, and `getChannelHealthReport` then calls `channelsRepository.listChannels()` again for names and
+  sort order. The measured health budget is 12; forwarding the attribution dimension (or asking attribution for a
+  name map) would make it 11. Deferred because it changes the T3/T4 contract, not the T7 test.
+- **The dashboard weekly test recomputes the attributed series instead of summing the dashboard buckets.** T6's
+  `weeklySeries` exposes weekly CAC/ROMI but not weekly attributed revenue, so the test calls
+  `getAttributionReport` for the same window and compares totals. That proves the window and model agree, but it does
+  not independently prove the dashboard's own buckets sum to the total; widening the view-model with
+  `attributedCents` would close the gap.
+- **The exact ranking-score assertion is a consistency check, not independent proof.** It recomputes the weighted
+  sum from the same `contributions`/`weightsBasisPoints` the service returned. It catches a score that does not match
+  its own terms, but an error in the basis-point apportionment would move both sides together; the unit suite's
+  fixtures are the independent check.
 - **The plan's payback fixtures are not encoded.** `payback = 12 / ratio`, so `payback 12` means `ratio 1`, which is
   `watch`, not `healthy`; `payback 12.004` implies `ratio < 1` and is `risk`. T7 asserts the derived statuses
   (`12 → watch`, `12.004 → risk`, `ratio 2.9996 → watch`) instead of the plan's unsatisfiable `12 → healthy` case.

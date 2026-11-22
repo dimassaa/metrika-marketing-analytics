@@ -2,8 +2,9 @@
  * SQL query counter for the metrics integration tests.
  *
  * Services receive repositories that receive this object instead of a `pg.Pool`. Every statement sent through
- * `query` is counted, including the `BEGIN`/`COMMIT` of `cohortsRepository.withSnapshot` and of the EXPLAIN probes:
- * the budget is about round trips to PostgreSQL, not about how many statements the planner happens to run.
+ * `query` is counted, including the `BEGIN`/`COMMIT` of `cohortsRepository.withSnapshot`: the budget is about round
+ * trips to PostgreSQL, not about how many statements the planner happens to run. EXPLAIN probes bypass this wrapper
+ * and run on a raw client, so they never enter the count.
  *
  * `connect` is wrapped too because `withSnapshot` calls it. A pool and a checked-out client expose different
  * methods, so the proxy forwards only `query` and `release`; those are the two methods the repositories use on a

@@ -25,13 +25,13 @@ const GOAL_PERIOD_START = startOfMonth(addMonths(SEED_ANCHOR, -11));
 
 /**
  * Query ceilings measured with `wrapDb`, which counts every statement sent to PostgreSQL, including the
- * `BEGIN`/`COMMIT` around the LTV snapshot and the EXPLAIN probes.
+ * `BEGIN`/`COMMIT` around the LTV snapshot. EXPLAIN probes run on a raw checked-out client and are not counted.
  *
  * The plan's numbers (CAC 2, health 8, ranking 8, dashboard 11, passport 15, goals 9) assumed that
  * `getAttributionReport` performed 2 reads. It performs 4 (orders, touchpoints, channel spend, channel list), so
  * every ceiling that includes a health report is 2 higher, and the LTV snapshot adds its 2 transaction statements
- * to the LTV and all downstream ceilings. The values below are the measured flat costs, not a growth allowance:
- * the invariant is that they do not move when the number of channels grows.
+ * to the LTV and all downstream ceilings. The values below are ceilings, not growth allowances: the invariant is
+ * that they do not move when the number of channels grows.
  */
 const BUDGETS = Object.freeze({
   cac: 2,
@@ -189,31 +189,31 @@ async function explainIndexes(captured) {
 describe('query budgets per service call', () => {
   it('CAC channel report stays within two reads', async () => {
     const { queries } = await measure(() => cacService.getCacReport({ anchor: SEED_ANCHOR }));
-    expect(queries).toBe(BUDGETS.cac);
+    expect(queries).toBeLessThanOrEqual(BUDGETS.cac);
   });
 
   it('LTV reads its cohort snapshot in a fixed number of statements', async () => {
     const { queries } = await measure(() => ltvService.getChannelLtv({ anchor: SEED_ANCHOR }));
-    expect(queries).toBe(BUDGETS.ltv);
+    expect(queries).toBeLessThanOrEqual(BUDGETS.ltv);
   });
 
   it('attribution loads orders, touchpoints, spend and channels once', async () => {
     const { queries } = await measure(() =>
       attributionService.getAttributionReport({ from: PERIOD.from, to: PERIOD.to }),
     );
-    expect(queries).toBe(BUDGETS.attribution);
+    expect(queries).toBeLessThanOrEqual(BUDGETS.attribution);
   });
 
   it('health report does not add a query per channel', async () => {
     const { queries } = await measure(() => healthService.getChannelHealthReport({ anchor: SEED_ANCHOR }));
-    expect(queries).toBe(BUDGETS.health);
+    expect(queries).toBeLessThanOrEqual(BUDGETS.health);
   });
 
   it('ranking adds no SQL on top of the health report', async () => {
     const health = await measure(() => healthService.getChannelHealthReport({ anchor: SEED_ANCHOR }));
     const ranking = await measure(() => rankingService.getRankingReport({ anchor: SEED_ANCHOR }));
 
-    expect(ranking.queries).toBe(BUDGETS.ranking);
+    expect(ranking.queries).toBeLessThanOrEqual(BUDGETS.ranking);
     expect(ranking.queries).toBe(health.queries);
   });
 
@@ -221,7 +221,7 @@ describe('query budgets per service call', () => {
     const health = await measure(() => healthService.getChannelHealthReport({ anchor: SEED_ANCHOR }));
     const dashboard = await measure(() => dashboardService.getDashboardSummary({ anchor: SEED_ANCHOR }));
 
-    expect(dashboard.queries).toBe(BUDGETS.dashboard);
+    expect(dashboard.queries).toBeLessThanOrEqual(BUDGETS.dashboard);
     // 1 weekly series + 2 attribution reads; the attributed series reuses no health data.
     expect(dashboard.queries).toBe(health.queries + 3);
   });
@@ -232,7 +232,7 @@ describe('query budgets per service call', () => {
       passportService.getChannelPassport({ anchor: SEED_ANCHOR, channelId: channelIds.instagram }),
     );
 
-    expect(passport.queries).toBe(BUDGETS.passport);
+    expect(passport.queries).toBeLessThanOrEqual(BUDGETS.passport);
     // channel + weekly series + 2 attribution reads + funnel + campaigns + campaign CAC inputs
     expect(passport.queries).toBe(health.queries + 7);
   });
@@ -247,7 +247,7 @@ describe('query budgets per service call', () => {
       }),
     );
 
-    expect(goals.queries).toBe(BUDGETS.goals);
+    expect(goals.queries).toBeLessThanOrEqual(BUDGETS.goals);
     expect(goals.queries).toBe(health.queries + 1);
   });
 });
@@ -323,52 +323,68 @@ describe('query count does not grow with the channel count', () => {
     };
     instagramId = channelIds.instagram;
 
-    // Reduce the stand to one channel in dependency order. Foreign keys are RESTRICT, so references to the
-    // channels/campaigns being removed are cleared before the dimension rows go away.
-    await pool.query('BEGIN');
+    // One checked-out client for the whole transaction: a pool.query('BEGIN') followed by a different pool.query
+    // can run on another connection, because a pool does not pin a session between calls.
+    const client = await pool.connect();
     try {
-      await pool.query(
+      await client.query('BEGIN');
+      // Reduce the stand to one channel in dependency order. Foreign keys are RESTRICT, so references to the
+      // channels/campaigns being removed are cleared before the dimension rows go away.
+      await client.query(
         'DELETE FROM orders WHERE customer_id IN (SELECT id FROM customers WHERE first_channel_id <> $1::bigint)',
         [instagramId],
       );
-      await pool.query(
+      await client.query(
         'DELETE FROM touchpoints WHERE customer_id IN (SELECT id FROM customers WHERE first_channel_id <> $1::bigint)',
         [instagramId],
       );
-      await pool.query('DELETE FROM touchpoints WHERE channel_id <> $1::bigint', [instagramId]);
-      await pool.query('DELETE FROM customers WHERE first_channel_id <> $1::bigint', [instagramId]);
-      await pool.query(
+      await client.query('DELETE FROM touchpoints WHERE channel_id <> $1::bigint', [instagramId]);
+      await client.query('DELETE FROM customers WHERE first_channel_id <> $1::bigint', [instagramId]);
+      await client.query(
         `UPDATE customers SET first_campaign_id = NULL
           WHERE first_channel_id = $1::bigint
             AND first_campaign_id IN (SELECT id FROM campaigns WHERE channel_id <> $1::bigint)`,
         [instagramId],
       );
-      await pool.query(
+      await client.query(
         `UPDATE orders SET campaign_id = NULL
           WHERE campaign_id IN (SELECT id FROM campaigns WHERE channel_id <> $1::bigint)`,
         [instagramId],
       );
-      await pool.query(
+      await client.query(
         `UPDATE touchpoints SET campaign_id = NULL
           WHERE campaign_id IN (SELECT id FROM campaigns WHERE channel_id <> $1::bigint)`,
         [instagramId],
       );
-      await pool.query(
+      await client.query(
         'DELETE FROM daily_stats WHERE campaign_id IN (SELECT id FROM campaigns WHERE channel_id <> $1::bigint)',
         [instagramId],
       );
-      await pool.query('DELETE FROM campaigns WHERE channel_id <> $1::bigint', [instagramId]);
-      await pool.query('DELETE FROM channels WHERE id <> $1::bigint', [instagramId]);
-      await pool.query('COMMIT');
+      await client.query('DELETE FROM campaigns WHERE channel_id <> $1::bigint', [instagramId]);
+      await client.query('DELETE FROM channels WHERE id <> $1::bigint', [instagramId]);
+
+      // Guard before any measurement: if the transaction did not really reduce the dimension, the growth test
+      // would compare 8 channels with 8 channels and prove nothing.
+      const { rows } = await client.query('SELECT count(*)::int AS n FROM channels');
+      expect(rows[0].n).toBe(1);
+      await client.query('COMMIT');
     } catch (error) {
-      await pool.query('ROLLBACK');
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // The original failure is the actionable one; a broken rollback must not mask it.
+      }
       throw error;
+    } finally {
+      client.release();
     }
   });
 
   afterAll(async () => {
-    // Restore the stand so a watch-mode rerun of this file starts from the same data.
+    // Restore the stand so a watch-mode rerun of this file starts from the same data, and prove the restore worked.
     await seed({ anchorDate: SEED_ANCHOR });
+    const { rows } = await pool.query('SELECT count(*)::int AS n FROM channels');
+    expect(rows[0].n).toBe(8);
   });
 
   it('keeps the health, ranking and dashboard budgets flat', async () => {

@@ -121,10 +121,11 @@ function sumRevenue(rows) {
 }
 
 describe('golden numbers', () => {
-  it('pins the fixture to the seed generator and to the resolved default period', () => {
+  it('pins the fixture to the seed generator and to the resolved default period', async () => {
     expect(GOLDEN.seedPrng).toBe(SEED_PRNG);
     expect(GOLDEN.capturedFromSeed).toBe(String(SEED_PRNG));
     expect(GOLDEN_CASE.anchor).toBe(SEED_ANCHOR);
+    expect(await createReferenceRepository(pool).getDataAnchor()).toBe(SEED_ANCHOR);
     expect({ from: GOLDEN_CASE.from, to: GOLDEN_CASE.to, days: PERIOD.days }).toEqual(PERIOD);
     expect(GOLDEN_CASE).toMatchObject({ model: 'last_touch', horizonMonths: 12 });
   });
