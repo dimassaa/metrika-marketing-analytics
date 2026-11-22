@@ -44,6 +44,20 @@ const ENTITY_LABELS = Object.freeze({
 });
 
 /**
+ * Renders the export filter object as one journal line. `all`/null entries carry no information, so they are
+ * omitted; an export with no narrowing filters reads «все».
+ * @param {unknown} filters
+ * @returns {string}
+ */
+function formatFilters(filters) {
+  if (!filters || typeof filters !== 'object') return '';
+  const parts = Object.entries(filters)
+    .filter(([, value]) => value !== null && value !== undefined && value !== '' && value !== 'all')
+    .map(([key, value]) => `${key}=${String(value)}`);
+  return parts.length === 0 ? 'все' : parts.join(', ');
+}
+
+/**
  * Russian labels for the role codes shown in audit payload summaries.
  */
 const ROLE_LABELS = Object.freeze({ admin: 'администратор', analyst: 'аналитик', viewer: 'наблюдатель' });
@@ -75,6 +89,10 @@ const DETAIL_KEYS = Object.freeze([
   ['targetValue', 'План'],
   ['periodStart', 'Начало'],
   ['periodEnd', 'Окончание'],
+  // Export payloads carry only these three; the line then reads «Строк: 7 · Обрезано: нет · Фильтры: kind=paid».
+  ['rowsCount', 'Строк'],
+  ['truncated', 'Обрезано'],
+  ['filters', 'Фильтры'],
 ]);
 
 const dateTimeFormatter = new Intl.DateTimeFormat('en-US', {
@@ -118,6 +136,8 @@ function summarisePayload(payload) {
     let text = String(value);
     if (key === 'role') text = ROLE_LABELS[value] ?? text;
     if (key === 'metric') text = GOAL_METRIC_LABELS[value] ?? text;
+    if (key === 'truncated') text = value ? 'да' : 'нет';
+    if (key === 'filters') text = formatFilters(value);
     parts.push(`${label}: ${text}`);
     // Four fields keep a goal line complete (metric, plan, start, end) while remaining one visual line.
     if (parts.length === 4) break;

@@ -1,10 +1,9 @@
 import { AUDIT_ACTIONS } from '../config/audit-actions.js';
 import { parseExportRequest } from '../validators/export.schema.js';
-import { EXPORT_ROW_LIMIT } from '../services/export.service.js';
 
 /**
  * CSV download endpoint. The handler only translates HTTP: the validator owns the dataset/filter contract, the
- * service owns formatting, and this module owns the response headers and the audit row.
+ * service owns formatting and truncation, and this module owns the response headers and the audit row.
  *
  * @param {{
  *   exportService: ReturnType<typeof import('../services/export.service.js').createExportService>,
@@ -21,25 +20,23 @@ export function createExportController({ exportService, auditService }) {
     async download(req, res) {
       const { dataset, filters } = parseExportRequest(req.params.dataset, req.query);
 
-      const report = await exportService.exportDataset({
-        dataset,
-        filters,
-        actor: { id: req.session.user.id },
-      });
+      const report = await exportService.exportDataset({ dataset, filters });
 
       await auditService.record({
         userId: req.session.user.id,
         action: AUDIT_ACTIONS.EXPORT_CSV,
         entity: dataset,
-        payload: { filters, rowsCount: report.rowsCount },
+        payload: { filters, rowsCount: report.rowsCount, truncated: report.truncated },
         ip: req.ip ?? null,
       });
 
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${report.filename}"`);
       res.setHeader('Cache-Control', 'no-store');
-      if (dataset === 'orders') {
-        res.setHeader('X-Row-Limit', String(EXPORT_ROW_LIMIT));
+      // Only a file that actually hit the cap announces it; an ordinary download carries neither header.
+      if (report.truncated) {
+        res.setHeader('X-Row-Limit', String(report.limit));
+        res.setHeader('X-Row-Truncated', 'true');
       }
       res.send(report.csvContent);
     },

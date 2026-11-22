@@ -11,14 +11,14 @@ export function createExportRepository(db) {
   return {
     /**
      * Channel rows with the campaign counter shown on the list. `status` is the screen vocabulary
-     * (`active`/`archived`), not the stored boolean.
-     * @param {{ status?: string | null, kind?: string | null }} [filters] NULL disables the condition.
+     * (`active`/`archived`), not the stored boolean. `limit` receives one extra row from the service.
+     * @param {{ status?: string | null, kind?: string | null, limit: number }} filters
      * @returns {Promise<Array<{
      *   code: string, name: string, kind: string, isActive: boolean,
      *   targetCacCents: bigint | null, targetRomiPct: string | null, campaignsCount: number,
      * }>>}
      */
-    async listChannels({ status = null, kind = null } = {}) {
+    async listChannels({ status = null, kind = null, limit }) {
       const onlyActive = status === 'active' ? true : status === 'archived' ? false : null;
       const { rows } = await db.query(
         `SELECT c.code,
@@ -33,8 +33,9 @@ export function createExportRepository(db) {
           WHERE ($1::boolean IS NULL OR c.is_active = $1::boolean)
             AND ($2::text IS NULL OR c.kind = $2::text)
           GROUP BY c.id
-          ORDER BY c.is_active DESC, c.code`,
-        [onlyActive, kind],
+          ORDER BY c.is_active DESC, c.code
+          LIMIT $3::int`,
+        [onlyActive, kind, limit],
       );
       return rows.map((row) => ({
         code: row.code,
@@ -49,13 +50,13 @@ export function createExportRepository(db) {
 
     /**
      * Campaign rows with the channel code and the spend aggregated from `daily_stats`, exactly like the list screen.
-     * @param {{ channelId?: string | null, status?: string | null, search?: string | null }} [filters]
+     * @param {{ channelId?: string | null, status?: string | null, search?: string | null, limit: number }} filters
      * @returns {Promise<Array<{
      *   code: string, name: string, channelCode: string, status: string,
      *   startedOn: string, endedOn: string | null, budgetCents: bigint | null, spendCents: bigint | null,
      * }>>}
      */
-    async listCampaigns({ channelId = null, status = null, search = null } = {}) {
+    async listCampaigns({ channelId = null, status = null, search = null, limit }) {
       const { rows } = await db.query(
         `SELECT cp.code,
                 cp.name,
@@ -76,8 +77,9 @@ export function createExportRepository(db) {
           GROUP BY cp.id, ch.id
           ORDER BY CASE cp.status WHEN 'active' THEN 0 WHEN 'paused' THEN 1 ELSE 2 END,
                    cp.name,
-                   cp.id`,
-        [channelId, status, search],
+                   cp.id
+          LIMIT $4::int`,
+        [channelId, status, search, limit],
       );
       return rows.map((row) => ({
         code: row.code,
@@ -93,13 +95,13 @@ export function createExportRepository(db) {
 
     /**
      * One row per campaign-day inside the inclusive calendar range.
-     * @param {{ channelId?: string | null, campaignId?: string | null, from: string, to: string }} filters
+     * @param {{ channelId?: string | null, campaignId?: string | null, from: string, to: string, limit: number }} filters
      * @returns {Promise<Array<{
      *   statDate: string, channelCode: string, campaignCode: string,
      *   impressions: number, clicks: number, leads: number, spendCents: bigint | null,
      * }>>}
      */
-    async listDailyStats({ channelId = null, campaignId = null, from, to }) {
+    async listDailyStats({ channelId = null, campaignId = null, from, to, limit }) {
       const { rows } = await db.query(
         `SELECT ds.stat_date::text AS stat_date,
                 ch.code AS channel_code,
@@ -115,8 +117,9 @@ export function createExportRepository(db) {
             AND ($2::bigint IS NULL OR cp.id = $2::bigint)
             AND ds.stat_date >= $3::date
             AND ds.stat_date <= $4::date
-          ORDER BY ds.stat_date, ch.code, cp.code`,
-        [channelId, campaignId, from, to],
+          ORDER BY ds.stat_date, ch.code, cp.code
+          LIMIT $5::int`,
+        [channelId, campaignId, from, to, limit],
       );
       return rows.map((row) => ({
         statDate: row.stat_date,
@@ -130,22 +133,36 @@ export function createExportRepository(db) {
     },
 
     /**
-     * Orders inside the inclusive Minsk-date range, attributed to the customer's first-touch channel (metrics spec
-     * §0). `limit` receives one extra row from the service so truncation is visible without a second COUNT query.
-     * @param {{ channelId?: string | null, from: string, to: string, limit: number }} filters
+     * Orders inside the half-open Minsk range `[fromInstant, toExclusive)`, attributed to the customer's first-touch
+     * channel (metrics spec §0). The instants are computed in the service with `minskDayStart`, so the predicate uses
+     * the `orders_time_idx` index instead of applying `AT TIME ZONE` to every row.
+     *
+     * `occurred_at` is exported as ISO 8601 with the Minsk offset: the value round-trips into the importer (which
+     * requires an explicit offset) and keeps orders on the same day distinguishable.
+     *
+     * @param {{
+     *   channelId?: string | null,
+     *   fromInstant: Date,
+     *   toExclusive: Date,
+     *   limit: number,
+     * }} filters `limit` receives one extra row from the service so truncation is visible without a COUNT query.
      * @returns {Promise<Array<{
      *   externalId: string, customerExternalId: string, firstChannelCode: string,
-     *   campaignCode: string | null, occurredOn: string,
+     *   campaignCode: string | null, occurredAt: string,
      *   revenueCents: bigint | null, marginCents: bigint | null,
      * }>>}
      */
-    async listOrders({ channelId = null, from, to, limit }) {
+    async listOrders({ channelId = null, fromInstant, toExclusive, limit }) {
       const { rows } = await db.query(
         `SELECT o.external_id,
                 cu.external_id AS customer_external_id,
                 ch.code AS first_channel_code,
                 cp.code AS campaign_code,
-                to_char(o.occurred_at AT TIME ZONE 'Europe/Minsk', 'YYYY-MM-DD') AS occurred_on,
+                -- Europe/Minsk is permanently UTC+3 (no DST since 2011), so appending the offset is exact and
+                -- keeps the format accepted by the import validator. Microseconds preserve the stored instant, so
+                -- an exported file re-imports to the same timestamptz rather than a rounded second.
+                to_char(o.occurred_at AT TIME ZONE 'Europe/Minsk', 'YYYY-MM-DD"T"HH24:MI:SS.US') || '+03:00'
+                  AS occurred_at_iso,
                 o.revenue_cents::text AS revenue_cents,
                 o.margin_cents::text AS margin_cents
            FROM orders o
@@ -153,18 +170,18 @@ export function createExportRepository(db) {
            JOIN channels ch ON ch.id = cu.first_channel_id
            LEFT JOIN campaigns cp ON cp.id = o.campaign_id
           WHERE ($1::bigint IS NULL OR cu.first_channel_id = $1::bigint)
-            AND (o.occurred_at AT TIME ZONE 'Europe/Minsk')::date >= $2::date
-            AND (o.occurred_at AT TIME ZONE 'Europe/Minsk')::date <= $3::date
+            AND o.occurred_at >= $2::timestamptz
+            AND o.occurred_at < $3::timestamptz
           ORDER BY o.occurred_at, o.id
           LIMIT $4::int`,
-        [channelId, from, to, limit],
+        [channelId, fromInstant, toExclusive, limit],
       );
       return rows.map((row) => ({
         externalId: row.external_id,
         customerExternalId: row.customer_external_id,
         firstChannelCode: row.first_channel_code,
         campaignCode: row.campaign_code ?? null,
-        occurredOn: row.occurred_on,
+        occurredAt: row.occurred_at_iso,
         revenueCents: centsFromDb(row.revenue_cents),
         marginCents: centsFromDb(row.margin_cents),
       }));

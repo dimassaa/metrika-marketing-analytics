@@ -1,11 +1,10 @@
-import { addDays } from '../lib/dates.js';
+import { addDays, minskDayStart } from '../lib/dates.js';
 import { ValidationError } from '../lib/errors.js';
 import { stringifyCsv } from '../lib/csv.js';
 
 /**
- * Hard cap for the order export. The seed holds ~9 500 orders, but a real stand can grow without bound; a single
- * synchronous response must not try to serialise a million rows into memory. The controller exposes the cap as
- * `X-Row-Limit`, so the caller can narrow the period instead of silently losing rows.
+ * Hard cap shared by every export dataset. A single synchronous response must not try to serialise an unbounded
+ * table into memory; the controller advertises the cap only when it actually truncated the file.
  */
 export const EXPORT_ROW_LIMIT = 50_000;
 
@@ -70,41 +69,56 @@ function resolvePeriod({ from, to }, anchor) {
 }
 
 /**
- * @param {unknown} value
- * @returns {string | null} NULL for the `all` pseudo-value used by the screen filters.
- */
-function nullableFilter(value) {
-  return typeof value === 'string' && value !== 'all' && value !== '' ? value : null;
-}
-
-/**
- * Builds a filtered CSV report and returns it with its download name. Formatting, defaults and the row cap live
- * here; HTTP headers and the audit row are the controller's job.
+ * Builds a filtered CSV report and returns it with its download name and truncation state. Formatting, defaults
+ * and the row cap live here; HTTP headers and the audit row are the controller's job.
+ *
+ * Every dataset is fetched with `LIMIT limit + 1`. The probe row is dropped and only its presence sets
+ * `truncated`, which makes the cap honest without a second COUNT query.
  *
  * @param {{
  *   exportRepository: ReturnType<typeof import('../repositories/export.repo.js').createExportRepository>,
  *   referenceRepository: ReturnType<typeof import('../repositories/reference.repo.js').createReferenceRepository>,
- * }} deps
+ *   rowLimit?: number,
+ * }} deps `rowLimit` is injectable so a unit test can exercise the cap without seeding 50 000 rows.
  */
-export function createExportService({ exportRepository, referenceRepository }) {
+export function createExportService({ exportRepository, referenceRepository, rowLimit = EXPORT_ROW_LIMIT }) {
+  /**
+   * @template T
+   * @param {(limit: number) => Promise<T[]>} fetchRows
+   * @returns {Promise<{ rows: T[], truncated: boolean }>}
+   */
+  async function fetchWithCap(fetchRows) {
+    const fetched = await fetchRows(rowLimit + 1);
+    const truncated = fetched.length > rowLimit;
+    return { rows: truncated ? fetched.slice(0, rowLimit) : fetched, truncated };
+  }
+
   /**
    * @param {{
    *   dataset: 'channels' | 'campaigns' | 'daily_stats' | 'orders',
    *   filters: Record<string, string | null>,
-   *   actor: { id: string, ip?: string | null },
-   * }} request `actor` is accepted for symmetry with the other services; only the controller writes the audit row.
-   * @returns {Promise<{ filename: string, csvContent: string, rowsCount: number }>}
+   * }} request
+   * @returns {Promise<{
+   *   filename: string,
+   *   csvContent: string,
+   *   rowsCount: number,
+   *   truncated: boolean,
+   *   limit: number,
+   * }>}
    */
   async function exportDataset({ dataset, filters }) {
     const anchor = await referenceRepository.getDataAnchor();
-    let rows;
+    /** @type {Array<Array<string | number>>} */
+    let csvRows;
+    /** @type {boolean} */
+    let truncated;
 
     if (dataset === 'channels') {
-      const channels = await exportRepository.listChannels({
-        status: nullableFilter(filters.status),
-        kind: nullableFilter(filters.kind),
-      });
-      rows = channels.map((channel) => [
+      const capped = await fetchWithCap((limit) =>
+        exportRepository.listChannels({ status: filters.status, kind: filters.kind, limit }),
+      );
+      truncated = capped.truncated;
+      csvRows = capped.rows.map((channel) => [
         channel.code,
         channel.name,
         channel.kind,
@@ -114,12 +128,16 @@ export function createExportService({ exportRepository, referenceRepository }) {
         channel.campaignsCount,
       ]);
     } else if (dataset === 'campaigns') {
-      const campaigns = await exportRepository.listCampaigns({
-        channelId: nullableFilter(filters.channelId),
-        status: nullableFilter(filters.status),
-        search: nullableFilter(filters.q),
-      });
-      rows = campaigns.map((campaign) => [
+      const capped = await fetchWithCap((limit) =>
+        exportRepository.listCampaigns({
+          channelId: filters.channelId,
+          status: filters.status,
+          search: filters.q,
+          limit,
+        }),
+      );
+      truncated = capped.truncated;
+      csvRows = capped.rows.map((campaign) => [
         campaign.code,
         campaign.name,
         campaign.channelCode,
@@ -131,12 +149,16 @@ export function createExportService({ exportRepository, referenceRepository }) {
       ]);
     } else if (dataset === 'daily_stats') {
       const period = resolvePeriod(filters, anchor);
-      const stats = await exportRepository.listDailyStats({
-        channelId: nullableFilter(filters.channelId),
-        campaignId: nullableFilter(filters.campaignId),
-        ...period,
-      });
-      rows = stats.map((stat) => [
+      const capped = await fetchWithCap((limit) =>
+        exportRepository.listDailyStats({
+          channelId: filters.channelId,
+          campaignId: filters.campaignId,
+          ...period,
+          limit,
+        }),
+      );
+      truncated = capped.truncated;
+      csvRows = capped.rows.map((stat) => [
         stat.statDate,
         stat.channelCode,
         stat.campaignCode,
@@ -147,19 +169,24 @@ export function createExportService({ exportRepository, referenceRepository }) {
       ]);
     } else if (dataset === 'orders') {
       const period = resolvePeriod(filters, anchor);
-      const orders = await exportRepository.listOrders({
-        channelId: nullableFilter(filters.channelId),
-        ...period,
-        // One extra row distinguishes "exactly at the cap" from "truncated" without a second COUNT query.
-        limit: EXPORT_ROW_LIMIT + 1,
-      });
-      const visible = orders.length > EXPORT_ROW_LIMIT ? orders.slice(0, EXPORT_ROW_LIMIT) : orders;
-      rows = visible.map((order) => [
+      // Half-open instants keep the predicate sargable and match Minsk calendar days exactly, DST included.
+      const fromInstant = minskDayStart(period.from);
+      const toExclusive = minskDayStart(addDays(period.to, 1));
+      const capped = await fetchWithCap((limit) =>
+        exportRepository.listOrders({
+          channelId: filters.channelId,
+          fromInstant,
+          toExclusive,
+          limit,
+        }),
+      );
+      truncated = capped.truncated;
+      csvRows = capped.rows.map((order) => [
         order.externalId,
         order.customerExternalId,
         order.firstChannelCode,
         order.campaignCode ?? '',
-        order.occurredOn,
+        order.occurredAt,
         formatCentsForCsv(order.revenueCents),
         formatCentsForCsv(order.marginCents),
       ]);
@@ -171,8 +198,10 @@ export function createExportService({ exportRepository, referenceRepository }) {
     return {
       // The anchor, not the wall clock, keeps a downloaded file reproducible on a stand opened later.
       filename: `metrika-${dataset}-${anchor}.csv`,
-      csvContent: stringifyCsv(HEADERS[dataset], rows, { withBom: true }),
-      rowsCount: rows.length,
+      csvContent: stringifyCsv(HEADERS[dataset], csvRows, { withBom: true }),
+      rowsCount: csvRows.length,
+      truncated,
+      limit: rowLimit,
     };
   }
 

@@ -58,6 +58,16 @@ function csvOf(res) {
   return { headers, rows: rows.map((row) => row.values) };
 }
 
+/**
+ * @param {string} html
+ * @returns {string} The `<tbody>` slice, so table assertions do not match sidebar labels.
+ */
+function tableBody(html) {
+  const start = html.indexOf('<tbody');
+  const end = html.indexOf('</tbody>');
+  return start === -1 || end === -1 ? '' : html.slice(start, end);
+}
+
 describe('channels export', () => {
   it('downloads a BOM-prefixed CRLF CSV containing only the filtered channels', async () => {
     const agent = await signedIn(VIEWER);
@@ -218,19 +228,61 @@ describe('orders export', () => {
       expect(row.external_id).not.toBe('');
       expect(row.customer_external_id).not.toBe('');
       expect(row.first_channel_code).not.toBe('');
-      expect(row.occurred_at >= from && row.occurred_at <= anchor).toBe(true);
+      // ISO 8601 with the Minsk offset: the importer accepts this shape, so the file round-trips.
+      expect(row.occurred_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}\+03:00$/);
+      expect(row.occurred_at.slice(0, 10) >= from && row.occurred_at.slice(0, 10) <= anchor).toBe(true);
       expect(row.revenue_byn).toMatch(/^\d+,\d{2}$/);
       expect(row.margin_byn).toMatch(/^\d+,\d{2}$/);
     }
+
+    // The exported timestamp is the same instant that is stored, not a re-interpreted local date.
+    const { rows: stored } = await pool.query('SELECT occurred_at FROM orders WHERE external_id = $1', [
+      rows[0].external_id,
+    ]);
+    expect(new Date(rows[0].occurred_at).getTime()).toBe(stored[0].occurred_at.getTime());
   });
 
-  it('advertises the order row cap', async () => {
+  it('does not advertise a row cap when nothing was truncated', async () => {
     const agent = await signedIn(VIEWER);
 
-    const res = await agent.get('/app/export/orders.csv');
+    const res = await agent.get('/app/export/orders.csv').query({ from: addDays(anchor, -1), to: anchor });
 
     expect(res.status).toBe(200);
-    expect(res.headers['x-row-limit']).toBe('50000');
+    expect(res.headers['x-row-limit']).toBeUndefined();
+    expect(res.headers['x-row-truncated']).toBeUndefined();
+  });
+
+  it('neutralises formulas in external ids', async () => {
+    const from = addDays(anchor, -9);
+    const { rows: picked } = await pool.query(
+      `SELECT o.id::text AS order_id, o.external_id, cu.id::text AS customer_id, cu.external_id AS customer_external_id
+         FROM orders o
+         JOIN customers cu ON cu.id = o.customer_id
+        WHERE (o.occurred_at AT TIME ZONE 'Europe/Minsk')::date BETWEEN $1::date AND $2::date
+        ORDER BY o.id
+        LIMIT 1`,
+      [from, anchor],
+    );
+    const original = picked[0];
+    try {
+      await pool.query('UPDATE orders SET external_id = $1 WHERE id = $2::bigint', ['@cmd', original.order_id]);
+      await pool.query('UPDATE customers SET external_id = $1 WHERE id = $2::bigint', ['=1+1', original.customer_id]);
+
+      const agent = await signedIn(VIEWER);
+      const res = await agent.get('/app/export/orders.csv').query({ from, to: anchor });
+
+      const { rows } = csvOf(res);
+      expect(rows.find((row) => row.customer_external_id === "'=1+1")?.external_id).toBe("'@cmd");
+    } finally {
+      await pool.query('UPDATE orders SET external_id = $1 WHERE id = $2::bigint', [
+        original.external_id,
+        original.order_id,
+      ]);
+      await pool.query('UPDATE customers SET external_id = $1 WHERE id = $2::bigint', [
+        original.customer_external_id,
+        original.customer_id,
+      ]);
+    }
   });
 });
 
@@ -251,7 +303,26 @@ describe('export guard rails', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].email).toBe(VIEWER);
     expect(rows[0].entity).toBe('channels');
-    expect(rows[0].payload).toMatchObject({ filters: { kind: 'paid' }, rowsCount: 6 });
+    expect(rows[0].payload).toMatchObject({ filters: { kind: 'paid' }, rowsCount: 6, truncated: false });
+  });
+
+  it('filters export rows by dataset in the journal', async () => {
+    const viewer = await signedIn(VIEWER);
+    await viewer.get('/app/export/channels.csv');
+    await viewer.get('/app/export/campaigns.csv');
+
+    const admin = await signedIn(ADMIN);
+    const res = await admin.get('/app/audit').query({ entity: 'channels', action: AUDIT_ACTIONS.EXPORT_CSV });
+
+    expect(res.status).toBe(200);
+    // The code must survive the filter instead of being downgraded to "all".
+    expect(res.text).toContain('<option value="channels" selected>');
+    const body = tableBody(res.text);
+    expect(body).toContain('Экспорт CSV');
+    expect(body).toContain('Каналы');
+    expect(body).not.toContain('Кампании');
+    expect(body).toContain('Строк:');
+    expect(body).toContain('Фильтры:');
   });
 
   it('rejects an unknown dataset with a validation error instead of a file', async () => {

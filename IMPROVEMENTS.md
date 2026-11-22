@@ -335,6 +335,22 @@ Non-critical findings recorded during implementation. Priority is decided by the
   seed those rows fail with «Клиент не найден», which is honest but makes the downloaded template look broken. Point
   the template at a self-contained pair, or label the dependency in the template comment, once templates gain comments.
 
+## M2 CSV export (task 6 follow-ups)
+
+- **The filename does not encode the filters.** `metrika-channels-2026-11-20.csv` looks identical whether it contains
+  all channels or only paid ones, so several downloads overwrite each other in the browser. A short hash or dataset
+  suffix would keep them apart; the brief pins the current name, so this waits for a format change.
+- **The export is a GET with an audit side effect.** Every click appends to `audit_log`, including retries and
+  prefetches, so the journal counts downloads rather than unique exports. Acceptable for the demo and required by the
+  brief; if the noise becomes a problem, deduplicate by actor+dataset+filters inside a short window.
+- **An invalid filter value silently widens the export.** `?kind=bogus` falls back to “all” (like the list screens),
+  which can hand the caller more rows than they asked for. A strict 400 would be safer for a download endpoint, but it
+  would diverge from the screen filters; revisit together with them.
+- **Export SQL repeats the list repositories' filter clauses.** `export.repo.js` mirrors the channels, campaigns and
+  daily-stats WHERE/ORDER fragments so a download matches its screen. When M3 adds the stats/orders screens, extract
+  the shared predicates into repository helpers instead of keeping three copies in sync by hand.
+
+
 ## M2 media assets (task 7 follow-ups)
 
 - **Public media ids are sequential and enumerable.** `/media/:id` exposes every stored picture to anyone who walks

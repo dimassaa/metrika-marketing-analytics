@@ -1,11 +1,12 @@
 import { z } from 'zod';
 import { toDateOnly } from '../lib/dates.js';
 import { ValidationError } from '../lib/errors.js';
+import { AUDIT_EXPORT_DATASETS } from '../config/audit-actions.js';
 import { CHANNEL_KINDS } from './channels.schema.js';
 import { CAMPAIGN_STATUSES } from './campaigns.schema.js';
 
 /** Datasets the download route accepts. The set is closed: anything else is a 400, not an empty file. */
-export const EXPORT_DATASETS = Object.freeze(['channels', 'campaigns', 'daily_stats', 'orders']);
+export const EXPORT_DATASETS = AUDIT_EXPORT_DATASETS;
 
 /** Largest value a PostgreSQL BIGINT primary key can hold (2^63 - 1). */
 const MAX_BIGINT_ID = 9223372036854775807n;
@@ -55,13 +56,22 @@ const withPeriodCheck = (schema) =>
   });
 
 const channelsFilters = z.object({
-  status: z.enum(['all', 'active', 'archived']).catch('all'),
-  kind: z.enum(['all', ...CHANNEL_KINDS]).catch('all'),
+  status: z
+    .enum(['all', 'active', 'archived'])
+    .catch('all')
+    .transform((value) => (value === 'all' ? null : value)),
+  kind: z
+    .enum(['all', ...CHANNEL_KINDS])
+    .catch('all')
+    .transform((value) => (value === 'all' ? null : value)),
 });
 
 const campaignsFilters = z.object({
   channelId: idFilter,
-  status: z.enum(['all', ...CAMPAIGN_STATUSES]).catch('all'),
+  status: z
+    .enum(['all', ...CAMPAIGN_STATUSES])
+    .catch('all')
+    .transform((value) => (value === 'all' ? null : value)),
   q: z
     .string()
     .trim()

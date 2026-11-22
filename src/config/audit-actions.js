@@ -37,9 +37,25 @@ export const AUDIT_ACTIONS = Object.freeze({
 });
 
 /**
+ * Datasets accepted by the CSV export. They are also written to `audit_log.entity`, so the journal entity filter and
+ * its Russian labels read the same list instead of duplicating the four codes.
+ *
+ * @type {ReadonlyArray<string>}
+ */
+export const AUDIT_EXPORT_DATASETS = Object.freeze(['channels', 'campaigns', 'daily_stats', 'orders']);
+
+/**
  * Entity codes written to `audit_log.entity`. The journal filter and the Russian labels in the audit service both
  * read this list, so a new entity becomes filterable without a second hard-coded array.
  *
  * @type {ReadonlyArray<string>}
  */
-export const AUDIT_ENTITIES = Object.freeze(['user', 'channel', 'campaign', 'goal', 'import', 'media']);
+export const AUDIT_ENTITIES = Object.freeze([
+  'user',
+  'channel',
+  'campaign',
+  'goal',
+  'import',
+  'media',
+  ...AUDIT_EXPORT_DATASETS,
+]);
