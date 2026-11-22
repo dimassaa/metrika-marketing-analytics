@@ -787,7 +787,7 @@ Commit: `feat: store media assets in postgres bytea and serve with etag caching`
 4. Проверить отсутствие ошибок в `agent-browser console` на каждом экране и вёрстку на мобильной ширине `390×844`.
 
 **Files:**
-- Create: `docs/screenshots/m2/README.md`, `docs/screenshots/m2/csv/{daily_stats,customers,touchpoints,orders}.csv`, `docs/screenshots/m2/*.png` (`channels.png`, `campaigns.png`, `goals.png`, `import-report.png`, `admin-users.png`, `audit-log.png`, `profile-avatar.png`, `mobile-channels.png`)
+- Create: `docs/screenshots/m2/README.md`, `docs/screenshots/m2/csv/{daily_stats,customers,touchpoints,orders}.csv` (плюс `orders-broken.csv` для отказа), `docs/screenshots/m2/*.png` (`channels.png`, `channel-card.png`, `goals.png`, `import-report-success.png`, `import-report-errors.png`, `import-batch-refused.png`, `audit.png`, `users.png`, `profile-avatar.png`, `media-etag.png`, `media-og-cover.png`, `mobile-channels.png`)
 - Modify: `README.md` (обновить статус M2), `IMPROVEMENTS.md`
 
 **Interfaces:** не меняет production-код.
