@@ -82,7 +82,7 @@ function assertOrder(value) {
 
 /**
  * @param {unknown} value
- * @returns {string} The id as a digit string.
+ * @returns {void}
  * @throws {TypeError} When the touchpoint row does not match the repository contract.
  */
 function assertTouchpoint(value) {
@@ -95,7 +95,6 @@ function assertTouchpoint(value) {
   if (!(value.occurredAt instanceof Date) || Number.isNaN(value.occurredAt.getTime())) {
     throw new TypeError('touchpoint occurredAt must be a valid Date');
   }
-  return value.touchpointId;
 }
 
 /**
@@ -283,20 +282,26 @@ function buildModelView(allocations, spendByChannel, channels, channelById) {
  */
 export function createAttributionService({ attributionRepository, metricsRepository, channelsRepository }) {
   /**
-   * Loads everything a report or a series needs. The repository calls are independent, so they run together.
+   * Loads everything a report or a series needs.
+   *
+   * The two reads are sequential on purpose. A service may receive a single `pg.Client` (tests, report
+   * transactions): with `Promise.all` both queries are in flight from the caller's perspective, `pg` internally
+   * queues them, and a failure in the first does not stop the second from being sent. Sequential awaits keep one
+   * connection's work ordered and abort the touchpoint read when the order read fails.
+   *
    * @param {{ from: string, to: string }} period
    * @returns {Promise<{ orders: object[], touchpoints: object[] }>}
    */
   async function loadInputs(period) {
-    const [orders, touchpoints] = await Promise.all([
-      attributionRepository.listOrdersInPeriod(period),
-      attributionRepository.listTouchpointsForOrders(period),
-    ]);
+    const orders = await attributionRepository.listOrdersInPeriod(period);
+    const touchpoints = await attributionRepository.listTouchpointsForOrders(period);
     return { orders, touchpoints };
   }
 
   /**
    * @param {{ from: string, to: string }} period
+   * @param {'last_touch' | 'first_touch' | 'linear'} model
+   * @param {string | null} channelId
    * @returns {Promise<Array<{ weekStart: string, revenueCents: string }>>}
    */
   async function buildSeries(period, model, channelId) {
@@ -333,8 +338,9 @@ export function createAttributionService({ attributionRepository, metricsReposit
      *
      * `models` narrows the returned map, but every configured model is always allocated: the comparison table has
      * fixed last/first/linear columns and needs all three, and one extra bounded pass is cheaper than a second
-     * report call. `totalRevenueCents` is the period's order revenue; `totalAttributedCents` sums the shares, and
-     * their equality is the cent-leak invariant the tests assert.
+     * report call. `deltaLinearVsLastCents` is explicitly labelled by `deltaModel: 'linear'`, so a consumer cannot
+     * misread it as a first-touch or generic delta. `totalRevenueCents` is the period's order revenue;
+     * `totalAttributedCents` sums the shares, and their equality is the cent-leak invariant the tests assert.
      *
      * @param {{
      *   from: string,
@@ -356,21 +362,22 @@ export function createAttributionService({ attributionRepository, metricsReposit
      *     lastTouchCents: string,
      *     firstTouchCents: string,
      *     linearCents: string,
-     *     deltaVsDefaultCents: string,
-     *     deltaVsDefaultPct: number | null,
+     *     deltaModel: 'linear',
+     *     deltaLinearVsLastCents: string,
+     *     deltaLinearVsLastPct: number | null,
      *   }>,
      * }>}
      * @throws {ValidationError} When the period or the model list is invalid.
+     * @throws {TypeError} When repository rows or allocations break their contract.
      */
     async getAttributionReport({ from, to, models } = {}) {
       const period = normalisePeriod({ from, to });
       const requestedModels = normaliseModels(models);
 
-      const [inputs, spendRows, channelRows] = await Promise.all([
-        loadInputs(period),
-        metricsRepository.listChannelSpend(period),
-        channelsRepository.listChannels(),
-      ]);
+      // Sequential for the same reason as `loadInputs`: all four reads may share one checked-out `pg.Client`.
+      const inputs = await loadInputs(period);
+      const spendRows = await metricsRepository.listChannelSpend(period);
+      const channelRows = await channelsRepository.listChannels();
 
       const channels = channelRows
         .map((channel) => ({ channelId: channel.id, channelCode: channel.code }))
@@ -415,9 +422,11 @@ export function createAttributionService({ attributionRepository, metricsReposit
           firstTouchCents: centsToApi(firstTouchCents),
           linearCents: centsToApi(linearCents),
           // The actionable comparison is how far the redistributing linear model moves a channel away from the
-          // default; first-touch keeps its own column so the consumer is not forced to derive it.
-          deltaVsDefaultCents: centsToApi(linearCents - lastTouchCents),
-          deltaVsDefaultPct: percentChange(Number(linearCents), Number(lastTouchCents)),
+          // default; first-touch keeps its own column so the consumer is not forced to derive it. The prefixed
+          // names plus `deltaModel` make the base models explicit instead of relying on a comment.
+          deltaModel: 'linear',
+          deltaLinearVsLastCents: centsToApi(linearCents - lastTouchCents),
+          deltaLinearVsLastPct: percentChange(Number(linearCents), Number(lastTouchCents)),
         };
       });
 

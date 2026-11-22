@@ -10,7 +10,7 @@ const DAY_MS = 86_400_000;
 /**
  * Builds one order fixture. Defaults keep the allocation tests focused on the touch set.
  * @param {object} [overrides]
- * @returns {{ orderId: string, customerId: string, firstChannelId: string, occurredAt: Date, revenueCents: bigint }}
+ * @returns {{ orderId: string, customerId: string, firstChannelId: string | null, occurredAt: Date, revenueCents: bigint }}
  */
 function order(overrides = {}) {
   return {
@@ -52,8 +52,8 @@ function sumByOrder(rows) {
 
 /**
  * Deterministic 200-order fixture. A small LCG keeps the distribution non-trivial without randomness, so a failure
- * is reproducible. Every order resolves to `firstChannelId`, which lets the property test assert
- * `Σ attributed === Σ revenue` for each model.
+ * is reproducible. Every order has a non-null `firstChannelId`, so no order can drop out of the allocation; the
+ * property test can therefore assert `Σ attributed === Σ revenue` for each model.
  * @returns {{
  *   orders: Array<ReturnType<typeof order>>,
  *   touchpoints: Array<ReturnType<typeof touch>>,
@@ -178,6 +178,47 @@ describe('attributeOrders', () => {
     expect(rows).toEqual([{ orderId: '1', channelId: 'edge', amountCents: 10000n }]);
   });
 
+  it('includes a touch exactly at the order instant and ignores any touch after it', () => {
+    const at = new Date('2026-11-10T12:00:00+03:00');
+    const rows = attributeOrders({
+      orders: [order({ occurredAt: at })],
+      touchpoints: [
+        touch({ touchpointId: '1', channelId: 'before', at: new Date(at.getTime() - 1_000) }),
+        touch({ touchpointId: '2', channelId: 'exact', at }),
+        touch({ touchpointId: '3', channelId: 'after', at: new Date(at.getTime() + 1) }),
+        touch({ touchpointId: '4', channelId: 'much_after', at: new Date(at.getTime() + 3_600_000) }),
+      ],
+      model: 'last_touch',
+    });
+
+    expect(rows).toEqual([{ orderId: '1', channelId: 'exact', amountCents: 10000n }]);
+  });
+
+  it('includes a touch exactly at the order instant for the first-touch model too', () => {
+    const at = new Date('2026-11-10T12:00:00+03:00');
+
+    expect(
+      attributeOrders({
+        orders: [order({ occurredAt: at })],
+        touchpoints: [
+          touch({ touchpointId: '1', channelId: 'after', at: new Date(at.getTime() + 1) }),
+          touch({ touchpointId: '2', channelId: 'exact', at }),
+        ],
+        model: 'first_touch',
+      }),
+    ).toEqual([{ orderId: '1', channelId: 'exact', amountCents: 10000n }]);
+  });
+
+  it('omits an order that has neither a touch nor an acquisition channel', () => {
+    const rows = attributeOrders({
+      orders: [order({ firstChannelId: null })],
+      touchpoints: [],
+      model: 'linear',
+    });
+
+    expect(rows).toEqual([]);
+  });
+
   it('ignores touchpoints of another customer', () => {
     const rows = attributeOrders({
       orders: [order({ customerId: '7' })],
@@ -281,7 +322,7 @@ function fakeRepositories({ orders = [], touchpoints = [], channels = [], spend 
 /**
  * Two-channel book used by the service tests:
  * - order 1: 10 000 c, three touches (instagram, email, instagram) → linear 6 667 / 3 333;
- * - order 2: 0 c without touches → acquisition fallback email;
+ * - order 2: 0 c without touches, so the acquisition fallback contributes an honest zero, not a negative share;
  * - order 3: 2 500 c, one email touch in the next week.
  * @returns {ReturnType<typeof fakeRepositories>}
  */
@@ -365,8 +406,9 @@ describe('createAttributionService report', () => {
         lastTouchCents: '2500',
         firstTouchCents: '2500',
         linearCents: '5833',
-        deltaVsDefaultCents: '3333',
-        deltaVsDefaultPct: 133.32,
+        deltaModel: 'linear',
+        deltaLinearVsLastCents: '3333',
+        deltaLinearVsLastPct: 133.32,
       },
       {
         channelId: '1',
@@ -374,10 +416,30 @@ describe('createAttributionService report', () => {
         lastTouchCents: '10000',
         firstTouchCents: '10000',
         linearCents: '6667',
-        deltaVsDefaultCents: '-3333',
-        deltaVsDefaultPct: -33.33,
+        deltaModel: 'linear',
+        deltaLinearVsLastCents: '-3333',
+        deltaLinearVsLastPct: -33.33,
       },
     ]);
+  });
+
+  it('returns only the requested model in the map but keeps the comparison complete', async () => {
+    const service = createAttributionService(serviceFixtures());
+    const report = await service.getAttributionReport({
+      from: '2026-11-01',
+      to: '2026-11-21',
+      models: ['linear'],
+    });
+
+    expect(Object.keys(report.models)).toEqual(['linear']);
+    expect(report.comparison[0]).toMatchObject({
+      channelCode: 'email',
+      lastTouchCents: '2500',
+      firstTouchCents: '2500',
+      linearCents: '5833',
+      deltaModel: 'linear',
+      deltaLinearVsLastCents: '3333',
+    });
   });
 
   it('leaves ROMI null when the channel has no spend', async () => {

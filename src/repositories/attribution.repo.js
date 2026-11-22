@@ -1,13 +1,16 @@
-import { addDays, minskDayEnd, minskDayStart } from '../lib/dates.js';
+import { addDays, minskDayStart } from '../lib/dates.js';
 import { METRICS_CONFIG } from '../config/metrics.js';
 import { centsFromDb } from '../lib/money.js';
 
 /**
  * Orders and touchpoints for revenue attribution (metrics spec §3.1).
  *
- * The period is two inclusive Minsk calendar days, so both bounds are built with `minskDayStart`/`minskDayEnd`
- * and passed as `timestamptz`. Comparing against `$1::date` would let the session timezone move the first three
- * hours of the day: an order at 00:30 Minsk would land on the previous UTC day and disappear from the report.
+ * The period is an inclusive range of Minsk calendar days, expressed as a half-open instant range
+ * `[minskDayStart(from), minskDayStart(to + 1 day))`. Compared with `<= minskDayEnd(to)` the half-open bound also
+ * keeps events whose timestamp has sub-millisecond digits (`23:59:59.9995`), because `timestamptz` stores
+ * microseconds while `minskDayEnd` only reaches `.999`. Both bounds are passed as `timestamptz`; comparing against
+ * `$1::date` would let the session timezone move the first three hours of the day, and an order at 00:30 Minsk
+ * would land on the previous UTC day and disappear from the report.
  *
  * Attribution itself needs a wider touchpoint horizon: an order on the period start can have a touchpoint up to
  * `attribution.windowDays` earlier. The touchpoint query therefore starts at the Minsk day that contains
@@ -22,7 +25,7 @@ export function createAttributionRepository(db) {
      *
      * @param {{ from: string, to: string }} period Inclusive Minsk calendar dates.
      * @returns {Promise<Array<{
-     *   orderId: string, customerId: string, firstChannelId: string,
+     *   orderId: string, customerId: string, firstChannelId: string | null,
      *   occurredAt: Date, revenueCents: bigint,
      * }>>} Ordered by instant and id, so equal-instant orders stay stable across calls.
      */
@@ -36,9 +39,9 @@ export function createAttributionRepository(db) {
            FROM orders o
            JOIN customers c ON c.id = o.customer_id
           WHERE o.occurred_at >= $1::timestamptz
-            AND o.occurred_at <= $2::timestamptz
+            AND o.occurred_at < $2::timestamptz
           ORDER BY o.occurred_at, o.id`,
-        [minskDayStart(from), minskDayEnd(to)],
+        [minskDayStart(from), minskDayStart(addDays(to, 1))],
       );
 
       return rows.map((row) => {
@@ -70,6 +73,7 @@ export function createAttributionRepository(db) {
      */
     async listTouchpointsForOrders({ from, to }) {
       const windowStart = minskDayStart(addDays(from, -METRICS_CONFIG.attribution.windowDays));
+      const periodEnd = minskDayStart(addDays(to, 1));
 
       const { rows } = await db.query(
         `SELECT t.id::text AS touchpoint_id,
@@ -78,16 +82,16 @@ export function createAttributionRepository(db) {
                 t.occurred_at
            FROM touchpoints t
           WHERE t.occurred_at >= $3::timestamptz
-            AND t.occurred_at <= $4::timestamptz
+            AND t.occurred_at < $4::timestamptz
             AND EXISTS (
                   SELECT 1
                     FROM orders o
                    WHERE o.customer_id = t.customer_id
                      AND o.occurred_at >= $1::timestamptz
-                     AND o.occurred_at <= $2::timestamptz
+                     AND o.occurred_at < $2::timestamptz
                 )
           ORDER BY t.customer_id, t.occurred_at, t.id`,
-        [minskDayStart(from), minskDayEnd(to), windowStart, minskDayEnd(to)],
+        [minskDayStart(from), periodEnd, windowStart, periodEnd],
       );
 
       return rows.map((row) => ({

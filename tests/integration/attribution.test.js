@@ -103,10 +103,11 @@ describe('attribution against the seeded stand', () => {
     expect(report.comparison).toHaveLength(8);
     expect(new Set(report.comparison.map((row) => row.channelId)).size).toBe(report.comparison.length);
     for (const row of report.comparison) {
+      expect(row.deltaModel).toBe('linear');
       expect(row.lastTouchCents).toBe(channelCents(report, 'last_touch', row.channelId));
       expect(row.firstTouchCents).toBe(channelCents(report, 'first_touch', row.channelId));
       expect(row.linearCents).toBe(channelCents(report, 'linear', row.channelId));
-      expect(BigInt(row.deltaVsDefaultCents)).toBe(BigInt(row.linearCents) - BigInt(row.lastTouchCents));
+      expect(BigInt(row.deltaLinearVsLastCents)).toBe(BigInt(row.linearCents) - BigInt(row.lastTouchCents));
     }
   });
 
@@ -269,6 +270,75 @@ describe('attribution boundaries', () => {
         // The 30-day + 1 s touch belongs to the same customer, so a broken window would move first-touch/linear.
         expect(allocations.some((allocation) => allocation.channelId === channelIds.tiktok)).toBe(false);
       }
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
+    }
+  });
+
+  it('keeps an order with sub-millisecond digits at the end of the day inside that day', async () => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const { rows: customers } = await client.query(
+        `INSERT INTO customers (external_id, first_channel_id, acquired_at)
+         VALUES ('attr_frac_customer', $1::bigint, '2026-09-01T00:00:00+03:00')
+         RETURNING id::text AS id`,
+        [channelIds.instagram],
+      );
+      const { rows: orders } = await client.query(
+        `INSERT INTO orders (external_id, customer_id, occurred_at, revenue_cents, margin_cents)
+         VALUES ('attr_order_frac', $1::bigint, '2026-11-10T23:59:59.9995+03:00'::timestamptz, 3300, 1200)
+         RETURNING id::text AS id`,
+        [customers[0].id],
+      );
+
+      // `minskDayEnd` stops at .999, so an inclusive `<=` bound would silently drop this row. The half-open
+      // `[dayStart, nextDayStart)` bound keeps it while still excluding the first instant of the next day.
+      const scopedRepository = createAttributionRepository(client);
+      const onTenth = await scopedRepository.listOrdersInPeriod({ from: '2026-11-10', to: '2026-11-10' });
+      const onEleventh = await scopedRepository.listOrdersInPeriod({ from: '2026-11-11', to: '2026-11-11' });
+
+      expect(onTenth.some((order) => order.orderId === orders[0].id)).toBe(true);
+      expect(onEleventh.some((order) => order.orderId === orders[0].id)).toBe(false);
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
+    }
+  });
+
+  it('attributes a sub-millisecond touchpoint of the last day through the half-open bound', async () => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const { rows: customers } = await client.query(
+        `INSERT INTO customers (external_id, first_channel_id, acquired_at)
+         VALUES ('attr_frac_touch_customer', $1::bigint, '2026-09-01T00:00:00+03:00')
+         RETURNING id::text AS id`,
+        [channelIds.instagram],
+      );
+      const customerId = customers[0].id;
+      await client.query(
+        `INSERT INTO orders (external_id, customer_id, occurred_at, revenue_cents, margin_cents)
+         VALUES ('attr_frac_touch_order', $1::bigint, '2026-11-10T23:59:59.9999+03:00'::timestamptz, 4400, 2000)`,
+        [customerId],
+      );
+      const { rows: probes } = await client.query(
+        `INSERT INTO touchpoints (customer_id, channel_id, occurred_at, kind)
+         VALUES ($1::bigint, $2::bigint, '2026-11-10T23:59:59.9995+03:00'::timestamptz, 'click')
+         RETURNING id::text AS id`,
+        [customerId, channelIds.yandex],
+      );
+
+      const scopedRepository = createAttributionRepository(client);
+      const touchpoints = await scopedRepository.listTouchpointsForOrders({
+        from: '2026-11-10',
+        to: '2026-11-10',
+      });
+
+      expect(touchpoints.some((touchpoint) => touchpoint.touchpointId === probes[0].id)).toBe(true);
     } finally {
       await client.query('ROLLBACK');
       client.release();

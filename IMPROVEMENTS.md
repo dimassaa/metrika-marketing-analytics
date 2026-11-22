@@ -441,6 +441,14 @@ Recorded so the deferred findings do not disappear from history when the open en
   customers at zero cost. This is the literal spec ruling and must not be changed silently — it needs an owner
   decision (for example, treat ROMI as not applicable instead of missing for a free channel).
 
+### M3 attribution (task 3 follow-ups)
+
+- **The comparison table ships one delta, linear vs last-touch.** The task brief listed three model columns but a
+  single delta field. The owner settled it during review: `deltaModel: 'linear'`, `deltaLinearVsLastCents`,
+  `deltaLinearVsLastPct`. A first-touch delta is derivable from the same row (`firstTouchCents - lastTouchCents`) and
+  is intentionally not a separate field; if the UI needs to show both deltas side by side, widen the view-model
+  rather than overloading this one.
+
 ### M3 cohorts and LTV (task 2 follow-ups)
 
 - **The margin query fetches every month offset of every selected cohort, not just the requested horizon.** The
