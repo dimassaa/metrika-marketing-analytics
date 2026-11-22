@@ -125,6 +125,11 @@ describe('channel ranking against the seeded stand', () => {
     });
 
     expect(byRomi.weights).toEqual({ cac: 0, romi: 1, ltvCac: 0, newCustomers: 0 });
+    expect(byRomi.weights.cac + byRomi.weights.romi + byRomi.weights.ltvCac + byRomi.weights.newCustomers).toBe(1);
+    for (const entry of byRomi.ranked[0].contributions) {
+      // The reported weights are the scored weights: no second rounding pass may shift them.
+      expect(entry.weight).toBe(byRomi.weights[entry.criterion]);
+    }
     expect(byRomi.ranked.map((row) => row.code)).toEqual([
       'telegram',
       'instagram',

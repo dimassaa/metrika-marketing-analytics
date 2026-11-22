@@ -1,5 +1,6 @@
 import { METRICS_CONFIG } from '../../config/metrics.js';
 import { ValidationError } from '../../lib/errors.js';
+import { RANKING_REASON_LABELS } from '../../lib/metrics-labels.js';
 import { normalizeBigInt, normalizeNumber, roundNumber } from '../../lib/metrics-math.js';
 import { centsFromDb } from '../../lib/money.js';
 
@@ -11,32 +12,27 @@ const CRITERIA = Object.freeze(['cac', 'romi', 'ltvCac', 'newCustomers']);
 
 /** Three decimals are 0.1 percentage points of a weight: enough for a slider, coarse enough to keep sums readable. */
 const WEIGHT_DECIMALS = 3;
+/** Weights are distributed in integer thousandths, so the largest-remainder step can sum them exactly. */
+const WEIGHT_SCALE = 10 ** WEIGHT_DECIMALS;
 /** Contributions are money-like display values: two decimals are what the stack bar and its legend show. */
 const CONTRIBUTION_DECIMALS = 2;
 /** Guard digits for normalised and scored values before the final display rounding. */
 const SCORE_DECIMALS = 6;
 
-/** Human-readable explanations for excluding a channel; the codes stay machine-readable. */
-const REASON_LABELS = Object.freeze({
-  no_data: 'Мало данных',
-  missing_criterion: 'Не хватает метрики',
-  blended: 'Сводная строка',
-});
-
 /**
- * Validates and renormalises criterion weights to a sum of 1 (metrics spec §4).
- *
- * Missing keys fall back to `METRICS_CONFIG.ranking.weights`, so a caller may override one criterion without
- * restating the rest. Negative and non-finite weights are rejected instead of being silently clamped: a negative
- * weight would invert a criterion, which is never what a user means by moving a slider.
- *
- * @param {Record<string, number>} [weights] Weights with `cac`, `romi`, `ltvCac`, `newCustomers`.
- * @returns {{ cac: number, romi: number, ltvCac: number, newCustomers: number }} Weights summing to 1.
- * @throws {ValidationError} When a weight is negative or not a finite number, or when the sum is zero.
+ * @param {Record<string, number>} weights
+ * @returns {Record<string, number>} Raw weights merged with the configured defaults.
+ * @throws {ValidationError} On an unknown criterion, a negative/non-finite weight or a non-positive total.
  */
-export function normalizeWeights(weights = METRICS_CONFIG.ranking.weights) {
+function validateWeights(weights = METRICS_CONFIG.ranking.weights) {
   if (weights === null || typeof weights !== 'object' || Array.isArray(weights)) {
     throw new ValidationError('Веса критериев должны быть объектом');
+  }
+
+  for (const key of Object.keys(weights)) {
+    if (!CRITERIA.includes(key)) {
+      throw new ValidationError(`Неизвестный критерий веса «${key}»`);
+    }
   }
 
   const merged = {};
@@ -52,14 +48,77 @@ export function normalizeWeights(weights = METRICS_CONFIG.ranking.weights) {
   }
 
   const total = CRITERIA.reduce((sum, criterion) => sum + merged[criterion], 0);
+  if (!Number.isFinite(total)) {
+    // Finite operands can still overflow to Infinity; that must not turn every normalised weight into 0.
+    throw new ValidationError('Сумма весов критериев слишком велика');
+  }
   if (total <= 0) {
     throw new ValidationError('Сумма весов критериев должна быть больше нуля');
   }
 
-  return Object.fromEntries(
-    CRITERIA.map((criterion) => [criterion, roundNumber(merged[criterion] / total, WEIGHT_DECIMALS)]),
-  );
+  return merged;
 }
+
+/**
+ * Renormalises criterion weights to a sum of 1 (metrics spec §4).
+ *
+ * Independent rounding is not enough: values like 1/2/3/5 round to 0.091, 0.182, 0.273 and 0.455, a sum of 1.001
+ * that would let a channel best on every criterion score above 100. The largest-remainder method therefore rounds
+ * the scaled weights to integer thousandths and hands the residual (+1 or −1 per unit) to the largest or smallest
+ * fractional parts. The returned weights sum to exactly 1, and the same values are the ones used for scoring.
+ *
+ * Missing keys fall back to `METRICS_CONFIG.ranking.weights`, so a caller may override one criterion without
+ * restating the rest. Negative, non-finite and unknown weights are rejected instead of being silently clamped or
+ * ignored: a negative weight would invert a criterion, and a typo must not disappear.
+ *
+ * @param {Record<string, number>} [weights] Weights with `cac`, `romi`, `ltvCac`, `newCustomers`.
+ * @returns {{ cac: number, romi: number, ltvCac: number, newCustomers: number }} Weights summing to exactly 1.
+ * @throws {ValidationError} When the weights are invalid.
+ */
+export function normalizeWeights(weights = METRICS_CONFIG.ranking.weights) {
+  const merged = validateWeights(weights);
+  const total = CRITERIA.reduce((sum, criterion) => sum + merged[criterion], 0);
+
+  const entries = CRITERIA.map((criterion, index) => {
+    const exact = (merged[criterion] / total) * WEIGHT_SCALE;
+    const whole = Math.floor(exact);
+    return { criterion, index, whole, fraction: exact - whole };
+  });
+  let residual = WEIGHT_SCALE - entries.reduce((sum, entry) => sum + entry.whole, 0);
+
+  // A positive residual goes to the largest fractional parts, a negative one is taken from the smallest, which is
+  // largest-remainder apportionment. Ties resolve by criterion order to keep repeated calls identical.
+  if (residual !== 0) {
+    const step = residual > 0 ? 1 : -1;
+    const order = [...entries].sort((left, right) =>
+      step > 0
+        ? right.fraction - left.fraction || left.index - right.index
+        : left.fraction - right.fraction || left.index - right.index,
+    );
+    for (let index = 0; residual !== 0; index += 1) {
+      order[index % order.length].whole += step;
+      residual -= step;
+    }
+  }
+
+  const normalized = Object.fromEntries(
+    entries.map((entry) => [entry.criterion, entry.whole / WEIGHT_SCALE]),
+  );
+
+  // Adding four thousandths in floating point can land one ULP away from 1; move that ULP to the largest weight so
+  // the returned weights sum exactly, not approximately.
+  const sum = CRITERIA.reduce((acc, criterion) => acc + normalized[criterion], 0);
+  if (sum !== 1) {
+    const largest = CRITERIA.reduce(
+      (best, criterion) => (normalized[criterion] > normalized[best] ? criterion : best),
+      CRITERIA[0],
+    );
+    normalized[largest] += 1 - sum;
+  }
+
+  return normalized;
+}
+
 
 /**
  * @param {Record<string, number>} values Criterion values keyed by criterion code.
@@ -95,7 +154,7 @@ function partitionChannels(channels) {
 
   for (const row of channels) {
     if (row.channelId === null || row.channelId === undefined) {
-      excluded.push({ code: row.code, reason: 'blended', reasonLabel: REASON_LABELS.blended });
+      excluded.push({ code: row.code, reason: 'blended', reasonLabel: RANKING_REASON_LABELS.blended });
       continue;
     }
 
@@ -104,7 +163,7 @@ function partitionChannels(channels) {
         channelId: row.channelId,
         code: row.code,
         reason: 'no_data',
-        reasonLabel: REASON_LABELS.no_data,
+        reasonLabel: RANKING_REASON_LABELS.no_data,
       });
       continue;
     }
@@ -128,7 +187,7 @@ function partitionChannels(channels) {
         channelId: row.channelId,
         code: row.code,
         reason: 'missing_criterion',
-        reasonLabel: REASON_LABELS.missing_criterion,
+        reasonLabel: RANKING_REASON_LABELS.missing_criterion,
       });
       continue;
     }
@@ -308,10 +367,11 @@ export function createRankingService({ healthService }) {
      */
     async getRankingReport({ from = null, to = null, anchor = null, weights } = {}) {
       // Validate before touching the database: a bad slider value is a 400, not a reason to run three reports.
-      const normalizedWeights = normalizeWeights(weights);
+      // The weights are normalised exactly once, inside `computeRanking`, so the reported values are the scored ones.
+      validateWeights(weights);
 
       const health = await healthService.getChannelHealthReport({ from, to, anchor });
-      const ranking = computeRanking({ channels: [...health.rows, health.blended], weights: normalizedWeights });
+      const ranking = computeRanking({ channels: [...health.rows, health.blended], weights });
 
       return { period: health.period, ...ranking };
     },

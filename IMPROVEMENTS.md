@@ -468,3 +468,10 @@ Recorded so the deferred findings do not disappear from history when the open en
 - **A cohort month later than the anchor is rejected, but `fromCohortMonth` earlier than the first customer is
   accepted** and simply returns the available months. That matches a date-range filter; the UI should clamp the picker
   to the data window rather than relying on an error.
+
+### M3 ranking (task 5 follow-ups)
+
+- **`getRankingReport` cannot select the attribution model.** It always ranks the health report's default
+  (`last_touch`), while `getChannelHealthReport` already accepts `attributionModel`. Deliberately out of the BO-04
+  brief, but once the UI lets users compare models the ranking must forward the parameter instead of adding a second
+  report path; otherwise the screen would show a last-touch score under a first-touch/linear label.

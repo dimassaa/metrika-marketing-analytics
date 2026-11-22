@@ -38,7 +38,7 @@ describe('normalizeWeights', () => {
     const weights = normalizeWeights();
 
     expect(weights).toEqual({ ...METRICS_CONFIG.ranking.weights });
-    expect(weights.cac + weights.romi + weights.ltvCac + weights.newCustomers).toBeCloseTo(1, 10);
+    expect(weights.cac + weights.romi + weights.ltvCac + weights.newCustomers).toBe(1);
   });
 
   it('normalises arbitrary non-negative weights to a sum of one', () => {
@@ -48,7 +48,15 @@ describe('normalizeWeights', () => {
     expect(weights.romi).toBeCloseTo(0.333, 3);
     expect(weights.ltvCac).toBeCloseTo(0.167, 3);
     expect(weights.newCustomers).toBeCloseTo(0.167, 3);
-    expect(weights.cac + weights.romi + weights.ltvCac + weights.newCustomers).toBeCloseTo(1, 10);
+    expect(weights.cac + weights.romi + weights.ltvCac + weights.newCustomers).toBe(1);
+  });
+
+  it('apportions the rounding residual so the weights sum to exactly one', () => {
+    // Independent rounding would give 0.091 + 0.182 + 0.273 + 0.455 = 1.001 and a score of 100.1.
+    const weights = normalizeWeights({ cac: 1, romi: 2, ltvCac: 3, newCustomers: 5 });
+
+    expect(weights).toEqual({ cac: 0.091, romi: 0.182, ltvCac: 0.273, newCustomers: 0.454 });
+    expect(weights.cac + weights.romi + weights.ltvCac + weights.newCustomers).toBe(1);
   });
 
   it('keeps a single non-zero weight at one and the others at zero', () => {
@@ -77,6 +85,23 @@ describe('normalizeWeights', () => {
     expect(() => normalizeWeights({ cac: Number.NaN, romi: 0.3, ltvCac: 0.25, newCustomers: 0.15 })).toThrow(
       ValidationError,
     );
+  });
+
+  it('rejects an unknown criterion instead of silently ignoring it', () => {
+    expect(() =>
+      normalizeWeights({ cac: 0.3, romi: 0.3, ltvCac: 0.25, newCustomers: 0.15, profit: 1 }),
+    ).toThrow('Неизвестный критерий веса «profit»');
+  });
+
+  it('rejects a total that overflows to Infinity', () => {
+    expect(() =>
+      normalizeWeights({
+        cac: Number.MAX_VALUE,
+        romi: Number.MAX_VALUE,
+        ltvCac: Number.MAX_VALUE,
+        newCustomers: Number.MAX_VALUE,
+      }),
+    ).toThrow(ValidationError);
   });
 });
 
@@ -253,6 +278,21 @@ describe('computeRanking scoring and order', () => {
     });
 
     expect(byCac.ranked.map((row) => row.code)).toEqual(['zulu', 'alpha']);
+  });
+
+  it('never scores a channel best on every criterion above 100', () => {
+    const ranking = computeRanking({
+      channels: [
+        channel({ channelId: '1', code: 'best', cacCents: '10000', romiPct: 300, ltvCacRatio: 4, newCustomers: 20 }),
+        channel({ channelId: '2', code: 'worst', cacCents: '20000', romiPct: 100, ltvCacRatio: 2, newCustomers: 5 }),
+      ],
+      weights: { cac: 1, romi: 2, ltvCac: 3, newCustomers: 5 },
+    });
+
+    // 0.091 + 0.182 + 0.273 + 0.454 is exactly 1 after largest-remainder apportionment, so the ceiling holds.
+    expect(ranking.ranked[0]).toMatchObject({ code: 'best', rank: 1, score: 100 });
+    expect(ranking.ranked[0].score).toBeLessThanOrEqual(100);
+    expect(ranking.ranked[1].score).toBeLessThanOrEqual(100);
   });
 
   it('gives a zero weight no contribution and no influence on the order', () => {

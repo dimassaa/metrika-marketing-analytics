@@ -1,6 +1,7 @@
 import { METRICS_CONFIG } from '../../config/metrics.js';
 import { ValidationError } from '../../lib/errors.js';
 import { formatCentsToByn, formatMonths, formatPercent, formatRatio } from '../../lib/format.js';
+import { HEALTH_STATUS_LABELS } from '../../lib/metrics-labels.js';
 import {
   assertFiniteOrNull,
   centsPercent,
@@ -10,14 +11,6 @@ import {
 } from '../../lib/metrics-math.js';
 import { centsFromDb } from '../../lib/money.js';
 import { resolvePeriod } from '../../lib/periods.js';
-
-/** One Russian label per health status; the view never derives a label from the status code itself. */
-const STATUS_LABELS = Object.freeze({
-  healthy: 'В норме',
-  watch: 'Наблюдать',
-  risk: 'Риск',
-  no_data: 'Мало данных',
-});
 
 const ATTRIBUTION_MODELS = METRICS_CONFIG.attribution.models;
 
@@ -222,7 +215,7 @@ function buildRow({
     ltvCacRatio,
     ratioLabel: formatRatio(ltvCacRatio),
     status,
-    statusLabel: STATUS_LABELS[status],
+    statusLabel: HEALTH_STATUS_LABELS[status],
   };
 }
 

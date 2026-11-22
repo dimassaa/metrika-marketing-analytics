@@ -1,0 +1,21 @@
+/**
+ * Russian labels for metric view-models.
+ *
+ * They live in one module because the same status or reason can surface in several services: a ranking exclusion and
+ * a health row must not drift into «Мало данных» versus «Нет данных» for the same `no_data` code.
+ */
+
+/** One label per channel health status; the view never derives a label from the status code itself. */
+export const HEALTH_STATUS_LABELS = Object.freeze({
+  healthy: 'В норме',
+  watch: 'Наблюдать',
+  risk: 'Риск',
+  no_data: 'Мало данных',
+});
+
+/** One label per reason a channel is left out of the ranking. */
+export const RANKING_REASON_LABELS = Object.freeze({
+  no_data: HEALTH_STATUS_LABELS.no_data,
+  missing_criterion: 'Не хватает метрики',
+  blended: 'Сводная строка',
+});
