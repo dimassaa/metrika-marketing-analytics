@@ -209,11 +209,32 @@ describe('channel passport against the seeded stand', () => {
       newCustomers: rows[0].new_customers,
       orders: rows[0].orders,
     });
-    // The funnel narrows at every stage, so the chart cannot draw a widening shape.
+    // The funnel and the CAC block count the same customers with the same period semantics.
+    expect(passport.funnel.newCustomers).toBe(passport.health.newCustomers);
+    // On the seeded stand the funnel narrows at every stage. Monotonicity is a property of the data, not a rule the
+    // service enforces: a channel could acquire more customers than it logged leads, and the view-model must show
+    // that honestly.
     expect(passport.funnel.impressions).toBeGreaterThanOrEqual(passport.funnel.clicks);
     expect(passport.funnel.clicks).toBeGreaterThanOrEqual(passport.funnel.leads);
     expect(passport.funnel.leads).toBeGreaterThanOrEqual(passport.funnel.newCustomers);
     expect(passport.funnel.orders).toBeGreaterThanOrEqual(passport.funnel.newCustomers);
+  });
+
+  it('sums weekly new customers to the direct aggregate of the same window', async () => {
+    const summary = await dashboardService.getDashboardSummary({ anchor: ANCHOR });
+    const firstWeekStart = summary.weeklySeries[0].weekStart;
+    const lastWeekEnd = addDays(summary.weeklySeries.at(-1).weekStart, 6);
+
+    const { rows } = await pool.query(
+      `SELECT count(*)::int AS new_customers
+         FROM customers cu
+        WHERE cu.first_order_at >= $1::timestamptz
+          AND cu.first_order_at <= $2::timestamptz`,
+      [minskDayStart(firstWeekStart), minskDayEnd(lastWeekEnd)],
+    );
+    const weeklyTotal = summary.weeklySeries.reduce((total, bucket) => total + bucket.newCustomers, 0);
+
+    expect(weeklyTotal).toBe(rows[0].new_customers);
   });
 
   it('scopes the weekly series and campaign spend to the channel and the period', async () => {
@@ -296,6 +317,7 @@ describe('goals progress against the seeded stand', () => {
       direction: 'lower_is_better',
       // The status is derived from the same numbers the assertion reads; it is not a hard-coded golden value.
       status: BigInt(health.blended.cacCents) <= 5000n ? 'on_track' : 'off_track',
+      favorable: BigInt(health.blended.cacCents) <= 5000n,
     });
     // The deviation is the exact kopeck gap, not a rounded float.
     expect(BigInt(cac.deviation.abs)).toBe(BigInt(health.blended.cacCents) - 5000n);

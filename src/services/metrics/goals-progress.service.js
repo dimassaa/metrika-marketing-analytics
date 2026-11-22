@@ -66,7 +66,9 @@ function buildTarget(metric, targetValue) {
     }
     case 'ltv_cac': {
       const value = toFiniteNumber(targetValue, metric);
-      return { value, unit: 'ratio', label: formatRatio(value), compare: value };
+      // Two decimals, matching the M2 goal list: the same plan must not read `3,000` on one screen and `3,00` on
+      // the other.
+      return { value, unit: 'ratio', label: formatRatio(value, { decimals: 2 }), compare: value };
     }
     case 'payback': {
       const value = toFiniteNumber(targetValue, metric);
@@ -237,6 +239,7 @@ export function createGoalsProgressService({ goalsRepository, healthService }) {
      *     fact: { value: string | number | null, unit: string, label: string },
      *     deviation: { abs: string | number | null, pct: number | null, label: string },
      *     direction: 'lower_is_better' | 'higher_is_better',
+     *     favorable: boolean | null,
      *     status: 'on_track' | 'off_track' | 'no_data',
      *   }>,
      * }>} JSON-safe view-model; money as kopeck strings.
@@ -244,7 +247,7 @@ export function createGoalsProgressService({ goalsRepository, healthService }) {
      * @throws {TypeError} When a goal row breaks the metric contract.
      */
     async getGoalsProgress({ anchor, from = null, to = null, metric = null } = {}) {
-      if (metric !== null && metric !== undefined && GOAL_METRICS[metric] === undefined) {
+      if (metric !== null && metric !== undefined && !Object.hasOwn(GOAL_METRICS, metric)) {
         throw new ValidationError('Неизвестная метрика цели');
       }
 
@@ -262,7 +265,9 @@ export function createGoalsProgressService({ goalsRepository, healthService }) {
       const rows = goals
         .filter((goal) => goal.periodStart === period.from && goal.periodEnd === period.to)
         .map((goal) => {
-          const metricView = GOAL_METRICS[goal.metric];
+          const metricView = Object.hasOwn(GOAL_METRICS, goal.metric)
+            ? GOAL_METRICS[goal.metric]
+            : undefined;
           if (metricView === undefined) {
             throw new TypeError(`goal ${goal.id} has an unknown metric: ${String(goal.metric)}`);
           }
@@ -274,6 +279,7 @@ export function createGoalsProgressService({ goalsRepository, healthService }) {
 
           const target = buildTarget(goal.metric, goal.targetValue);
           const fact = healthRow ? buildFact(goal.metric, healthRow) : null;
+          const status = buildStatus(metricView.direction, target, fact);
 
           return {
             goalId: goal.id,
@@ -289,7 +295,9 @@ export function createGoalsProgressService({ goalsRepository, healthService }) {
               : { value: null, unit: metricView.unit, label: EM_DASH },
             deviation: buildDeviation(goal.metric, metricView.direction, target, fact),
             direction: metricView.direction,
-            status: buildStatus(metricView.direction, target, fact),
+            // A single boolean for the tone: the signed `deviation.label` must not be read as good/bad on its own.
+            favorable: status === 'no_data' ? null : status === 'on_track',
+            status,
           };
         });
 

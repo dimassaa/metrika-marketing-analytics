@@ -227,12 +227,66 @@ describe('dashboard summary', () => {
     expect(JSON.stringify(summary)).not.toMatch(/NaN|Infinity/);
   });
 
-  it('rejects a non-positive week count before touching a dependency', async () => {
-    const { service, healthService } = serviceWith();
+  it('includes the complete week that ends on a Sunday anchor', async () => {
+    // 2026-11-22 is Sunday: the week 11-16..11-22 is complete and must not be dropped as "the current week".
+    const sundayAnchor = '2026-11-22';
+    const { service, metricsRepository } = serviceWith({
+      weeklyRows: [
+        { weekStart: '2026-11-16', spendCents: 70000n, newCustomers: 7 },
+        { weekStart: LAST_WEEK, spendCents: 100000n, newCustomers: 10 },
+      ],
+      attributedRows: [{ weekStart: '2026-11-16', revenueCents: '140000' }],
+    });
 
-    await expect(service.getDashboardSummary({ anchor: ANCHOR, weeks: 0 })).rejects.toThrow(
-      'Количество недель должно быть целым положительным числом',
-    );
-    expect(healthService.getChannelHealthReport).not.toHaveBeenCalled();
+    const summary = await service.getDashboardSummary({ anchor: sundayAnchor });
+
+    expect(metricsRepository.listWeeklySeries).toHaveBeenCalledExactlyOnceWith({
+      from: addDays('2026-11-16', -7 * 11),
+      to: sundayAnchor,
+    });
+    expect(summary.weeklySeries).toHaveLength(12);
+    expect(summary.weeklySeries.at(-1)).toMatchObject({
+      weekStart: '2026-11-16',
+      spendCents: '70000',
+      newCustomers: 7,
+      cacCents: '10000',
+      romiPct: 100,
+    });
+    expect(addDays(summary.weeklySeries.at(-1).weekStart, 6)).toBe(sundayAnchor);
+  });
+
+  it('honours an explicit from/to pair and clamps a future to at the anchor', async () => {
+    const { service, healthService, metricsRepository } = serviceWith();
+
+    const summary = await service.getDashboardSummary({
+      anchor: ANCHOR,
+      from: '2026-10-01',
+      to: '2026-10-30',
+    });
+
+    expect(summary.period).toEqual({ from: '2026-10-01', to: '2026-10-30', days: 30, anchor: ANCHOR });
+    expect(healthService.getChannelHealthReport).toHaveBeenCalledExactlyOnceWith({
+      anchor: ANCHOR,
+      from: '2026-10-01',
+      to: '2026-10-30',
+    });
+    // 2026-10-30 is Friday, so the last complete week starts on 2026-10-19 and the axis starts 11 weeks earlier.
+    expect(metricsRepository.listWeeklySeries).toHaveBeenCalledExactlyOnceWith({
+      from: addDays('2026-10-19', -7 * 11),
+      to: '2026-10-30',
+    });
+
+    const clamped = await service.getDashboardSummary({ anchor: ANCHOR, to: '2027-01-01' });
+    expect(clamped.period.to).toBe(ANCHOR);
+  });
+
+  it('rejects a non-positive or oversized week count before touching a dependency', async () => {
+    for (const weeks of [0, 1.5, 53]) {
+      const { service, healthService } = serviceWith();
+      await expect(service.getDashboardSummary({ anchor: ANCHOR, weeks })).rejects.toThrow(
+        'Количество недель должно быть целым числом от 1 до 52',
+      );
+      expect(healthService.getChannelHealthReport).not.toHaveBeenCalled();
+    }
   });
 });

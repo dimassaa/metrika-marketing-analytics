@@ -484,11 +484,18 @@ Recorded so the deferred findings do not disappear from history when the open en
   buckets, not from `weeklySeries.length`.
 - **The last complete week is the week containing `to` when `to` is Sunday.** The brief's
   `addDays(isoWeekStart(to), -7)` would drop that complete week; the semantic rule "only full Mon–Sun weeks" was
-  implemented and covered by tests. Every other `to` weekday gives the brief's formula unchanged.
+  implemented and is pinned by `tests/unit/weekly-series.test.js` and a Sunday-anchor dashboard case. Every other
+  `to` weekday gives the brief's formula unchanged. The series length is bounded to 1–52 weeks: an unbounded axis
+  would loop and shift dates without any screen ever needing it.
 - **`deviation.abs` is directional while `deviation.pct` is a signed fact-vs-plan change.** For lower-is-better a
   positive `abs` means "behind"; for higher-is-better the sign is inverted by the brief, while `pct` always uses
-  `percentChange(fact, target)`. M4 must combine `abs`/`pct` with `direction` for tone and text; if one signed number
-  is needed, extend the view-model rather than reinterpreting these two.
+  `percentChange(fact, target)`. M4 must read `favorable` (`true`/`false`, `null` for `no_data`) for tone and text
+  and must not infer good/bad from the signed `label`; if one signed number is needed, extend the view-model rather
+  than reinterpreting these two.
+- **Funnel monotonicity is a property of the data, not a rule of the service.** `getChannelFunnel` sums independent
+  sources (`daily_stats` stages vs `customers`), so a channel can acquire more customers than it logged leads; the
+  view-model shows that honestly instead of clamping stages. The integration test only proves the seeded stand is
+  monotonic — M4 must not draw a funnel chart that assumes a narrowing shape.
 - **Goal metric labels are duplicated from `goals.service.js`.** The M2 labels are private, so
   `goals-progress.service.js` repeats the five Russian names. They must stay byte-identical; moving them into
   `src/lib/metrics-labels.js` is the obvious fix once M2's list is next touched.

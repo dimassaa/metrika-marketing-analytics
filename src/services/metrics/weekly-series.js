@@ -19,21 +19,39 @@ import { computeRomi } from './romi.service.js';
 const ROMI_DISPLAY_DECIMALS = 2;
 
 /**
+ * Upper bound of one series. Twelve weeks is the dashboard default; 52 (a year) is the longest axis a reader can
+ * still follow and keeps `addDays` and the chart far away from an unbounded loop.
+ */
+const MAX_SERIES_WEEKS = 52;
+
+/**
+ * @param {unknown} weeks
+ * @returns {void}
+ * @throws {ValidationError} When the week count is not an integer in `[1, 52]`.
+ */
+function assertWeekCount(weeks) {
+  if (!Number.isInteger(weeks) || weeks < 1 || weeks > MAX_SERIES_WEEKS) {
+    throw new ValidationError(
+      `Количество недель должно быть целым числом от 1 до ${MAX_SERIES_WEEKS}`,
+    );
+  }
+}
+
+/**
  * Monday-to-Sunday weeks covered by the series.
  *
  * The last complete week is the week containing `to` when `to` is its Sunday; otherwise the previous one. The brief
  * states `addDays(isoWeekStart(to), -7)`, which is the same answer for every day except Sunday — there it would drop
- * a complete week, so the semantic rule ("only full weeks") decides.
+ * a complete week, so the semantic rule ("only full weeks") decides. `tests/unit/weekly-series.test.js` pins both
+ * the Sunday and the Saturday case.
  *
  * @param {string} to Inclusive reporting end as `YYYY-MM-DD`.
- * @param {number} weeks Number of buckets.
+ * @param {number} weeks Number of buckets, 1–52.
  * @returns {{ firstWeekStart: string, lastWeekStart: string }}
- * @throws {ValidationError} When `weeks` is not a positive integer.
+ * @throws {ValidationError} When `weeks` is not an integer in `[1, 52]`.
  */
 export function resolveWeekRange(to, weeks = METRICS_CONFIG.dashboard.weeks) {
-  if (!Number.isInteger(weeks) || weeks < 1) {
-    throw new ValidationError('Количество недель должно быть целым положительным числом');
-  }
+  assertWeekCount(weeks);
 
   const currentWeekStart = isoWeekStart(to);
   const lastWeekStart = addDays(currentWeekStart, 6) <= to ? currentWeekStart : addDays(currentWeekStart, -7);
@@ -64,11 +82,10 @@ export function resolveWeekRange(to, weeks = METRICS_CONFIG.dashboard.weeks) {
  *   romiPct: number | null,
  * }>}
  * @throws {TypeError} When a repository row breaks the contract (non-bigint spend, negative count).
+ * @throws {ValidationError} When `weeks` is not an integer in `[1, 52]`.
  */
 export function buildWeeklySeries({ firstWeekStart, weeks, weeklyRows = [], attributedRows = [] }) {
-  if (!Number.isInteger(weeks) || weeks < 1) {
-    throw new TypeError(`weeks must be a positive integer, got ${String(weeks)}`);
-  }
+  assertWeekCount(weeks);
 
   /** @type {Map<string, { spendCents: bigint, newCustomers: number }>} */
   const spendByWeek = new Map(

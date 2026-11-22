@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { addDays, formatDateRu, isoWeekStart } from '../../src/lib/dates.js';
 import { NotFoundError, ValidationError } from '../../src/lib/errors.js';
+import { CAMPAIGN_LIST_LIMIT } from '../../src/repositories/campaigns.repo.js';
 import { createChannelPassportService } from '../../src/services/metrics/channel-passport.service.js';
 
 const ANCHOR = '2026-11-21';
@@ -246,6 +247,59 @@ describe('channel passport', () => {
       ValidationError,
     );
     await expect(service.getChannelPassport({ anchor: ANCHOR, channelId: '0' })).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('reports absent channel targets as null instead of a zero', async () => {
+    const { service } = serviceWith({
+      channel: { ...CHANNEL, targetCacCents: null, targetRomiPct: null },
+    });
+
+    const passport = await service.getChannelPassport({ anchor: ANCHOR, channelId: '4' });
+
+    expect(passport.channel).toMatchObject({ targetCacCents: null, targetRomiPct: null });
+  });
+
+  it('uses an explicit from/to pair for every period-scoped read', async () => {
+    const { service, healthService, metricsRepository, attributionService } = serviceWith();
+    const from = '2026-10-01';
+    const to = '2026-10-30';
+
+    const passport = await service.getChannelPassport({ anchor: ANCHOR, channelId: '4', from, to });
+
+    expect(passport.period).toEqual({ from, to, days: 30, anchor: ANCHOR });
+    expect(healthService.getChannelHealthReport).toHaveBeenCalledExactlyOnceWith({ anchor: ANCHOR, from, to });
+    expect(metricsRepository.getChannelFunnel).toHaveBeenCalledExactlyOnceWith({ from, to, channelId: '4' });
+    expect(metricsRepository.listCampaignCacInputs).toHaveBeenCalledExactlyOnceWith({ from, to, channelId: '4' });
+    // 2026-10-30 is Friday, so the weekly axis ends on the complete week that starts on 2026-10-19.
+    expect(metricsRepository.listWeeklySeries).toHaveBeenCalledExactlyOnceWith({
+      from: addDays('2026-10-19', -7 * 11),
+      to,
+      channelIds: ['4'],
+    });
+    expect(attributionService.getAttributionSeries).toHaveBeenCalledExactlyOnceWith({
+      from: addDays('2026-10-19', -7 * 11),
+      to,
+      channelId: '4',
+    });
+  });
+
+  it('drops the truncation sentinel so the screen never renders limit + 1 campaigns', async () => {
+    const campaignRows = Array.from({ length: CAMPAIGN_LIST_LIMIT + 1 }, (_, index) => ({
+      id: String(1000 + index),
+      channelId: '4',
+      code: `ig_${index}`,
+      name: `Кампания ${index}`,
+      status: 'active',
+      spendCents: 0n,
+    }));
+    const { service } = serviceWith({ campaignRows, campaignCacRows: [] });
+
+    const { campaigns } = await service.getChannelPassport({ anchor: ANCHOR, channelId: '4' });
+
+    expect(campaigns).toHaveLength(CAMPAIGN_LIST_LIMIT);
+    expect(campaigns.at(-1).id).toBe(String(1000 + CAMPAIGN_LIST_LIMIT - 1));
+    // The sentinel row is not joined to a CAC input and would have rendered as `cacCents: null`.
+    expect(campaigns.some((campaign) => campaign.id === String(1000 + CAMPAIGN_LIST_LIMIT))).toBe(false);
   });
 
   it('serialises without a bigint, NaN or Infinity', async () => {

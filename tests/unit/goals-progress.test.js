@@ -123,23 +123,29 @@ describe('goals progress', () => {
     // CAC 60,00 against a 50,00 plan: 10,00 over plan is off track.
     expect(byId.get('1')).toMatchObject({
       status: 'off_track',
+      favorable: false,
       fact: { value: '6000', unit: 'cents', label: '60,00' },
       deviation: { abs: '1000', pct: 20, label: '10,00' },
     });
     // ROMI 100 % against a 120 % plan: 20 points short is off track.
     expect(byId.get('2')).toMatchObject({
       status: 'off_track',
+      favorable: false,
       fact: { value: 100, unit: 'percent', label: '100,0%' },
       deviation: { abs: 20, pct: -16.67, label: '20,0%' },
     });
-    // LTV:CAC 3,4 against 3,0 is on track; the gap is negative because the fact exceeds the plan.
+    // LTV:CAC 3,4 against 3,0 is on track; the gap is negative because the fact exceeds the plan. The target keeps
+    // the two decimals of the M2 goal list.
     expect(byId.get('3')).toMatchObject({
       status: 'on_track',
+      favorable: true,
+      target: { value: 3, unit: 'ratio', label: '3,00' },
       deviation: { abs: -0.4, label: '−0,400' },
     });
     // Payback 3,5 months against 12 is on track; months must never be formatted as a percentage.
     expect(byId.get('4')).toMatchObject({
       status: 'on_track',
+      favorable: true,
       target: { value: 12, unit: 'months', label: '12 мес.' },
       fact: { value: 3.5, unit: 'months', label: '3,5 мес.' },
     });
@@ -148,6 +154,7 @@ describe('goals progress', () => {
     // 10 new customers against a plan of 20 is off track.
     expect(byId.get('5')).toMatchObject({
       status: 'off_track',
+      favorable: false,
       deviation: { abs: 10, label: '10' },
     });
   });
@@ -193,6 +200,7 @@ describe('goals progress', () => {
 
     expect(rows[0]).toMatchObject({
       status: 'no_data',
+      favorable: null,
       channelLabel: 'TikTok',
       fact: { value: null, unit: 'percent', label: '—' },
       deviation: { abs: null, pct: null, label: '—' },
@@ -235,11 +243,15 @@ describe('goals progress', () => {
     await service.getGoalsProgress({ anchor: ANCHOR, ...PERIOD, metric: 'cac' });
     expect(goalsRepository.listGoals).toHaveBeenCalledExactlyOnceWith({ metric: 'cac' });
 
-    const fresh = serviceWith();
-    await expect(
-      fresh.service.getGoalsProgress({ anchor: ANCHOR, ...PERIOD, metric: 'magic' }),
-    ).rejects.toThrow(ValidationError);
-    expect(fresh.goalsRepository.listGoals).not.toHaveBeenCalled();
+    // Prototype keys are not goal metrics. A plain object lookup would accept `constructor` and then build a row
+    // from `Object.prototype.constructor`.
+    for (const metric of ['magic', 'constructor', 'toString', '__proto__']) {
+      const fresh = serviceWith();
+      await expect(
+        fresh.service.getGoalsProgress({ anchor: ANCHOR, ...PERIOD, metric }),
+      ).rejects.toThrow(ValidationError);
+      expect(fresh.goalsRepository.listGoals).not.toHaveBeenCalled();
+    }
   });
 
   it('serialises without a bigint, NaN or Infinity', async () => {

@@ -4,6 +4,7 @@ import { NotFoundError, ValidationError } from '../../lib/errors.js';
 import { parseBigIntId } from '../../lib/ids.js';
 import { centsToApi } from '../../lib/metrics-math.js';
 import { resolvePeriod } from '../../lib/periods.js';
+import { CAMPAIGN_LIST_LIMIT } from '../../repositories/campaigns.repo.js';
 import { computeCac } from './cac.service.js';
 import { buildWeeklySeries, resolveWeekRange } from './weekly-series.js';
 
@@ -85,7 +86,8 @@ export function createChannelPassportService({
      *     id: string, code: string, name: string, status: string,
      *     spendCents: string, newCustomers: number, cacCents: string | null,
      *   }>,
-     * }>} JSON-safe view-model; money as kopeck strings, percentages as numbers.
+     * }>} JSON-safe view-model; money as kopeck strings, percentages as numbers. At most
+     *   `CAMPAIGN_LIST_LIMIT` campaigns are returned, without the repository's truncation sentinel.
      * @throws {ValidationError} When the anchor, period or channel id is malformed.
      * @throws {NotFoundError} When the channel does not exist.
      * @throws {TypeError} When a dependency returns a row outside its contract.
@@ -132,8 +134,11 @@ export function createChannelPassportService({
         channelId: channel.id,
       });
 
+      // `listCampaigns` reads `LIMIT + 1` so the list screen can tell "200 campaigns" from "more than 200". The
+      // extra row is a truncation sentinel, not a campaign: render at most the real limit instead of a 201st row.
+      const visibleCampaigns = campaignRows.slice(0, CAMPAIGN_LIST_LIMIT);
       const cacInputByCampaign = new Map(campaignCacRows.map((row) => [row.campaignId, row]));
-      const campaigns = campaignRows.map((campaign) => {
+      const campaigns = visibleCampaigns.map((campaign) => {
         // The CAC input list comes from its own query for the same period. A campaign missing from it has no
         // statistics in the window, which is a real zero spend and an undefined CAC, not an error.
         const input = cacInputByCampaign.get(campaign.id);
