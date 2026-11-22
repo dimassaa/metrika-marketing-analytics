@@ -600,3 +600,18 @@ Still open:
   integer basis points), but the visible `Σ contributions` can differ from the score by up to one hundredth after
   per-term rounding. T7 asserts both the exact sum and a `0.05` display tolerance; a UI that prints the sum must use
   the same tolerance rather than an equality check.
+- **The dashboard bundle is 277 KB gzip, above the 250 KB page budget (and the 160 KB entry budget).** The single
+  entry is React 19 + Recharts 3.11; no unused Recharts component is imported and tree-shaking leaves only the line,
+  bar, grid, axis, tooltip and legend modules. Closing the gap needs a deliberate decision (lazy-load the charts
+  after the KPI paint, or accept the larger budget for a chart-heavy screen), not a silent test edit. T7 should
+  re-measure and either change the budget or split the vendor chunk.
+- **`formatCompactCents` follows the metrics spec, not the plan's arithmetic example.** `12_340_000` kopecks is
+  123 400 BYN, so the axis reads `123,4 тыс.`, not the plan's `12,3 тыс.` (that would be `1_234_000` kopecks).
+  The unit test pins both the thousands and the millions boundary; the plan example should be corrected in T7.
+- **The dashboard channel filter has no form control yet.** T1 accepts `channelIds` on the page and API, filters the
+  blended row and every weekly source, and ships the full `channelOptions` list in the props. The `<select multiple>`
+  belongs to T2's page frame; adding it now would duplicate a control T2 rewrites.
+- **Two channel repository instances are alive in one app.** M2's channel controller builds its own
+  `channelsRepository`, while the metrics composition root builds another. The instances are stateless wrappers
+  around one pool, so this costs no connection and no state; moving M2 onto the module is T3's cleanup, together
+  with its `channelListService`/`passportService`.

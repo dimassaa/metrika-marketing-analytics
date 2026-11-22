@@ -69,29 +69,15 @@ export function createAppController({ referenceRepository }) {
    * Renders one screen inside the app shell.
    * @param {import('express').Request} req
    * @param {import('express').Response} res
-   * @param {{ view: string, title: string, activeNav: string, viewModel?: Record<string, unknown> }} page
+   * @param {{ view: string, title: string, activeNav: string }} page
    * @returns {Promise<void>}
    */
-  async function renderPage(req, res, { view, title, activeNav, viewModel = {} }) {
+  async function renderPage(req, res, { view, title, activeNav }) {
     const dataAnchor = await referenceRepository.getDataAnchor();
-    res.render(view, { ...buildShellLocals(req, { title, activeNav, dataAnchor }), ...viewModel });
+    res.render(view, buildShellLocals(req, { title, activeNav, dataAnchor }));
   }
 
   return {
-    /**
-     * Dashboard for milestone 1. There is no metrics engine yet, so the view model states that honestly: the
-     * template renders four KPI placeholders and an empty state instead of inventing numbers.
-     * @type {import('express').RequestHandler}
-     */
-    async dashboard(req, res) {
-      await renderPage(req, res, {
-        view: 'pages/dashboard',
-        title: 'Дашборд',
-        activeNav: 'dashboard',
-        viewModel: { kpis: null, isEmpty: true },
-      });
-    },
-
     /**
      * Honest placeholder for a section that exists in the navigation but ships in a later milestone.
      * @param {{ title: string, activeNav: string }} section

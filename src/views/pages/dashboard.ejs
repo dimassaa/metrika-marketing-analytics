@@ -1,93 +1,9 @@
+<%#
+  Dashboard frame. The page owns the shell and the single island mount node; KPI tiles, the verdict and all charts
+  are rendered by `client/entries/dashboard.jsx` from `model` (the same object `/api/v1/dashboard` returns).
+%>
 <section class="app-section">
   <div class="stack stack--lg">
-    <div class="grid grid--4">
-      <article class="kpi">
-        <p class="kpi__label">Расход</p>
-        <p class="kpi__value">—</p>
-        <p class="kpi__hint">Нет данных: расчёт появится в следующем этапе</p>
-      </article>
-
-      <article class="kpi">
-        <p class="kpi__label">Новые клиенты</p>
-        <p class="kpi__value">—</p>
-        <p class="kpi__hint">Нет данных: расчёт появится в следующем этапе</p>
-      </article>
-
-      <article class="kpi">
-        <p class="kpi__label">CAC</p>
-        <p class="kpi__value">—</p>
-        <p class="kpi__hint">Нет данных: расчёт появится в следующем этапе</p>
-      </article>
-
-      <article class="kpi">
-        <p class="kpi__label">ROMI</p>
-        <p class="kpi__value">—</p>
-        <p class="kpi__hint">Нет данных: расчёт появится в следующем этапе</p>
-      </article>
-    </div>
-
-    <% if (isEmpty) { %>
-    <div class="empty-state">
-      <svg
-        class="app-empty__icon"
-        viewBox="0 0 48 48"
-        width="48"
-        height="48"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.5"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >
-        <rect x="6" y="10" width="36" height="28" rx="4"></rect>
-        <path d="M6 30h10l3 5h10l3-5h10"></path>
-        <path d="M18 18h12M18 23h8"></path>
-      </svg>
-      <p class="empty-state__title">Данных пока нет</p>
-      <p class="empty-state__text">
-        Метрики ещё не рассчитаны: движок CAC, LTV и ROMI появится в следующем этапе. Показывать нули вместо
-        результатов было бы нечестно, поэтому KPI остаются пустыми.
-      </p>
-      <div class="empty-state__actions cluster">
-        <% if (can('import:run')) { %>
-        <a class="btn btn--primary" href="/app/import">Перейти к импорту</a>
-        <% } else { %>
-        <a class="btn btn--ghost" href="/app/channels">Посмотреть каналы</a>
-        <% } %>
-      </div>
-    </div>
-
-    <section class="card card--flat stack" aria-labelledby="dashboard-next-steps">
-      <div class="stack stack--sm">
-        <h2 class="card__title" id="dashboard-next-steps">Что дальше</h2>
-        <p class="card__meta">Два пути: загрузить свою выгрузку или наполнить стенд демо-данными «Зёрен».</p>
-      </div>
-
-      <ol class="app-steps">
-        <li class="app-steps__item">
-          <span class="step__index">01</span>
-          <div>
-            <strong>Загрузите CSV</strong>
-            <p>Импорт расходов, клиентов, касаний и заказов. Проверим строки и покажем ошибки по колонкам.</p>
-          </div>
-        </li>
-        <li class="app-steps__item">
-          <span class="step__index">02</span>
-          <div>
-            <strong>Или запустите демо-сид</strong>
-            <p>Команда <code>npm run seed</code> заполнит базу детерминированным набором за 14 месяцев.</p>
-          </div>
-        </li>
-        <li class="app-steps__item">
-          <span class="step__index">03</span>
-          <div>
-            <strong>Обновите страницу</strong>
-            <p>Якорь данных сдвинется на последнюю дату со статистикой. KPI включатся вместе с расчётным движком.</p>
-          </div>
-        </li>
-      </ol>
-    </section>
-    <% } %>
+    <%- include('../partials/island', { name: 'dashboard', model }) %>
   </div>
 </section>

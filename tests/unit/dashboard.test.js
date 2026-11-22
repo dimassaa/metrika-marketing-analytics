@@ -106,14 +106,17 @@ describe('dashboard summary', () => {
       anchor: ANCHOR,
       from: PERIOD.from,
       to: PERIOD.to,
+      channelIds: null,
     });
     expect(metricsRepository.listWeeklySeries).toHaveBeenCalledExactlyOnceWith({
       from: FIRST_WEEK,
       to: PERIOD.to,
+      channelIds: null,
     });
     expect(attributionService.getAttributionSeries).toHaveBeenCalledExactlyOnceWith({
       from: FIRST_WEEK,
       to: PERIOD.to,
+      channelIds: null,
     });
   });
 
@@ -243,6 +246,7 @@ describe('dashboard summary', () => {
     expect(metricsRepository.listWeeklySeries).toHaveBeenCalledExactlyOnceWith({
       from: addDays('2026-11-16', -7 * 11),
       to: sundayAnchor,
+      channelIds: null,
     });
     expect(summary.weeklySeries).toHaveLength(12);
     expect(summary.weeklySeries.at(-1)).toMatchObject({
@@ -269,15 +273,45 @@ describe('dashboard summary', () => {
       anchor: ANCHOR,
       from: '2026-10-01',
       to: '2026-10-30',
+      channelIds: null,
     });
     // 2026-10-30 is Friday, so the last complete week starts on 2026-10-19 and the axis starts 11 weeks earlier.
     expect(metricsRepository.listWeeklySeries).toHaveBeenCalledExactlyOnceWith({
       from: addDays('2026-10-19', -7 * 11),
       to: '2026-10-30',
+      channelIds: null,
     });
 
     const clamped = await service.getDashboardSummary({ anchor: ANCHOR, to: '2027-01-01' });
     expect(clamped.period.to).toBe(ANCHOR);
+  });
+
+  it('passes the channel filter to every source without a second health call', async () => {
+    const { service, healthService, metricsRepository, attributionService } = serviceWith();
+
+    const summary = await service.getDashboardSummary({
+      anchor: ANCHOR,
+      channelIds: ['1', '2'],
+    });
+
+    expect(healthService.getChannelHealthReport).toHaveBeenCalledExactlyOnceWith({
+      anchor: ANCHOR,
+      from: PERIOD.from,
+      to: PERIOD.to,
+      channelIds: ['1', '2'],
+    });
+    expect(metricsRepository.listWeeklySeries).toHaveBeenCalledExactlyOnceWith({
+      from: FIRST_WEEK,
+      to: PERIOD.to,
+      channelIds: ['1', '2'],
+    });
+    expect(attributionService.getAttributionSeries).toHaveBeenCalledExactlyOnceWith({
+      from: FIRST_WEEK,
+      to: PERIOD.to,
+      channelIds: ['1', '2'],
+    });
+    expect(summary.channels).toEqual([]);
+    expect(summary.availableChannels).toEqual([]);
   });
 
   it('rejects a non-positive or oversized week count before touching a dependency', async () => {

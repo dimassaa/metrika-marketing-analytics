@@ -2012,3 +2012,213 @@ input[type='file'] {
     gap: var(--spacing-8);
   }
 }
+
+/* --------------------------------------------------------------------------
+   13. Islands and charts
+   The EJS frame owns the mount node and a fixed-height skeleton; React replaces it with KPI, charts and tables.
+   Only tokens from §1 are used here, so the chart theme parity test stays meaningful.
+   -------------------------------------------------------------------------- */
+
+.island {
+  display: block;
+}
+
+.island > .skeleton--chart,
+.skeleton--chart {
+  height: 240px;
+  border-radius: var(--radius-cards);
+}
+/* Verdict card: badge plus one explanatory sentence, never a coloured panel. */
+.verdict {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-12);
+}
+
+.verdict__reason {
+  flex: 1 1 320px;
+  color: var(--color-warm-gray);
+  font-size: 14px;
+}
+
+.badge--no-data {
+  color: var(--color-ash-gray);
+}
+
+.kpi--bad .kpi__value {
+  color: var(--color-status-risk);
+}
+
+/* Chart frame: heading, fact caption, unit chip, fixed-height plot, duplicate table. */
+.chart {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-16);
+  padding: var(--spacing-24);
+}
+
+.chart__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--spacing-4) var(--spacing-12);
+  align-items: baseline;
+}
+
+.chart__title {
+  grid-column: 1;
+  margin: 0;
+  color: var(--color-ink-black);
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+
+.chart__caption {
+  grid-column: 1;
+  margin: 0;
+  color: var(--color-warm-gray);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.chart__unit {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: start;
+  color: var(--color-ash-gray);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.chart__plot {
+  width: 100%;
+  height: 240px;
+  min-height: 180px;
+}
+
+.chart__plot--sm {
+  height: 180px;
+}
+
+.chart__empty {
+  padding: var(--spacing-32) var(--spacing-16);
+  border: 1px dashed var(--color-stone-muted);
+  border-radius: var(--radius-cards);
+  color: var(--color-warm-gray);
+  font-size: 14px;
+  text-align: center;
+}
+
+.chart__table {
+  border-top: 1px solid var(--color-stone-border);
+  padding-top: var(--spacing-8);
+}
+
+.chart__table summary {
+  color: var(--color-warm-gray);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.chart__table[open] summary {
+  margin-bottom: var(--spacing-8);
+}
+
+.chart__table .table-wrap {
+  max-height: 280px;
+  overflow: auto;
+}
+
+/* Tooltip — white card, hairline border, card shadow; colours come from tokens, not inline styles. */
+.chart__tooltip {
+  padding: var(--spacing-8) var(--spacing-12);
+  border: 1px solid var(--color-stone-border);
+  border-radius: var(--radius-input);
+  background-color: var(--color-pure-white);
+  box-shadow: var(--shadow-card);
+  color: var(--color-ink-black);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.chart__tooltip-label {
+  margin-bottom: var(--spacing-4);
+  color: var(--color-ink-black);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart__tooltip-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chart__tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-8);
+}
+
+.chart__tooltip-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--color-ash-gray);
+}
+
+.chart__tooltip-dot--revenue,
+.chart__tooltip-dot--value {
+  background-color: var(--color-cyan-signal);
+}
+
+.chart__tooltip-name {
+  color: var(--color-warm-gray);
+}
+
+.chart__tooltip-value {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+/* Topbar period form: plain GET, no script handler, so the CSP can keep script-src-attr 'none'. */
+.app-topbar__period {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-8);
+  margin: 0;
+}
+
+@media (max-width: 768px) {
+  .chart {
+    padding: var(--spacing-16);
+  }
+
+  .chart__plot {
+    height: 200px;
+  }
+
+  .chart__plot--sm {
+    height: 160px;
+  }
+
+  .app-topbar__period {
+    flex-wrap: wrap;
+    order: 3;
+    flex-basis: 100%;
+  }
+
+  .app-avatar {
+    order: 2;
+    margin-left: auto;
+  }
+}

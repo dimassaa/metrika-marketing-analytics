@@ -16,6 +16,48 @@ function groupThousands(digits) {
 }
 
 /**
+ * Renders a compact BYN amount for a chart axis: `1 234`, `12,3 тыс.`, `1,2 млн`.
+ *
+ * Compaction applies to whole roubles (the input is kopecks), so the unit always means roubles: `12,3 тыс.` is
+ * 12 300 BYN. A chart axis has no room for kopecks; the tooltip and the duplicate table keep the exact amount.
+ * Below ten thousand roubles the grouped number is short enough and more precise than a unit suffix.
+ *
+ * @param {bigint | string | number | null | undefined} value Amount in kopecks.
+ * @returns {string} Ready-to-display compact amount; the caller adds the BYN glyph to the axis label.
+ */
+export function formatCompactCents(value) {
+  const cents = centsFromDb(value);
+  if (cents === null) return EM_DASH;
+
+  const negative = cents < 0n;
+  const rubles = (negative ? -cents : cents + 50n) / 100n;
+  if (rubles === 0n) return '0';
+
+  /**
+   * @param {bigint} unit Size of one compact unit in roubles.
+   * @param {string} suffix
+   * @returns {string}
+   */
+  const compact = (unit, suffix) => {
+    const tenths = (rubles + unit / 20n) / (unit / 10n);
+    const whole = tenths / 10n;
+    const fraction = tenths % 10n;
+    const body = fraction === 0n ? whole.toString() : `${whole},${fraction}`;
+    return `${body} ${suffix}`;
+  };
+
+  let text;
+  if (rubles < 10_000n) {
+    text = groupThousands(rubles.toString());
+  } else if (rubles < 1_000_000n) {
+    text = compact(1000n, 'тыс.');
+  } else {
+    text = compact(1_000_000n, 'млн');
+  }
+  return `${negative ? MINUS : ''}${text}`;
+}
+
+/**
  * @param {string} text Normalized decimal text; the caller guarantees finiteness.
  * @returns {string} Up to two decimals, at least one, with a comma.
  */

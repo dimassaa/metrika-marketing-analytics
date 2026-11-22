@@ -8,15 +8,26 @@
     <div class="app-topbar__tools">
       <p class="app-topbar__anchor">Данные по <%= dataAnchor %></p>
 
-      <%# Period switching arrives with the metrics engine; the control is visible but disabled so the layout is final. %>
-      <label class="app-topbar__period">
-        <span class="u-visually-hidden">Период расчётов</span>
-        <select class="select app-topbar__select" disabled>
-          <option>30 дней</option>
-          <option>90 дней</option>
-          <option>180 дней</option>
-        </select>
-      </label>
+      <%#
+        Plain GET form, no inline handler: the CSP forbids script attributes. `preserve` replays every other query
+        key (channel filter, sort) so switching the period cannot silently reset the screen.
+      %>
+      <% if (locals.periodControl) { %>
+      <form class="app-topbar__period" method="get" action="<%= locals.currentPath || '/app/dashboard' %>">
+        <% for (const item of periodControl.preserve) { %>
+        <input type="hidden" name="<%= item.name %>" value="<%= item.value %>">
+        <% } %>
+        <label class="app-topbar__period-field">
+          <span class="u-visually-hidden">Период расчётов</span>
+          <select class="select app-topbar__select" name="days">
+            <% for (const option of periodControl.options) { %>
+            <option value="<%= option.value %>"<%= option.selected ? ' selected' : '' %>><%= option.label %></option>
+            <% } %>
+          </select>
+        </label>
+        <button class="btn btn--ghost btn--sm" type="submit">Показать</button>
+      </form>
+      <% } %>
 
       <a class="app-avatar" href="/app/profile" aria-label="Профиль: <%= currentUser.fullName %>"><%= initials %></a>
     </div>

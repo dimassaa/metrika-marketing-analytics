@@ -1,0 +1,15 @@
+<%#
+  Hashed island modules for the current page. `islandEntries` is set by the page controller; a page without it
+  renders no scripts at all. The manifest lookup throws on an unknown entry, so a typo becomes a 500 in development
+  instead of a silently script-less screen.
+%>
+<% const entries = locals.islandEntries ?? []; %>
+<% if (entries.length > 0) { %>
+<% const bundle = assetScripts(entries); %>
+<% for (const href of bundle.preloads) { %>
+<link rel="modulepreload" href="<%= href %>">
+<% } %>
+<% for (const src of bundle.scripts) { %>
+<script type="module" src="<%= src %>"></script>
+<% } %>
+<% } %>

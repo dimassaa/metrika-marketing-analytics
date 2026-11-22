@@ -1,0 +1,15 @@
+<%#
+  One island mount point per page. EJS renders only this node; React replaces its skeleton with the screen.
+
+  `dataProps` escapes `<`, `>` and `&` as JSON unicode escapes and the escaped EJS print escapes the attribute
+  quotes, so a string value can never close the attribute or inject a tag. The skeleton keeps the layout height
+  stable until the module executes; `<noscript>` explains the screen when it cannot.
+%>
+<div class="island" data-island="<%= name %>" data-props="<%= dataProps(model, name) %>">
+  <div class="skeleton skeleton--chart" aria-hidden="true"></div>
+  <noscript>
+    <p class="empty-state__text">
+      Для интерактивных графиков нужен JavaScript. Числа остаются доступны в JSON API.
+    </p>
+  </noscript>
+</div>

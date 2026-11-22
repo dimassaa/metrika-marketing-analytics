@@ -274,7 +274,11 @@ describe('createChannelHealthService', () => {
       from: RESOLVED.from,
       to: RESOLVED.to,
     });
-    expect(ltvService.getChannelLtv).toHaveBeenCalledExactlyOnceWith({ anchor: '2026-11-21', horizonMonths: 12 });
+    expect(ltvService.getChannelLtv).toHaveBeenCalledExactlyOnceWith({
+      anchor: '2026-11-21',
+      horizonMonths: 12,
+      channelIds: null,
+    });
     expect(attributionService.getAttributionReport).toHaveBeenCalledExactlyOnceWith({
       from: RESOLVED.from,
       to: RESOLVED.to,

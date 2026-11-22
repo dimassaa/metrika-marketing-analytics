@@ -1,7 +1,7 @@
 import { METRICS_CONFIG } from '../../config/metrics.js';
 import { isoWeekStart, toDateOnly } from '../../lib/dates.js';
 import { ValidationError } from '../../lib/errors.js';
-import { parseBigIntId } from '../../lib/ids.js';
+import { parseBigIntId, normalizeChannelIds } from '../../lib/ids.js';
 import { centsPercent, centsToApi } from '../../lib/metrics-math.js';
 
 const DAY_MS = 86_400_000;
@@ -301,12 +301,14 @@ export function createAttributionService({ attributionRepository, metricsReposit
   /**
    * @param {{ from: string, to: string }} period
    * @param {'last_touch' | 'first_touch' | 'linear'} model
-   * @param {string | null} channelId
+   * @param {string | null} channelId Single-channel filter used by the passport.
+   * @param {string[] | null} channelIds Multi-channel filter used by the dashboard.
    * @returns {Promise<Array<{ weekStart: string, revenueCents: string }>>}
    */
-  async function buildSeries(period, model, channelId) {
+  async function buildSeries(period, model, channelId, channelIds = null) {
     const { orders, touchpoints } = await loadInputs(period);
     const allocations = attributeOrders({ orders, touchpoints, model });
+    const allowed = channelIds === null ? null : new Set(channelIds);
 
     /** @type {Map<string, string>} */
     const weekByOrder = new Map();
@@ -318,7 +320,11 @@ export function createAttributionService({ attributionRepository, metricsReposit
     const revenueByWeek = new Map();
     for (const allocation of allocations) {
       // The channel filter runs after allocation: a channel receives its own share, not a re-split of the order.
-      if (channelId !== null && allocation.channelId !== channelId) continue;
+      const matches =
+        allowed === null
+          ? channelId === null || allocation.channelId === channelId
+          : allowed.has(allocation.channelId);
+      if (!matches) continue;
       const weekStart = weekByOrder.get(allocation.orderId);
       if (weekStart === undefined) {
         throw new TypeError(`allocation refers to unknown order ${allocation.orderId}`);
@@ -445,23 +451,31 @@ export function createAttributionService({ attributionRepository, metricsReposit
      *   to: string,
      *   model?: 'last_touch' | 'first_touch' | 'linear',
      *   channelId?: string | null,
+     *   channelIds?: string[] | null,
      * }} request
      * @returns {Promise<Array<{ weekStart: string, revenueCents: string }>>}
-     * @throws {ValidationError} When the period, model or channel id is invalid.
+     * @throws {ValidationError} When the period, model, channel id or channel list is invalid.
      */
-    async getAttributionSeries({ from, to, model = DEFAULT_MODEL, channelId = null } = {}) {
+    async getAttributionSeries({
+      from,
+      to,
+      model = DEFAULT_MODEL,
+      channelId = null,
+      channelIds = null,
+    } = {}) {
       const period = normalisePeriod({ from, to });
       const selectedModel = normaliseModels([model])[0];
+      const scopedIds = normalizeChannelIds(channelIds);
 
       let scopedChannelId = null;
-      if (channelId !== null && channelId !== undefined) {
+      if (scopedIds === null && channelId !== null && channelId !== undefined) {
         scopedChannelId = parseBigIntId(channelId);
         if (scopedChannelId === null) {
           throw new ValidationError('Некорректный идентификатор канала');
         }
       }
 
-      return buildSeries(period, selectedModel, scopedChannelId);
+      return buildSeries(period, selectedModel, scopedChannelId, scopedIds);
     },
   };
 }

@@ -1,6 +1,7 @@
 import { METRICS_CONFIG } from '../../config/metrics.js';
 import { addDays, formatDateRu, isoWeekStart } from '../../lib/dates.js';
 import { ValidationError } from '../../lib/errors.js';
+import { formatCentsToByn } from '../../lib/format.js';
 import { assertFiniteOrNull, centsToApi, roundNumber } from '../../lib/metrics-math.js';
 import { centsFromDb } from '../../lib/money.js';
 import { computeCac } from './cac.service.js';
@@ -117,6 +118,10 @@ export function buildWeeklySeries({ firstWeekStart, weeks, weeklyRows = [], attr
       newCustomers,
       cacCents: centsToApi(cacCents),
       romiPct,
+      // Attributed revenue is kept next to ROMI so the spend/revenue bars use the same numerator as the ratio; a
+      // chart derived from ROMI would compound two rounding steps.
+      attributedCents: centsToApi(revenueCents),
+      attributedLabel: formatCentsToByn(revenueCents),
     });
   }
 

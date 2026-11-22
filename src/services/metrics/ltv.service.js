@@ -2,7 +2,7 @@ import { METRICS_CONFIG } from '../../config/metrics.js';
 import { addMonths, startOfMonth, toDateOnly } from '../../lib/dates.js';
 import { ValidationError } from '../../lib/errors.js';
 import { formatCentsToByn } from '../../lib/format.js';
-import { parseBigIntId } from '../../lib/ids.js';
+import { parseBigIntId, normalizeChannelIds } from '../../lib/ids.js';
 import { centsToApi, roundNumber } from '../../lib/metrics-math.js';
 
 /** Guard against a caller asking for a 1 000-column matrix by accident; 60 months is five years of history. */
@@ -571,7 +571,10 @@ export function createLtvService({ cohortsRepository }) {
      * margins are summed for each cohort, while the cohort set must cover every month that already has a completed
      * horizon. A rolling start would silently drop the older cohorts and inflate the channel average.
      *
-     * @param {{ anchor: string, horizonMonths?: number }} request
+     * `channelIds` narrows the entries before the aggregation, so the blended LTV is the exact margin/customer
+     * ratio of the selected channels, not an average of their rounded per-channel values.
+     *
+     * @param {{ anchor: string, horizonMonths?: number, channelIds?: string[] | null }} request
      * @returns {Promise<{
      *   rows: Array<{
      *     channelId: string, channelCode: string, ltvCents: string | null,
@@ -582,11 +585,12 @@ export function createLtvService({ cohortsRepository }) {
      *     cohortCount: number, status: 'ok' | 'insufficient_history',
      *   },
      * }>}
-     * @throws {ValidationError} When the anchor or horizon is invalid.
+     * @throws {ValidationError} When the anchor, horizon or channel filter is invalid.
      */
-    async getChannelLtv({ anchor, horizonMonths = METRICS_CONFIG.ltv.defaultHorizon } = {}) {
+    async getChannelLtv({ anchor, horizonMonths = METRICS_CONFIG.ltv.defaultHorizon, channelIds = null } = {}) {
       const anchorDate = validated(() => assertDate(anchor));
       const horizon = validated(() => assertHorizon(horizonMonths));
+      const scopedIds = normalizeChannelIds(channelIds);
       const { entries, channels } = await loadReport({
         fromCohortMonth: null,
         toCohortMonth: startOfMonth(anchorDate),
@@ -594,7 +598,13 @@ export function createLtvService({ cohortsRepository }) {
         anchor: anchorDate,
       });
 
-      const { rows, blended } = buildChannelLtv(entries, channels, {
+      // Filtering in memory keeps the two repository queries unchanged; a second WHERE clause would only move the
+      // same work into SQL and make the unfiltered/filtered reports two code paths.
+      const allowed = scopedIds === null ? null : new Set(scopedIds);
+      const scopedEntries = allowed === null ? entries : entries.filter((entry) => allowed.has(entry.channelId));
+      const scopedChannels = allowed === null ? channels : channels.filter((channel) => allowed.has(channel.channelId));
+
+      const { rows, blended } = buildChannelLtv(scopedEntries, scopedChannels, {
         anchor: anchorDate,
         horizonMonths: horizon,
       });

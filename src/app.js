@@ -40,6 +40,9 @@ import { createMediaController } from './controllers/media.controller.js';
 import { createAuthRouter } from './routes/auth.routes.js';
 import { createAppRouter } from './routes/app.routes.js';
 import { createApiRouter } from './routes/api.routes.js';
+import { createMetricsModule } from './services/metrics/index.js';
+import { ASSETS_DIR, createAssetManifest } from './lib/assets.js';
+import { dataProps } from './lib/serialize-props.js';
 
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const viewsDir = fileURLToPath(new URL('./views', import.meta.url));
@@ -56,12 +59,15 @@ const publicDir = fileURLToPath(new URL('../public', import.meta.url));
  *   } & Partial<import('pg').Pool>,
  *   sessionStore?: import('express-session').Store,
  *   trustProxy?: false | true | number | string,
+ *   assets?: { assets: (entryNames: string | string[]) => { scripts: string[], preloads: string[] } },
  * }} deps `db.connect` backs `withTransaction`: the import writes data, its batch and its audit row in one
  *   transaction. Integration tests pass a pool pointed at the test database, never the shared one.
  *   `trustProxy` defaults to `TRUST_PROXY`; tests inject it to exercise the forged `X-Forwarded-For` path.
+ *   `assets` is a ready asset manifest; tests inject a stub so a missing `public/assets` directory does not change
+ *   what the page renders.
  * @returns {import('express').Express}
  */
-export function createApp({ db, sessionStore, trustProxy = env.trustProxy } = {}) {
+export function createApp({ db, sessionStore, trustProxy = env.trustProxy, assets } = {}) {
   if (!db || typeof db.query !== 'function') {
     throw new TypeError('createApp requires a db object with a query(text, params) method');
   }
@@ -91,6 +97,10 @@ export function createApp({ db, sessionStore, trustProxy = env.trustProxy } = {}
   const importController = createImportController({ importService, referenceRepository });
   const mediaController = createMediaController({ mediaService });
   const store = sessionStore ?? createPgSessionStore(db);
+  // One composition root for the metrics engine; routers and controllers receive ready services from here.
+  const metrics = createMetricsModule({ db, referenceRepository });
+  // The manifest is read lazily in development/test so a fresh clone can boot before the first `npm run build`.
+  const assetManifest = assets ?? createAssetManifest();
 
   const app = express();
   // Never trust a proxy hop unless TRUST_PROXY says so: a direct request then cannot forge req.ip through
@@ -98,7 +108,7 @@ export function createApp({ db, sessionStore, trustProxy = env.trustProxy } = {}
   app.set('trust proxy', trustProxy);
   app.disable('x-powered-by');
 
-  // Server-rendered EJS with one public layout; React islands will add their own scripts in later milestones.
+  // Server-rendered EJS with one public layout; the islands are hashed ES modules loaded from `public/assets`.
   app.set('view engine', 'ejs');
   app.set('views', viewsDir);
   app.use(expressLayouts);
@@ -142,7 +152,10 @@ export function createApp({ db, sessionStore, trustProxy = env.trustProxy } = {}
   app.use(express.json({ limit: '100kb' }));
   app.use(express.urlencoded({ extended: false, limit: '100kb' }));
 
-  // Fonts, the single stylesheet and SVG assets live here. Fingerprinted React assets will get immutable caching.
+  // Fingerprinted island files never change under a given name, so they are immutable for a year. The mount sits
+  // before the public tree: `app.css` has no hash and must keep the default revalidation behaviour.
+  app.use('/assets', express.static(ASSETS_DIR, { immutable: true, maxAge: '1y' }));
+  // Fonts, the single stylesheet and SVG assets live here.
   app.use(express.static(publicDir));
 
   // Session → CSRF → locals → routes is the required order: the token lives in the session, the templates read the
@@ -152,6 +165,16 @@ export function createApp({ db, sessionStore, trustProxy = env.trustProxy } = {}
   app.use((req, res, next) => {
     res.locals.currentUser = req.session?.user ?? null;
     res.locals.can = (permission) => can(req.session?.user?.role, permission);
+    // Island props are serialised through one helper, so an escaping fix reaches every page at once.
+    res.locals.dataProps = dataProps;
+    res.locals.assetScripts = (entries) => assetManifest.assets(entries);
+    next();
+  });
+
+  // HTML is the one document that must never be cached: it names the current bundle hash, and a stale copy would
+  // pair an old page with a removed asset after a deploy.
+  app.use('/app', (req, res, next) => {
+    res.set('Cache-Control', 'no-store');
     next();
   });
 
@@ -159,7 +182,7 @@ export function createApp({ db, sessionStore, trustProxy = env.trustProxy } = {}
   app.use(createAuthRouter({ authController }));
   // Mounted after `csrfProtection`: every mutating API call carries `X-CSRF-Token`, including multipart uploads,
   // whose body cannot be parsed by the global CSRF middleware.
-  app.use('/api/v1', createApiRouter({ importController, mediaController }));
+  app.use('/api/v1', createApiRouter({ importController, mediaController, metrics }));
   app.use('/app', createAppRouter({
     requireAuth,
     referenceRepository,
@@ -171,6 +194,7 @@ export function createApp({ db, sessionStore, trustProxy = env.trustProxy } = {}
     importController,
     exportService,
     mediaRepository,
+    metrics,
   }));
 
   app.get('/health', async (req, res) => {

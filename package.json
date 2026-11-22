@@ -4,7 +4,9 @@
   "description": "Marketing channel efficiency analytics: CAC, LTV, ROMI",
   "scripts": {
     "test": "vitest run",
-    "dev": "node --watch src/server.js",
+    "build": "vite build",
+    "build:watch": "vite build --watch",
+    "dev": "npm run build && node --watch src/server.js",
     "start": "node src/server.js",
     "db:setup": "node db/setup.js",
     "migrate": "node db/migrate.js",
@@ -14,7 +16,7 @@
   "type": "module",
   "private": true,
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",
@@ -31,10 +33,15 @@
     "pg": "^8.23.1",
     "pino": "^9.14.0",
     "pino-http": "^10.5.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "recharts": "^3.11.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@vitejs/plugin-react": "^5.2.0",
     "supertest": "^7.3.2",
+    "vite": "^7.3.8",
     "vitest": "^3.2.7"
   }
 }

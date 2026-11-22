@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatMonths, formatRatio, formatRomi } from '../../src/lib/format.js';
+import { formatCompactCents, formatMonths, formatRatio, formatRomi } from '../../src/lib/format.js';
 
 describe('formatMonths', () => {
   it('drops trailing zeros instead of showing a fake precision', () => {
@@ -84,5 +84,29 @@ describe('formatRatio', () => {
     expect(() => formatRatio(2.5, { decimals: -1 })).toThrow(TypeError);
     expect(() => formatRatio(2.5, { decimals: 1.5 })).toThrow(TypeError);
     expect(() => formatRatio(2.5, { decimals: 13 })).toThrow(/between 0 and 12/);
+  });
+});
+
+describe('formatCompactCents', () => {
+  it('groups whole roubles below the thousands threshold', () => {
+    expect(formatCompactCents(123400)).toBe('1 234');
+    expect(formatCompactCents(0)).toBe('0');
+  });
+
+  it('compacts thousands and millions of roubles with one decimal', () => {
+    // The input is kopecks, so 1 234 000 equals 12 340 BYN.
+    expect(formatCompactCents(1_234_000)).toBe('12,3 тыс.');
+    expect(formatCompactCents(12_340_000)).toBe('123,4 тыс.');
+    expect(formatCompactCents(1_234_500_000)).toBe('12,3 млн');
+  });
+
+  it('drops a trailing zero decimal instead of printing ,0', () => {
+    expect(formatCompactCents(1_200_000)).toBe('12 тыс.');
+  });
+
+  it('keeps a missing value honest and uses the typographic minus', () => {
+    expect(formatCompactCents(null)).toBe('—');
+    expect(formatCompactCents(undefined)).toBe('—');
+    expect(formatCompactCents(-1_234_000)).toBe('\u221212,3 тыс.');
   });
 });

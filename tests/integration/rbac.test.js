@@ -3,6 +3,7 @@ import request from 'supertest';
 import { seed } from '../../db/seed/seed.js';
 import { closeTestPool, getTestPool, resetTestDatabase } from '../helpers/db.js';
 import { loginAs, makeApp } from '../helpers/app.js';
+import { extractDataProps } from '../helpers/dataProps.js';
 import { formatDateRu, minskToday } from '../../src/lib/dates.js';
 
 const ADMIN = 'admin@metrika.by';
@@ -160,10 +161,14 @@ describe('app shell RBAC', () => {
     const res = await agent.get('/app/dashboard');
 
     expect(res.status).toBe(200);
-    expect(res.text).toContain('Данных пока нет');
     expect(res.text).toContain(`Данные по ${formatDateRu(minskToday())}`);
-    // Every KPI is an em dash, not a computed NaN from an empty denominator.
-    expect((res.text.match(/class="kpi__value">—</g) ?? []).length).toBe(4);
+    // The island model carries the empty dashboard: spend and customers are measured zeros, CAC and ROMI are dashes.
+    const props = extractDataProps(res.text);
+    expect(props.kpis.spendLabel).toBe('0,00');
+    expect(props.kpis.newCustomersLabel).toBe('0');
+    expect(props.kpis.cacLabel).toBe('—');
+    expect(props.kpis.romiLabel).toBe('—');
+    expect(props.verdict.status).toBe('no_data');
     expect(res.text).not.toContain('NaN');
   });
 

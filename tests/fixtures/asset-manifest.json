@@ -1,0 +1,19 @@
+{
+  "client/entries/dashboard.jsx": {
+    "file": "dashboard-a1b2c3.js",
+    "src": "client/entries/dashboard.jsx",
+    "isEntry": true,
+    "imports": ["_shared-d4e5f6.js"]
+  },
+  "_shared-d4e5f6.js": {
+    "file": "chunks/shared-d4e5f6.js",
+    "imports": ["_react-g7h8i9.js"]
+  },
+  "_react-g7h8i9.js": {
+    "file": "chunks/react-g7h8i9.js"
+  },
+  "client/entries/raw.jsx": {
+    "file": "raw-j1k2l3.js",
+    "isEntry": true
+  }
+}

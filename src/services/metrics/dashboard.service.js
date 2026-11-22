@@ -55,7 +55,9 @@ export function createDashboardService({ healthService, metricsRepository, attri
      *   from?: string | null,
      *   to?: string | null,
      *   weeks?: number,
+     *   channelIds?: string[] | null,
      * }} request `anchor` is the data anchor; the default period and the series end both derive from it.
+     *   `channelIds` is the BO-13 filter: `null` means every channel.
      * @returns {Promise<{
      *   period: { from: string, to: string, days: number, anchor: string },
      *   kpis: {
@@ -67,13 +69,22 @@ export function createDashboardService({ healthService, metricsRepository, attri
      *   weeklySeries: Array<{
      *     weekStart: string, weekLabel: string, spendCents: string, newCustomers: number,
      *     cacCents: string | null, romiPct: number | null,
+     *     attributedCents: string, attributedLabel: string,
      *   }>,
+     *   channels: object[],
+     *   availableChannels: Array<{ channelId: string, code: string, name: string }>,
      *   verdict: { status: 'healthy' | 'watch' | 'risk' | 'no_data', label: string, reason: string },
      * }>} Money as decimal kopeck strings, percentages as numbers — JSON-safe for `data-props`.
-     * @throws {ValidationError} When the anchor, period or week count is invalid.
+     * @throws {ValidationError} When the anchor, period, week count or channel filter is invalid.
      * @throws {TypeError} When a dependency returns a row outside its contract.
      */
-    async getDashboardSummary({ anchor, from = null, to = null, weeks = METRICS_CONFIG.dashboard.weeks } = {}) {
+    async getDashboardSummary({
+      anchor,
+      from = null,
+      to = null,
+      weeks = METRICS_CONFIG.dashboard.weeks,
+      channelIds = null,
+    } = {}) {
       const period = resolvePeriod({ anchor, from, to });
       const anchorDate = toDateOnly(anchor);
       // Resolve before the first query so an invalid week count fails without loading the whole report.
@@ -85,11 +96,19 @@ export function createDashboardService({ healthService, metricsRepository, attri
         anchor,
         from: period.from,
         to: period.to,
+        channelIds,
       });
-      const weeklyRows = await metricsRepository.listWeeklySeries({ from: firstWeekStart, to: period.to });
+      // The filter reaches every source, not just the KPI: a series that still summed all channels would contradict
+      // the numbers above it.
+      const weeklyRows = await metricsRepository.listWeeklySeries({
+        from: firstWeekStart,
+        to: period.to,
+        channelIds,
+      });
       const attributedRows = await attributionService.getAttributionSeries({
         from: firstWeekStart,
         to: period.to,
+        channelIds,
       });
 
       const blended = health.blended;
@@ -107,6 +126,10 @@ export function createDashboardService({ healthService, metricsRepository, attri
           romiLabel: blended.romiLabel,
         },
         weeklySeries: buildWeeklySeries({ firstWeekStart, weeks, weeklyRows, attributedRows }),
+        // Both lists are already-loaded health data: the selected rows feed the per-channel views, while the full
+        // dimension keeps the multi-select usable after a filter hides some options.
+        channels: health.rows,
+        availableChannels: health.availableChannels ?? [],
         verdict: buildVerdict(blended.status, blended.statusLabel),
       };
     },

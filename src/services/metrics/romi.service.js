@@ -1,6 +1,7 @@
 import { METRICS_CONFIG } from '../../config/metrics.js';
 import { ValidationError } from '../../lib/errors.js';
 import { formatCentsToByn, formatMonths, formatRatio, formatRomi } from '../../lib/format.js';
+import { normalizeChannelIds } from '../../lib/ids.js';
 import { HEALTH_STATUS_LABELS } from '../../lib/metrics-labels.js';
 import {
   assertFiniteOrNull,
@@ -11,6 +12,7 @@ import {
 } from '../../lib/metrics-math.js';
 import { centsFromDb } from '../../lib/money.js';
 import { resolvePeriod } from '../../lib/periods.js';
+import { computeCac } from './cac.service.js';
 
 const ATTRIBUTION_MODELS = METRICS_CONFIG.attribution.models;
 
@@ -245,14 +247,18 @@ export function createChannelHealthService({ cacService, ltvService, attribution
      *   to?: string | null,
      *   anchor?: string | null,
      *   attributionModel?: 'last_touch' | 'first_touch' | 'linear',
+     *   channelIds?: string[] | null,
      * }} [request] `anchor` is the data anchor; explicit bounds are clamped to it by `resolvePeriod`.
+     *   `channelIds` filters the rows and rebuilds the blended row; `null` keeps every channel.
      * @returns {Promise<{
      *   period: { from: string, to: string, days: number },
      *   rows: object[],
      *   blended: object,
-     * }>} Money as decimal kopeck strings, percentages and ratios as numbers, one row per channel plus a blended
-     *   row without `channelId`.
-     * @throws {ValidationError} When the anchor, period or attribution model is invalid.
+     *   availableChannels: Array<{ channelId: string, code: string, name: string }>,
+     * }>} Money as decimal kopeck strings, percentages and ratios as numbers, one row per selected channel plus a
+     *   blended row without `channelId`. `availableChannels` is the full channel dimension, so a filter control
+     *   does not lose the unselected options.
+     * @throws {ValidationError} When the anchor, period, attribution model or channel filter is invalid.
      * @throws {TypeError} When a dependency returns a row outside its contract.
      */
     async getChannelHealthReport({
@@ -260,26 +266,33 @@ export function createChannelHealthService({ cacService, ltvService, attribution
       to = null,
       anchor = null,
       attributionModel = METRICS_CONFIG.attribution.defaultModel,
+      channelIds = null,
     } = {}) {
       if (!ATTRIBUTION_MODELS.includes(attributionModel)) {
         throw new ValidationError('Неизвестная модель атрибуции');
       }
 
       const period = resolvePeriod({ anchor, from, to });
+      const scopedIds = normalizeChannelIds(channelIds);
+      const allowed = scopedIds === null ? null : new Set(scopedIds);
 
       // Sequential on purpose: callers may hand all three services one shared `pg.Client` (tests, report
       // transactions), and node-postgres deprecates overlapping queries on a single client.
       const cacReport = await cacService.getCacReport({ anchor, from: period.from, to: period.to });
+      // The LTV filter runs inside the cohort engine, so the blended LTV is the exact ratio of the selected
+      // channels instead of an average of their already-rounded per-channel LTV.
       const ltvReport = await ltvService.getChannelLtv({
         anchor,
         horizonMonths: METRICS_CONFIG.ltv.defaultHorizon,
+        channelIds: scopedIds,
       });
       const attributionReport = await attributionService.getAttributionReport({
         from: period.from,
         to: period.to,
         models: [attributionModel],
       });
-      const channels = await channelsRepository.listChannels();
+      const allChannels = await channelsRepository.listChannels();
+      const channels = allowed === null ? allChannels : allChannels.filter((channel) => allowed.has(channel.id));
 
       const modelView = attributionReport.models?.[attributionModel];
       if (!modelView) {
@@ -311,18 +324,79 @@ export function createChannelHealthService({ cacService, ltvService, attribution
           });
         });
 
-      const blended = buildRow({
-        code: 'blended',
-        name: 'Все каналы',
+      const blended = allowed === null ? buildBlendedRow({
         spendCents: centsFromDb(cacReport.blended.spendCents) ?? 0n,
-        // The attributed total, not raw order revenue: ROMI compares spend with the revenue this model assigned.
         revenueCents: centsFromDb(modelView.totalAttributedCents) ?? 0n,
         newCustomers: cacReport.blended.newCustomers,
         cacCents: centsFromDb(cacReport.blended.cacCents),
         ltv12Cents: centsFromDb(ltvReport.blended.ltvCents),
-      });
+      }) : buildFilteredBlendedRow(rows, ltvReport.blended);
 
-      return { period, rows, blended };
+      return {
+        period,
+        rows,
+        blended,
+        availableChannels: allChannels
+          .map((channel) => ({ channelId: channel.id, code: channel.code, name: channel.name }))
+          .sort((left, right) => left.code.localeCompare(right.code)),
+      };
     },
   };
+}
+
+/**
+ * @param {{
+ *   spendCents: bigint, revenueCents: bigint, newCustomers: number,
+ *   cacCents: bigint | null, ltv12Cents: bigint | null,
+ * }} totals
+ * @returns {object} Blended health row built by the same `buildRow` contract as a channel row.
+ */
+function buildBlendedRow({ spendCents, revenueCents, newCustomers, cacCents, ltv12Cents }) {
+  return buildRow({
+    code: 'blended',
+    name: 'Все каналы',
+    spendCents,
+    // The attributed total, not raw order revenue: ROMI compares spend with the revenue this model assigned.
+    revenueCents,
+    newCustomers,
+    cacCents,
+    ltv12Cents,
+  });
+}
+
+/**
+ * Recomputes the blended row for a channel subset.
+ *
+ * Spend, attributed revenue and new customers are the sums of the selected rows, and CAC is divided from those
+ * sums rather than averaged: `sum(spend) / sum(customers)` is the ratio a reader expects from "CAC of these three
+ * channels". LTV comes from the filtered cohort aggregation, so it is not an average of rounded channel values.
+ *
+ * @param {object[]} rows Selected health rows.
+ * @param {{ ltvCents: string | null }} ltvBlended Exact blended LTV of the same filter.
+ * @returns {object}
+ * @throws {TypeError} When a row breaks the health-row contract.
+ */
+function buildFilteredBlendedRow(rows, ltvBlended) {
+  let spendCents = 0n;
+  let revenueCents = 0n;
+  let newCustomers = 0;
+
+  for (const row of rows) {
+    const spend = centsFromDb(row.spendCents);
+    const revenue = centsFromDb(row.revenueCents);
+    if (spend === null || revenue === null) {
+      throw new TypeError(`health row ${row.code} has a missing amount inside the filter`);
+    }
+    spendCents += spend;
+    revenueCents += revenue;
+    newCustomers += row.newCustomers;
+  }
+
+  return buildBlendedRow({
+    spendCents,
+    revenueCents,
+    newCustomers,
+    cacCents: computeCac({ spendCents, newCustomers }).cacCents,
+    ltv12Cents: centsFromDb(ltvBlended.ltvCents),
+  });
 }

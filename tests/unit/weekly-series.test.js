@@ -55,6 +55,8 @@ describe('buildWeeklySeries', () => {
       newCustomers: 7,
       cacCents: '10000',
       romiPct: 100,
+      attributedCents: '140000',
+      attributedLabel: '1 400,00',
     });
   });
 

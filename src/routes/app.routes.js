@@ -33,6 +33,7 @@ const PLACEHOLDER_SECTIONS = [
  *   importController: ReturnType<typeof import('../controllers/import.controller.js').createImportController>,
  *   exportService: ReturnType<typeof import('../services/export.service.js').createExportService>,
  *   mediaRepository: ReturnType<typeof import('../repositories/media.repo.js').createMediaRepository>,
+ *   metrics: ReturnType<typeof import('../services/metrics/index.js').createMetricsModule>,
  * }} deps
  * @returns {import('express').Router}
  */
@@ -47,6 +48,7 @@ export function createAppRouter({
   importController,
   exportService,
   mediaRepository,
+  metrics,
 }) {
   const appController = createAppController({ referenceRepository });
   const adminController = createAdminController({ usersService, auditService, referenceRepository, mediaRepository });
@@ -60,7 +62,7 @@ export function createAppRouter({
     res.redirect('/app/dashboard');
   });
 
-  router.get('/dashboard', requireAuth, appController.dashboard);
+  router.get('/dashboard', requireAuth, requirePermission('dashboard:view'), metrics.controllers.dashboard.page);
 
   // Channels carry their own permissions per method: viewing is open to every role, mutations only to analysts.
   router.get('/channels', requireAuth, requirePermission('channels:view'), channelsController.list);
