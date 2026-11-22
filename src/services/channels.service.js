@@ -166,7 +166,8 @@ export function createChannelsService({ channelsRepository, auditService }) {
       const channel = await channelsRepository.findChannelById(id);
       if (!channel) throw new NotFoundError('Канал не найден');
 
-      if (channel.isActive && (await channelsRepository.countActiveCampaigns(id)) > 0) {
+      // The list/detail query already aggregated the campaign counters, so the guard needs no extra round trip.
+      if (channel.isActive && channel.activeCampaignCount > 0) {
         throw new ValidationError(ACTIVE_CAMPAIGNS_GUARD);
       }
 

@@ -9,6 +9,7 @@ import {
   sessionCookieOptions,
 } from '../lib/session.js';
 import { safeRedirectTarget } from '../middleware/auth.js';
+import { AUDIT_ACTIONS } from '../config/audit-actions.js';
 
 const loginSchema = z.object({
   email: z.string().trim().min(1).max(254),
@@ -79,7 +80,7 @@ export function createAuthController({ authService, auditService }) {
       issueCsrfToken(req);
       await auditService.record({
         userId: user.id,
-        action: 'auth.login',
+        action: AUDIT_ACTIONS.AUTH_LOGIN,
         entity: 'user',
         entityId: user.id,
         ip: req.ip,
@@ -99,7 +100,7 @@ export function createAuthController({ authService, auditService }) {
       if (user) {
         await auditService.record({
           userId: user.id,
-          action: 'auth.logout',
+          action: AUDIT_ACTIONS.AUTH_LOGOUT,
           entity: 'user',
           entityId: user.id,
           ip: req.ip,

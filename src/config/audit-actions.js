@@ -9,6 +9,7 @@
  */
 export const AUDIT_ACTIONS = Object.freeze({
   AUTH_LOGIN: 'auth.login',
+  AUTH_LOGOUT: 'auth.logout',
 
   CHANNEL_CREATE: 'channel.create',
   CHANNEL_UPDATE: 'channel.update',

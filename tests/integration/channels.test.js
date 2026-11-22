@@ -59,6 +59,19 @@ async function channelRow(code) {
 }
 
 /**
+ * Counts the data rows of the first table on a page. Used to bound the seeded list instead of only checking that
+ * some names appear somewhere in the HTML.
+ * @param {string} html
+ * @returns {number}
+ */
+function tableRowCount(html) {
+  const start = html.indexOf('<tbody');
+  const end = html.indexOf('</tbody>');
+  const body = start === -1 || end === -1 ? '' : html.slice(start, end);
+  return (body.match(/<tr\b/g) ?? []).length;
+}
+
+/**
  * @param {string} entityId
  * @returns {Promise<string[]>} Audit actions recorded for the channel, oldest first.
  */
@@ -77,6 +90,7 @@ describe('channels list', () => {
     const res = await agent.get('/app/channels');
 
     expect(res.status).toBe(200);
+    expect(tableRowCount(res.text)).toBe(CHANNELS.length);
     for (const channel of CHANNELS) {
       expect(res.text).toContain(channel.name);
     }
@@ -104,9 +118,13 @@ describe('channels list', () => {
     const agent = await signedIn(ANALYST);
 
     const res = await agent.get('/app/channels/999999');
-
     expect(res.status).toBe(404);
     expect(res.text).toContain('Страница не найдена');
+
+    // 2^63 is still digits but exceeds BIGINT: it must 404, not reach $1::bigint and become a 500.
+    const oversized = await agent.get('/app/channels/9223372036854775808');
+    expect(oversized.status).toBe(404);
+    expect(oversized.text).toContain('Страница не найдена');
   });
 });
 
@@ -172,6 +190,86 @@ describe('channel mutations', () => {
     );
     // The payload keeps cents as a string: a bigint would make JSON.stringify throw inside node-postgres.
     expect(rows[0].payload).toMatchObject({ code: 'viber_ads', targetCacCents: '3850' });
+  });
+
+  it('updates name, CAC and ROMI, audits the change and shows the new name in the list', async () => {
+    const agent = await signedIn(ANALYST);
+    const csrf = await getAppCsrf(agent);
+    const before = await channelRow('viber_ads');
+
+    const res = await agent.post(`/app/channels/${before.id}`).type('form').send({
+      name: 'Viber Ads — Беларусь',
+      kind: 'paid',
+      targetCacByn: '42,10',
+      targetRomiPct: '118',
+      _csrf: csrf,
+    });
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe(`/app/channels/${before.id}`);
+
+    const updated = await channelRow('viber_ads');
+    expect(updated.target_cac_cents).toBe('4210');
+    expect(updated.target_romi_pct).toBe('118.00');
+    expect(await auditActions(before.id)).toContain(AUDIT_ACTIONS.CHANNEL_UPDATE);
+
+    const list = await agent.get('/app/channels');
+    expect(list.text).toContain('Viber Ads — Беларусь');
+  });
+
+  it('forbids channel editing for a viewer with the styled 403 page', async () => {
+    const agent = await signedIn(VIEWER);
+    const csrf = await getAppCsrf(agent);
+    const instagram = await channelRow('instagram');
+
+    const res = await agent.post(`/app/channels/${instagram.id}`).type('form').send({
+      name: 'Чужое имя',
+      kind: 'paid',
+      targetCacByn: '1',
+      targetRomiPct: '1',
+      _csrf: csrf,
+    });
+
+    expect(res.status).toBe(403);
+    expect(res.headers['content-type']).toContain('text/html');
+    expect(res.text).toContain('Недостаточно прав');
+
+    const { rows } = await pool.query('SELECT name FROM channels WHERE code = $1', ['instagram']);
+    expect(rows[0].name).toBe('Instagram');
+  });
+
+  it('keeps the edit form with a Russian message for an invalid ROMI and changes nothing', async () => {
+    const agent = await signedIn(ANALYST);
+    const csrf = await getAppCsrf(agent);
+    const before = await channelRow('viber_ads');
+
+    const res = await agent.post(`/app/channels/${before.id}`).type('form').send({
+      name: 'Не должно сохраниться',
+      kind: 'paid',
+      targetCacByn: '1,00',
+      targetRomiPct: 'abc',
+      _csrf: csrf,
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.headers['content-type']).toContain('text/html');
+    expect(res.text).toContain('Целевой ROMI');
+    // Submitted values are echoed back, so the analyst can correct only the bad field.
+    expect(res.text).toContain('value="Не должно сохраниться"');
+
+    const after = await channelRow('viber_ads');
+    expect(after.target_cac_cents).toBe(before.target_cac_cents);
+    expect(after.target_romi_pct).toBe(before.target_romi_pct);
+
+    // A stale link with an invalid body renders the designed 404 page, not the central handler's plain text.
+    const stale = await agent.post('/app/channels/999999').type('form').send({
+      name: 'Неважно',
+      kind: 'paid',
+      targetRomiPct: 'abc',
+      _csrf: csrf,
+    });
+    expect(stale.status).toBe(404);
+    expect(stale.text).toContain('Страница не найдена');
   });
 
   it('re-renders the list with a Russian message for duplicate and malformed codes', async () => {

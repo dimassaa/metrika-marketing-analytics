@@ -177,7 +177,11 @@
                 <% if (can('channels:manage')) { %>
                 <form method="post" action="/app/channels/<%= channel.id %>/archive">
                   <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                  <button class="btn btn--ghost btn--sm" type="submit">
+                  <button
+                    class="btn btn--ghost btn--sm"
+                    type="submit"
+                    aria-label="<%= channel.isActive ? 'Архивировать' : 'Вернуть из архива' %>: <%= channel.name %>"
+                  >
                     <%= channel.isActive ? 'В архив' : 'Вернуть' %>
                   </button>
                 </form>

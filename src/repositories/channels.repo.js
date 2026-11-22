@@ -165,19 +165,5 @@ export function createChannelsRepository(db) {
       );
       return rows[0] ? mapChannelRow(rows[0]) : null;
     },
-
-    /**
-     * @param {string} channelId
-     * @returns {Promise<number>} Campaigns still running for the channel; the archive guard reads this.
-     */
-    async countActiveCampaigns(channelId) {
-      const { rows } = await db.query(
-        `SELECT count(*)::int AS active_count
-           FROM campaigns
-          WHERE channel_id = $1::bigint AND status = 'active'`,
-        [channelId],
-      );
-      return rows[0]?.active_count ?? 0;
-    },
   };
 }

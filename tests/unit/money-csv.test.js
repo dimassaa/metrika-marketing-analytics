@@ -35,6 +35,8 @@ describe('centsFromDb', () => {
     expect(() => centsFromDb('12.5')).toThrow(TypeError);
     expect(() => centsFromDb(12.5)).toThrow(TypeError);
     expect(() => centsFromDb('abc')).toThrow(TypeError);
+    // Money is never signed in this schema: a negative string is junk, not an amount to render.
+    expect(() => centsFromDb('-5')).toThrow(TypeError);
   });
 });
 
@@ -51,6 +53,7 @@ describe('formatPercent', () => {
   it('uses a typographic minus and keeps the sign when asked', () => {
     expect(formatPercent('-8.1', { signed: true })).toBe('\u22128,1%');
     expect(formatPercent('12.4', { signed: true })).toBe('+12,4%');
+    expect(formatPercent('120.00')).toBe('120,0%');
     expect(formatPercent(null)).toBe('—');
   });
 });
@@ -59,6 +62,13 @@ describe('formatInteger', () => {
   it('groups thousands and keeps a null honest', () => {
     expect(formatInteger(12345)).toBe('12 345');
     expect(formatInteger('7')).toBe('7');
+    expect(formatInteger(1234n)).toBe('1 234');
+    expect(formatInteger(-1234)).toBe('\u22121 234');
     expect(formatInteger(null)).toBe('—');
+  });
+
+  it('rejects fractional and non-numeric counters instead of rounding them', () => {
+    expect(() => formatInteger(12.5)).toThrow(TypeError);
+    expect(() => formatInteger('12,5')).toThrow(TypeError);
   });
 });

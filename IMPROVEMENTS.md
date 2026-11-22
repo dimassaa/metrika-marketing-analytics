@@ -221,6 +221,18 @@ Non-critical findings recorded during implementation. Priority is decided by the
 - **The JSON-vs-text error contract, the CSP nonce and `withTransaction` rollback were verified by hand**, not by
   automated tests. Add coverage when the error middleware or the transaction helper is next changed.
 
+## M2 channels (task 1 follow-ups)
+
+- **`.pager` is defined in `public/css/app.css` but no screen uses it yet.** It was added because the M2 plan
+  requires one shared set of list classes; delete it or wire it when pagination lands, so it does not become a
+  class that only exists in the stylesheet.
+- **The channel edit form prefills ROMI as `115,00`**, straight from the `NUMERIC` string, instead of the shorter
+  `115` the seed form shows. Submitting works, so this is cosmetic; normalise the prefill when the edit form gets
+  its next pass.
+- **`tests/integration/channels.test.js` is order-dependent by design.** The `viber_ads` channel is created in the
+  create case and reused by the update and archive cases, so running a single case in isolation fails. If the file
+  grows, create the fixture in `beforeEach` (or a helper) and keep the archive toggle test separate.
+
 ## Resolved during the M1 final fix wave
 
 Recorded so the deferred findings do not disappear from history when the open entries above are closed.

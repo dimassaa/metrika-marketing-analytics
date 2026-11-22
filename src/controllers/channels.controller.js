@@ -9,6 +9,8 @@ import {
 } from '../validators/channels.schema.js';
 
 const CHANNEL_ID = /^\d+$/;
+/** Largest value a PostgreSQL BIGINT primary key can hold (2^63 - 1). */
+const MAX_BIGINT_ID = 9223372036854775807n;
 
 const NOT_FOUND_SEO = buildSeo({
   title: 'Канал не найден — Метрика',
@@ -27,12 +29,19 @@ const EMPTY_CREATE_FORM = Object.freeze({
 });
 
 /**
+ * Validates the `:id` route param before it reaches SQL.
+ *
+ * A digit string above 2^63 - 1 is still digits, but `$1::bigint` would reject it with SQLSTATE 22003 and turn a
+ * hand-typed URL into a 500. Such ids cannot exist, so they get the same designed 404 as a missing channel.
+ *
  * @param {unknown} value Raw `:id` route param.
- * @returns {string | null} Digit string, or null when the id cannot be a BIGINT.
+ * @returns {string | null} Digit string inside the BIGINT range, or null for non-digits, zero and oversized values.
  */
 function parseChannelId(value) {
   const id = String(value ?? '');
-  return CHANNEL_ID.test(id) ? id : null;
+  if (!CHANNEL_ID.test(id)) return null;
+  const numeric = BigInt(id);
+  return numeric >= 1n && numeric <= MAX_BIGINT_ID ? id : null;
 }
 
 /**
@@ -165,16 +174,17 @@ export function createChannelsController({ channelsService, referenceRepository 
       }
 
       const parsed = channelUpdateSchema.safeParse(req.body);
-      if (!parsed.success) {
-        await renderDetail(req, res, id, {
-          status: 400,
-          error: parsed.error.issues[0]?.message,
-          values: channelFormValues(req.body),
-        });
-        return;
-      }
 
       try {
+        if (!parsed.success) {
+          // Rendering the rejected form reads the channel too; a stale link must show the 404 page, not text/plain.
+          await renderDetail(req, res, id, {
+            status: 400,
+            error: parsed.error.issues[0]?.message,
+            values: channelFormValues(req.body),
+          });
+          return;
+        }
         await channelsService.updateChannel(id, parsed.data, actorOf(req));
       } catch (error) {
         if (error instanceof NotFoundError) {
