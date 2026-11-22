@@ -7,7 +7,17 @@
  * audit row.
  */
 
-const BATCH_SELECT = `
+/** Joins shared by the batch list and the single-batch read. */
+const BATCH_FROM = `
+    FROM import_batches b
+    LEFT JOIN users u ON u.id = b.created_by
+`;
+
+/**
+ * Batch columns without the `errors` array. The list only needs the number of entries, so
+ * `jsonb_array_length(errors)` keeps a 10 000-row report from being materialised just to draw a table row.
+ */
+const BATCH_LIST_SELECT = `
   SELECT b.id::text AS id,
          b.kind,
          b.filename,
@@ -17,10 +27,24 @@ const BATCH_SELECT = `
          b.rows_ok,
          b.rows_duplicate,
          b.rows_failed,
+         b.committed,
+         jsonb_array_length(b.errors) AS error_count,
+         b.created_at
+`;
+
+const BATCH_DETAIL_SELECT = `
+  SELECT b.id::text AS id,
+         b.kind,
+         b.filename,
+         b.created_by::text AS created_by,
+         u.email AS created_by_email,
+         b.rows_total,
+         b.rows_ok,
+         b.rows_duplicate,
+         b.rows_failed,
+         b.committed,
          b.errors,
          b.created_at
-    FROM import_batches b
-    LEFT JOIN users u ON u.id = b.created_by
 `;
 
 /**
@@ -35,11 +59,14 @@ const BATCH_SELECT = `
  *   rowsOk: number,
  *   rowsDuplicate: number,
  *   rowsFailed: number,
+ *   committed: boolean,
+ *   errorCount: number,
  *   errors: Array<{ row: number, field: string | null, message: string }>,
  *   createdAt: Date,
  * }}
  */
 function mapBatchRow(row) {
+  const errors = row.errors ?? [];
   return {
     id: row.id,
     kind: row.kind,
@@ -50,7 +77,9 @@ function mapBatchRow(row) {
     rowsOk: row.rows_ok,
     rowsDuplicate: row.rows_duplicate,
     rowsFailed: row.rows_failed,
-    errors: row.errors ?? [],
+    committed: row.committed,
+    errorCount: row.error_count ?? errors.length,
+    errors,
     createdAt: row.created_at,
   };
 }
@@ -69,27 +98,31 @@ export function createImportRepository(db) {
      *   rowsOk: number,
      *   rowsDuplicate: number,
      *   rowsFailed: number,
+     *   committed: boolean,
      *   errors: Array<{ row: number, field: string | null, message: string }>,
      * }} batch
      * @returns {Promise<string>} New batch id.
      */
-    async insertBatch({ kind, filename, createdBy, rowsTotal, rowsOk, rowsDuplicate, rowsFailed, errors }) {
+    async insertBatch({ kind, filename, createdBy, rowsTotal, rowsOk, rowsDuplicate, rowsFailed, committed, errors }) {
       const { rows } = await db.query(
         `INSERT INTO import_batches
-           (kind, filename, created_by, rows_total, rows_ok, rows_duplicate, rows_failed, errors)
-         VALUES ($1, $2, $3::bigint, $4::int, $5::int, $6::int, $7::int, $8::jsonb)
+           (kind, filename, created_by, rows_total, rows_ok, rows_duplicate, rows_failed, committed, errors)
+         VALUES ($1, $2, $3::bigint, $4::int, $5::int, $6::int, $7::int, $8::boolean, $9::jsonb)
          RETURNING id::text AS id`,
-        [kind, filename, createdBy, rowsTotal, rowsOk, rowsDuplicate, rowsFailed, JSON.stringify(errors)],
+        [kind, filename, createdBy, rowsTotal, rowsOk, rowsDuplicate, rowsFailed, committed, JSON.stringify(errors)],
       );
       return rows[0].id;
     },
 
     /**
      * @param {number} limit
-     * @returns {Promise<ReturnType<typeof mapBatchRow>[]>} Newest first.
+     * @returns {Promise<ReturnType<typeof mapBatchRow>[]>} Newest first; `errors` is empty, `errorCount` is set.
      */
     async listRecentBatches(limit) {
-      const { rows } = await db.query(`${BATCH_SELECT} ORDER BY b.created_at DESC, b.id DESC LIMIT $1::int`, [limit]);
+      const { rows } = await db.query(
+        `${BATCH_LIST_SELECT} ${BATCH_FROM} ORDER BY b.created_at DESC, b.id DESC LIMIT $1::int`,
+        [limit],
+      );
       return rows.map(mapBatchRow);
     },
 
@@ -98,7 +131,7 @@ export function createImportRepository(db) {
      * @returns {Promise<ReturnType<typeof mapBatchRow> | null>}
      */
     async findBatchById(id) {
-      const { rows } = await db.query(`${BATCH_SELECT} WHERE b.id = $1::bigint`, [id]);
+      const { rows } = await db.query(`${BATCH_DETAIL_SELECT} ${BATCH_FROM} WHERE b.id = $1::bigint`, [id]);
       return rows[0] ? mapBatchRow(rows[0]) : null;
     },
 

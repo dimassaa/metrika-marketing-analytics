@@ -87,7 +87,6 @@ function toBatchView(batch) {
     ...batch,
     kindLabel: IMPORT_KIND_LABELS[batch.kind] ?? batch.kind,
     createdAtLabel: formatDateTimeMinsk(batch.createdAt),
-    hasErrors: batch.rowsFailed > 0 || batch.errors.length > 0,
   };
 }
 
@@ -220,18 +219,18 @@ function touchpointKey(customerId, occurredAt, channelId) {
 }
 
 /**
- * Counts duplicates a committed run would skip, without writing anything.
+ * Counts the rows a committed run would skip as duplicates, without writing anything.
  *
- * The commit path learns duplicates from `ON CONFLICT ... DO NOTHING RETURNING`; a dry run cannot, so it asks which
- * keys already exist and adds the duplicates that repeat inside the file itself. Duplicates are not failures and do
- * not affect the 10 % threshold.
+ * The commit path learns duplicates from `ON CONFLICT ... DO NOTHING RETURNING`. A dry run and a refused batch report
+ * cannot, so they ask which keys already exist and add the duplicates that repeat inside the file itself. Duplicates
+ * are not failures and do not affect the 10 % threshold.
  *
  * @param {string} kind
  * @param {Array<Record<string, any>>} resolved
  * @param {ReturnType<typeof import('../repositories/import.repo.js').createImportRepository>} repository Transaction client.
  * @returns {Promise<number>}
  */
-async function countDryRunDuplicates(kind, resolved, repository) {
+async function countDuplicates(kind, resolved, repository) {
   if (kind === 'daily_stats') return 0;
 
   if (kind === 'customers' || kind === 'orders') {
@@ -439,12 +438,17 @@ export function createImportService({ db, importRepository }) {
         const rowsTotal = parsed.rowsTotal;
         const report = { kind, rowsTotal, warnings: parsed.warnings, errors };
 
+        // Counters always describe the parsed file, not what was written: a refused batch must state how many rows
+        // were valid, how many were duplicates and how many failed. The invariant rowsOk + rowsDuplicate +
+        // rowsFailed === rowsTotal therefore holds in every response. The dry-run and refusal branches both need the
+        // prediction; a committing import learns duplicates from the insert itself.
         if (dryRun) {
-          const rowsDuplicate = await countDryRunDuplicates(kind, resolved, repository);
+          const rowsDuplicate = await countDuplicates(kind, resolved, repository);
           return {
             ...report,
             dryRun: true,
             committed: false,
+            // A dry run writes nothing, so there is no batch to link to.
             batchId: null,
             rowsOk: resolved.length - rowsDuplicate,
             rowsDuplicate,
@@ -455,16 +459,20 @@ export function createImportService({ db, importRepository }) {
         }
 
         if (rowsFailed * 10 > rowsTotal) {
-          // The batch is the permanent report of a refused import: no data rows, an honest zero in rows_ok and the
-          // row errors. It is written inside the same transaction, so the audit entry cannot outlive a failure here.
+          const rowsDuplicate = await countDuplicates(kind, resolved, repository);
+          const rowsOk = resolved.length - rowsDuplicate;
+          // The refused batch is a permanent report: counters describe the file, `committed = false` says nothing was
+          // applied, and the id is returned so the report page stays reachable. It is written inside the same
+          // transaction as the audit entry, so neither can outlive a failure here.
           const batchId = await repository.insertBatch({
             kind,
             filename: safeFilename,
             createdBy: actorId,
             rowsTotal,
-            rowsOk: 0,
-            rowsDuplicate: 0,
+            rowsOk,
+            rowsDuplicate,
             rowsFailed,
+            committed: false,
             errors,
           });
           await auditService.record({
@@ -472,31 +480,40 @@ export function createImportService({ db, importRepository }) {
             action: AUDIT_ACTIONS.IMPORT_RUN,
             entity: 'import',
             entityId: batchId,
-            payload: { kind, filename: safeFilename, committed: false, rowsTotal, rowsOk: 0, rowsDuplicate: 0, rowsFailed },
+            payload: {
+              kind,
+              filename: safeFilename,
+              committed: false,
+              rowsTotal,
+              rowsOk,
+              rowsDuplicate,
+              rowsFailed,
+            },
             ip,
           });
           return {
             ...report,
             dryRun: false,
             committed: false,
-            batchId: null,
-            rowsOk: 0,
-            rowsDuplicate: 0,
+            batchId: Number(batchId),
+            rowsOk,
+            rowsDuplicate,
             rowsFailed,
             wouldCommit: null,
           };
         }
 
-        let rowsOk = 0;
-        let rowsDuplicate = 0;
+        // Actual write results, not the prediction above: `ON CONFLICT` is the authority on duplicates.
+        let appliedOk = 0;
+        let appliedDuplicate = 0;
 
         for (const row of resolved) {
           const inserted = await applyRow(kind, row, repository);
           if (!inserted) {
-            rowsDuplicate += 1;
+            appliedDuplicate += 1;
             continue;
           }
-          rowsOk += 1;
+          appliedOk += 1;
 
           if (kind === 'orders') {
             const previousFirstOrder = row.customerFirstOrderAt;
@@ -517,9 +534,10 @@ export function createImportService({ db, importRepository }) {
           filename: safeFilename,
           createdBy: actorId,
           rowsTotal,
-          rowsOk,
-          rowsDuplicate,
+          rowsOk: appliedOk,
+          rowsDuplicate: appliedDuplicate,
           rowsFailed,
+          committed: true,
           errors,
         });
         await auditService.record({
@@ -527,7 +545,15 @@ export function createImportService({ db, importRepository }) {
           action: AUDIT_ACTIONS.IMPORT_RUN,
           entity: 'import',
           entityId: batchId,
-          payload: { kind, filename: safeFilename, committed: true, rowsTotal, rowsOk, rowsDuplicate, rowsFailed },
+          payload: {
+            kind,
+            filename: safeFilename,
+            committed: true,
+            rowsTotal,
+            rowsOk: appliedOk,
+            rowsDuplicate: appliedDuplicate,
+            rowsFailed,
+          },
           ip,
         });
 
@@ -536,8 +562,8 @@ export function createImportService({ db, importRepository }) {
           dryRun: false,
           committed: true,
           batchId: Number(batchId),
-          rowsOk,
-          rowsDuplicate,
+          rowsOk: appliedOk,
+          rowsDuplicate: appliedDuplicate,
           rowsFailed,
           wouldCommit: null,
         };

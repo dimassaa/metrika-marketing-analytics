@@ -130,7 +130,7 @@
     setState(state);
     status.appendChild(element('p', 'upload-status__title', title));
 
-    const accepted = report.dryRun ? 'будет принято' : 'принято';
+    const accepted = report.dryRun ? 'будет принято' : report.committed ? 'принято' : 'валидных';
     status.appendChild(
       element(
         'p',
@@ -141,11 +141,7 @@
 
     if (!report.dryRun && !report.committed) {
       status.appendChild(
-        element(
-          'p',
-          'upload-status__meta',
-          'Отчёт сохранён в списке последних пакетов (обновите страницу): ни одна строка файла не была применена.',
-        ),
+        element('p', 'upload-status__meta', 'Ни одна строка файла не применена. Отчёт сохранён как пакет.'),
       );
     }
 

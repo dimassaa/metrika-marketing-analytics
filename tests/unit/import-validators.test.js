@@ -29,6 +29,13 @@ describe('parseCsv', () => {
     expect(parsed.rows[0].values.b).toBe('ООО "Зёрна"');
   });
 
+  it('drops trailing empty header cells left by a closing separator', () => {
+    const parsed = parseCsv('a;b;\n1;2;');
+
+    expect(parsed.headers).toEqual(['a', 'b']);
+    expect(parsed.rows[0].values).toEqual({ a: '1', b: '2' });
+  });
+
   it('rejects a file above the row limit', () => {
     const csv = ['a;b', ...Array.from({ length: 10_001 }, (_, index) => `1;${index}`)].join('\n');
 
@@ -106,6 +113,54 @@ describe('validateImportRow', () => {
         },
       ),
     ).toThrow('часовым поясом');
+  });
+
+  it('rejects an impossible calendar date instead of rolling it into the next month', () => {
+    for (const occurredAt of ['2026-02-30T10:00:00Z', '2026-11-31T10:00:00+03:00']) {
+      expect(() =>
+        validateImportRow(
+          'orders',
+          {
+            external_id: 'o1',
+            customer_external_id: 'c1',
+            campaign_code: '',
+            occurred_at: occurredAt,
+            revenue: '100',
+            margin: '40',
+          },
+        ),
+      ).toThrow('существующую дату');
+    }
+  });
+
+  it('accepts the last instant of February with an offset', () => {
+    const row = validateImportRow(
+      'orders',
+      {
+        external_id: 'o1',
+        customer_external_id: 'c1',
+        campaign_code: '',
+        occurred_at: '2026-02-28T23:59:59+03:00',
+        revenue: '100',
+        margin: '40',
+      },
+    );
+
+    expect(row.occurredAt).toBe('2026-02-28T20:59:59.000Z');
+  });
+
+  it('rejects an amount above the BIGINT kopeck range as a row error', () => {
+    expect(() =>
+      validateImportRow('daily_stats', {
+        campaign_code: 'instagram_retarget',
+        stat_date: '2024-01-01',
+        impressions: '1',
+        clicks: '1',
+        leads: '1',
+        // One kopeck above 2^63 - 1.
+        spend: '92 233 720 368 547 758,08',
+      }),
+    ).toThrow('Сумма слишком велика');
   });
 
   it('rejects a touchpoint kind outside the closed list', () => {

@@ -120,6 +120,9 @@
             <tr>
               <td class="u-numeric">
                 <a href="/app/import/batches/<%= batch.id %>">№<%= batch.id %></a>
+                <% if (!batch.committed) { %>
+                <span class="badge badge--risk">Отклонён</span>
+                <% } %>
               </td>
               <td><%= batch.kindLabel %></td>
               <td class="u-truncate"><%= batch.filename %></td>
@@ -127,8 +130,8 @@
               <td class="u-numeric u-right"><%= batch.rowsOk %></td>
               <td class="u-numeric u-right"><%= batch.rowsDuplicate %></td>
               <td class="u-numeric u-right">
-                <% if (batch.rowsFailed > 0) { %>
-                <span class="badge badge--risk"><%= batch.rowsFailed %></span>
+                <% if (batch.errorCount > 0) { %>
+                <span class="badge badge--risk"><%= batch.errorCount %></span>
                 <% } else { %>
                 <span class="u-muted">0</span>
                 <% } %>

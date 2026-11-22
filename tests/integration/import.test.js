@@ -128,6 +128,91 @@ describe('dry run', () => {
     expect(await countRows('import_batches')).toBe(before.batches);
     expect(await countRows('audit_log')).toBe(before.audit);
   });
+
+  it('predicts the same duplicate counts as a commit and writes nothing', async () => {
+    const agent = await signedIn(ANALYST);
+    const token = await getAppCsrf(agent);
+
+    // One customer already exists, and the file repeats a new one inside itself: both are duplicates for a commit.
+    const existing = await postImport(agent, {
+      kind: 'customers',
+      token,
+      csv: [CUSTOMER_HEADER, 'm2_dry_c1;instagram;;'].join('\n'),
+    });
+    expect(existing.body.committed).toBe(true);
+
+    const customerCsv = [
+      CUSTOMER_HEADER,
+      'm2_dry_c1;instagram;;',
+      'm2_dry_c2;instagram;;',
+      'm2_dry_c2;instagram;;',
+    ].join('\n');
+    const customersBefore = await countRows('customers', `external_id LIKE 'm2_dry_c%'`);
+
+    const customerDryRun = await postImport(agent, { kind: 'customers', csv: customerCsv, dryRun: true, token });
+    expect(customerDryRun.body).toMatchObject({
+      committed: false,
+      batchId: null,
+      rowsTotal: 3,
+      rowsOk: 1,
+      rowsDuplicate: 2,
+      rowsFailed: 0,
+    });
+    expect(await countRows('customers', `external_id LIKE 'm2_dry_c%'`)).toBe(customersBefore);
+    expect(await countRows('customers', `external_id = 'm2_dry_c2'`)).toBe(0);
+
+    const customerCommit = await postImport(agent, { kind: 'customers', csv: customerCsv, token });
+    expect(customerCommit.body).toMatchObject({
+      committed: true,
+      rowsTotal: 3,
+      rowsOk: 1,
+      rowsDuplicate: 2,
+      rowsFailed: 0,
+    });
+    expect(await countRows('customers', `external_id LIKE 'm2_dry_c%'`)).toBe(customersBefore + 1);
+
+    // The same equality for orders: one stored key, one new key repeated in the file.
+    await postImport(agent, {
+      kind: 'customers',
+      token,
+      csv: [CUSTOMER_HEADER, 'm2_dryo_c1;instagram;;', 'm2_dryo_c2;instagram;;'].join('\n'),
+    });
+    const orderCsvFirst = [
+      ORDER_HEADER,
+      'm2_dryo_o1;m2_dryo_c1;;2029-06-01T10:00:00Z;100,00;40,00',
+    ].join('\n');
+    expect((await postImport(agent, { kind: 'orders', csv: orderCsvFirst, token })).body.committed).toBe(true);
+
+    const orderCsv = [
+      ORDER_HEADER,
+      'm2_dryo_o1;m2_dryo_c1;;2029-06-01T10:00:00Z;100,00;40,00',
+      'm2_dryo_o2;m2_dryo_c2;;2029-06-02T10:00:00Z;120,00;50,00',
+      'm2_dryo_o2;m2_dryo_c2;;2029-06-02T10:00:00Z;120,00;50,00',
+    ].join('\n');
+    const ordersBefore = await countRows('orders', `external_id LIKE 'm2_dryo_o%'`);
+
+    const orderDryRun = await postImport(agent, { kind: 'orders', csv: orderCsv, dryRun: true, token });
+    expect(orderDryRun.body).toMatchObject({
+      committed: false,
+      batchId: null,
+      rowsTotal: 3,
+      rowsOk: 1,
+      rowsDuplicate: 2,
+      rowsFailed: 0,
+    });
+    expect(await countRows('orders', `external_id LIKE 'm2_dryo_o%'`)).toBe(ordersBefore);
+    expect(await countRows('orders', `external_id = 'm2_dryo_o2'`)).toBe(0);
+
+    const orderCommit = await postImport(agent, { kind: 'orders', csv: orderCsv, token });
+    expect(orderCommit.body).toMatchObject({
+      committed: true,
+      rowsTotal: 3,
+      rowsOk: 1,
+      rowsDuplicate: 2,
+      rowsFailed: 0,
+    });
+    expect(await countRows('orders', `external_id LIKE 'm2_dryo_o%'`)).toBe(ordersBefore + 1);
+  });
 });
 
 describe('daily_stats import', () => {
@@ -344,28 +429,49 @@ describe('atomicity', () => {
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
       committed: false,
-      batchId: null,
       rowsTotal: 5,
-      rowsOk: 0,
+      // Counters describe the file: four rows are valid, one has a margin error. None of the four was applied.
+      rowsOk: 4,
       rowsDuplicate: 0,
       rowsFailed: 1,
       wouldCommit: null,
     });
+    expect(Number.isInteger(res.body.batchId)).toBe(true);
     expect(res.body.errors).toHaveLength(1);
     expect(res.body.errors[0]).toMatchObject({ row: 3, field: 'margin' });
 
     expect(await countRows('orders', `external_id LIKE 'm2_thr_o%'`)).toBe(0);
 
     const { rows: batches } = await pool.query(
-      'SELECT rows_total, rows_ok, rows_duplicate, rows_failed, errors FROM import_batches ORDER BY id DESC LIMIT 1',
+      `SELECT rows_total, rows_ok, rows_duplicate, rows_failed, committed, errors
+         FROM import_batches WHERE id = $1`,
+      [res.body.batchId],
     );
-    expect(batches[0]).toMatchObject({ rows_total: 5, rows_ok: 0, rows_duplicate: 0, rows_failed: 1 });
+    expect(batches[0]).toMatchObject({
+      rows_total: 5,
+      rows_ok: 4,
+      rows_duplicate: 0,
+      rows_failed: 1,
+      committed: false,
+    });
     expect(batches[0].errors).toHaveLength(1);
 
     const { rows: audit } = await pool.query(
       `SELECT payload FROM audit_log WHERE action = 'import.run' ORDER BY id DESC LIMIT 1`,
     );
-    expect(audit[0].payload).toMatchObject({ committed: false, kind: 'orders', rowsFailed: 1 });
+    expect(audit[0].payload).toMatchObject({
+      committed: false,
+      kind: 'orders',
+      rowsOk: 4,
+      rowsFailed: 1,
+    });
+
+    // The refused batch is reachable and says so instead of pretending it applied four rows.
+    const page = await agent.get(`/app/import/batches/${res.body.batchId}`);
+    expect(page.status).toBe(200);
+    expect(page.text).toContain('Импорт отклонён');
+    expect(page.text).toContain('Маржа не может превышать выручку');
+    expect(page.text).not.toContain('Импорт применён');
   });
 
   it('accepts the exact 10% boundary and applies the nine valid orders', async () => {
@@ -537,6 +643,123 @@ describe('file-level rejections', () => {
     expect(badCampaign.body).toMatchObject({ rowsOk: 1, rowsFailed: 1, wouldCommit: false });
     expect(badCampaign.body.errors[0]).toMatchObject({ row: 2, field: 'campaign_code' });
     expect(badCampaign.body.errors[0].message).toBe('Кампания не найдена');
+  });
+});
+
+describe('upload framing', () => {
+  it('rejects a request without a file', async () => {
+    const agent = await signedIn(ANALYST);
+    const token = await getAppCsrf(agent);
+
+    const res = await agent.post('/api/v1/import').set('X-CSRF-Token', token).field('kind', 'daily_stats');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toEqual({
+      code: 'VALIDATION_ERROR',
+      message: 'Выберите файл для загрузки',
+    });
+  });
+
+  it('rejects a file sent under an unexpected field name', async () => {
+    const agent = await signedIn(ANALYST);
+    const token = await getAppCsrf(agent);
+
+    const res = await agent
+      .post('/api/v1/import')
+      .set('X-CSRF-Token', token)
+      .field('kind', 'daily_stats')
+      .attach('other', Buffer.from([DAILY_HEADER, 'instagram_retarget;2024-10-01;1;1;1;1'].join('\n')), 'x.csv');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(res.body.error.message).toContain('Неожиданное поле файла');
+  });
+
+  it('rejects too many fields and an oversized field with 400 instead of 500', async () => {
+    const agent = await signedIn(ANALYST);
+    const token = await getAppCsrf(agent);
+    const file = Buffer.from([DAILY_HEADER, 'instagram_retarget;2024-10-02;1;1;1;1'].join('\n'));
+
+    let manyFields = agent.post('/api/v1/import').set('X-CSRF-Token', token).field('kind', 'daily_stats');
+    for (let index = 0; index < 9; index += 1) manyFields = manyFields.field(`extra${index}`, 'x');
+    const fieldsRes = await manyFields.attach('file', file, 'x.csv');
+
+    expect(fieldsRes.status).toBe(400);
+    expect(fieldsRes.body.error.code).toBe('VALIDATION_ERROR');
+    expect(fieldsRes.body.error.message).toContain('Слишком много полей');
+
+    const fieldRes = await agent
+      .post('/api/v1/import')
+      .set('X-CSRF-Token', token)
+      .field('kind', 'daily_stats')
+      .field('note', 'x'.repeat(9 * 1024))
+      .attach('file', file, 'x.csv');
+
+    expect(fieldRes.status).toBe(400);
+    expect(fieldRes.body.error.code).toBe('VALIDATION_ERROR');
+    expect(fieldRes.body.error.message).toContain('слишком длинное');
+    expect(await countRows('import_batches')).toBe(0);
+  });
+
+  it('maps a truncated multipart body to a 400 JSON error', async () => {
+    const agent = await signedIn(ANALYST);
+    const token = await getAppCsrf(agent);
+
+    const res = await agent
+      .post('/api/v1/import')
+      .set('X-CSRF-Token', token)
+      .set('Content-Type', 'multipart/form-data; boundary=----truncated')
+      .send(
+        [
+          '------truncated',
+          'Content-Disposition: form-data; name="kind"',
+          '',
+          'daily_stats',
+          '------truncated',
+          'Content-Disposition: form-data; name="file"; filename="a.csv"',
+          'Content-Type: text/csv',
+          '',
+          'campaign_code;stat_date',
+        ].join('\r\n'),
+      );
+
+    expect(res.status).toBe(400);
+    expect(res.headers['content-type']).toMatch(/application\/json/);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(res.body.error.message).toContain('Не удалось прочитать форму загрузки');
+  });
+
+  it('rejects a declared multipart body above 3 MB with 413', async () => {
+    const agent = await signedIn(ANALYST);
+    const token = await getAppCsrf(agent);
+
+    const res = await postImport(agent, {
+      kind: 'daily_stats',
+      token,
+      csv: 'a'.repeat(3 * 1024 * 1024 + 100),
+      filename: 'huge.csv',
+    });
+
+    expect(res.status).toBe(413);
+    expect(res.body.error.code).toBe('PAYLOAD_TOO_LARGE');
+  });
+
+  it('keeps a Cyrillic filename readable', async () => {
+    const agent = await signedIn(ANALYST);
+    const token = await getAppCsrf(agent);
+
+    const res = await agent
+      .post('/api/v1/import')
+      .set('X-CSRF-Token', token)
+      .field('kind', 'daily_stats')
+      .attach('file', Buffer.from([DAILY_HEADER, 'instagram_retarget;2024-10-03;1;1;1;1'].join('\n')), {
+        filename: 'заказы.csv',
+        contentType: 'text/csv',
+      });
+
+    expect(res.status).toBe(200);
+    const { rows } = await pool.query('SELECT filename FROM import_batches WHERE id = $1', [res.body.batchId]);
+    expect(rows[0].filename).toBe('заказы.csv');
   });
 });
 

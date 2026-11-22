@@ -112,6 +112,9 @@ export function parseCsv(input, { delimiter = DEFAULT_CSV_DELIMITER, maxRows = M
 
     if (headers === null) {
       headers = cells.map((cell) => cell.trim());
+      // A spreadsheet often leaves a closing separator on the header line (`a;b;`). Those cells are padding, not
+      // columns: keeping them would require an empty value in every data row.
+      while (headers.length > 0 && headers[headers.length - 1] === '') headers.pop();
       continue;
     }
 
@@ -131,12 +134,34 @@ export function parseCsv(input, { delimiter = DEFAULT_CSV_DELIMITER, maxRows = M
 }
 
 /**
+ * Characters that make a spreadsheet treat a cell as a formula instead of text (CSV Formula Injection).
+ * A leading apostrophe is the documented Excel/LibreOffice escape: the cell keeps its literal text and is never evaluated.
+ */
+const FORMULA_PREFIXES = Object.freeze(['=', '+', '-', '@', '\t', '\r']);
+
+/** A genuine negative number must stay numeric; only text that merely starts with `-` is neutralised. */
+const NEGATIVE_NUMBER = /^-\d+(?:[.,]\d+)?$/;
+
+/**
+ * @param {unknown} value
+ * @returns {boolean} True when the cell would be interpreted as a formula.
+ */
+function isFormulaLike(value) {
+  if (typeof value === 'number' || typeof value === 'bigint') return false;
+  const text = String(value);
+  if (NEGATIVE_NUMBER.test(text)) return false;
+  return FORMULA_PREFIXES.some((prefix) => text.startsWith(prefix));
+}
+
+/**
  * @param {unknown} value
  * @param {string} delimiter
  * @returns {string} Cell ready to be written between separators.
  */
 function escapeCell(value, delimiter) {
-  const text = value === null || value === undefined ? '' : String(value);
+  const raw = value === null || value === undefined ? '' : String(value);
+  // Formula injection is neutralised before quoting so the apostrophe ends up inside the quoted field.
+  const text = isFormulaLike(value) ? `'${raw}` : raw;
   if (text.includes(delimiter) || text.includes('"') || text.includes('\n') || text.includes('\r')) {
     return `"${text.replace(/"/g, '""')}"`;
   }
@@ -146,6 +171,10 @@ function escapeCell(value, delimiter) {
 /**
  * Serialises a table into the same CSV dialect the importer reads, so a downloaded template can be uploaded back
  * unedited.
+ *
+ * Every text cell starting with `=`, `+`, `-`, `@`, TAB or CR is prefixed with an apostrophe, so a hostile channel
+ * name such as `=1+1` opens as text instead of running as a formula. Real numbers, including negative ones, are
+ * left numeric.
  *
  * @param {string[]} headers Column order and names.
  * @param {Array<Array<unknown> | Record<string, unknown>>} rows Cells in header order, or objects keyed by header.

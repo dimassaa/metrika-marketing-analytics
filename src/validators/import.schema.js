@@ -36,6 +36,9 @@ export const TOUCHPOINT_KINDS = Object.freeze(['click', 'impression', 'visit']);
 /** PostgreSQL `INTEGER` upper bound for impressions, clicks and leads. */
 const MAX_INTEGER = 2_147_483_647;
 
+/** PostgreSQL `BIGINT` upper bound for money in kopecks. */
+const MAX_BIGINT = 9_223_372_036_854_775_807n;
+
 /**
  * ISO-8601 with an explicit offset: `2026-11-05T10:00:00+03:00`, `2026-11-05T10:00Z`, with optional seconds.
  * A timestamp without a zone is rejected instead of being interpreted in the server's local time.
@@ -85,12 +88,17 @@ function optionalText(values, field) {
  * @throws {ValidationError} With the money parser's specific reason, tagged with the column.
  */
 function moneyCents(values, field) {
+  let cents;
   try {
-    return parseBynToCents(values[field] ?? '');
+    cents = parseBynToCents(values[field] ?? '');
   } catch (error) {
     if (error instanceof ValidationError) throw fieldError(field, error.message);
     throw error;
   }
+  // An ox-sized amount is still a valid decimal, but not a valid BIGINT: report it as a row error instead of
+  // letting the INSERT fail with SQLSTATE 22003 and turn the whole file into a 500.
+  if (cents > MAX_BIGINT) throw fieldError(field, 'Сумма слишком велика');
+  return cents;
 }
 
 /**
@@ -135,8 +143,18 @@ function timestamp(values, field, { required }) {
     : optionalText(values, field);
   if (raw === '') return null;
 
-  const message = 'Укажите дату и время в формате ISO с часовым поясом, например 2026-11-05T10:00:00+03:00';
+  const message =
+    'Укажите существующую дату и время в формате ISO с часовым поясом, например 2026-11-05T10:00:00+03:00';
   if (!ISO_WITH_OFFSET.test(raw)) throw fieldError(field, message);
+
+  // `new Date('2026-02-30T10:00:00Z')` silently rolls over to 2 March. The calendar prefix is checked with the
+  // shared Minsk-safe helper first, so an impossible day is a row error rather than a guessed instant.
+  try {
+    toDateOnly(raw.slice(0, 10));
+  } catch {
+    throw fieldError(field, message);
+  }
+
   const instant = new Date(raw);
   if (Number.isNaN(instant.getTime())) throw fieldError(field, message);
   return instant.toISOString();

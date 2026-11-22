@@ -5,9 +5,14 @@
         <a class="btn btn--ghost btn--sm" href="/app/import">К импорту</a>
       </div>
       <h2>Пакет импорта №<%= batch.id %></h2>
-      <p class="u-muted">
-        <%= batch.kindLabel %> · <span class="u-numeric"><%= batch.createdAtLabel %></span> ·
-        файл «<%= batch.filename %>»<% if (batch.createdByEmail) { %>, загрузил <%= batch.createdByEmail %><% } %>
+      <p class="cluster">
+        <span class="badge <%= batch.committed ? 'badge--healthy' : 'badge--risk' %>">
+          <%= batch.committed ? 'Импорт применён' : 'Импорт отклонён' %>
+        </span>
+        <span class="u-muted">
+          <%= batch.kindLabel %> · <span class="u-numeric"><%= batch.createdAtLabel %></span> ·
+          файл «<%= batch.filename %>»<% if (batch.createdByEmail) { %>, загрузил <%= batch.createdByEmail %><% } %>
+        </span>
       </p>
     </div>
 
@@ -37,6 +42,13 @@
         </tbody>
       </table>
     </div>
+
+    <% if (!batch.committed) { %>
+    <div class="alert alert--error" role="alert">
+      <p class="alert__title">Импорт отклонён</p>
+      Ошибок больше 10% строк: ни одна строка файла не была применена. Числа выше описывают сам файл.
+    </div>
+    <% } %>
 
     <div class="stack stack--sm">
       <h3>Ошибки по строкам</h3>
