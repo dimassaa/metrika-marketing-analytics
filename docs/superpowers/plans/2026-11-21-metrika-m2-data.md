@@ -665,7 +665,10 @@ Commit: `feat: add csv import pipeline with dry-run, 10% error threshold and bat
 
 **Interfaces:**
 - Consumes: `db`, `stringifyCsv`, `centsFromDb`, `getDataAnchor`, `auditService.record`, `AUDIT_ACTIONS`.
-- Produces: `exportService.exportDataset({ dataset, filters, actor })` → `{ filename, csvContent, rowsCount }`.
+- Produces: `exportService.exportDataset({ dataset, filters })` → `{ filename, csvContent, rowsCount, truncated, limit }`.
+  The actor is not part of the service call: the controller writes `EXPORT_CSV` with `req.session.user.id` after the
+  file is built, so the service stays free of request context. `truncated`/`limit` let the controller advertise the
+  row cap only when the export actually hit it.
 
 - [ ] **Step 1: Написать падающий интеграционный тест экспорта**
 

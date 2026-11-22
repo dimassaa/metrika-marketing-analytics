@@ -9,21 +9,29 @@
 белорусских рублях (BYN), расчётные даты — Europe/Minsk. Интерфейс и подписи на русском, код и имена в БД —
 на английском.
 
-## Что уже работает (M1)
+## Что уже работает (M1–M2)
 
 - Публичный лендинг с SEO: canonical, Open Graph, JSON-LD, `robots.txt`, `sitemap.xml`, один `<h1>`.
 - Вход по email и паролю (argon2id), серверные сессии в PostgreSQL, CSRF, rate-limit, безопасный `next`.
 - Три роли с разными правами: администратор, аналитик, наблюдатель. RBAC проверяется на сервере, а не только
   скрытием ссылок.
-- Каркас приложения: сайдбар по правам, topbar с якорем данных, пустой дашборд с честным «нет данных»,
-  read-only список пользователей, страницы 403/404/500.
-- PostgreSQL-схема из 15 таблиц с FK/CHECK/UNIQUE и детерминированный сид: 8 каналов, 32 кампании, 4 000 клиентов,
-  14 месяцев статистики.
+- Каркас приложения: сайдбар по правам, topbar с якорем данных, дашборд с честным «нет данных», страницы 403/404/500.
+- **M2:** управление каналами (архив защищён от активных кампаний), кампаниями (фильтры, защита от удаления с
+  данными) и целями (плановые значения, запрет пересечения периодов).
+- **M2:** администрирование пользователей — создание, смена роли, блокировка, одноразовый сброс пароля; смена роли,
+  блокировка и сброс отзывают активные сессии. Журнал аудита с фильтрами по разделу, автору и действию.
+- **M2:** импорт CSV четырёх типов (`daily_stats`, `customers`, `touchpoints`, `orders`) с dry-run, лимитами,
+  отчётом по строкам и атомарным откатом при ошибках больше 10%. Экспорт тех же данных в CSV с BOM, фильтрами
+  текущего экрана, защитой от formula injection и записью в аудит.
+- **M2:** изображения (аватар и OG-обложка) хранятся в PostgreSQL `BYTEA` и отдаются по `/media/:id` и
+  `/media/slug/:slug` с `ETag`, `304 Not Modified` и content-addressed `?v=`-ссылкой.
+- PostgreSQL-схема из 15+ таблиц с FK/CHECK/UNIQUE, миграции `001_init.sql`, `002_m2_data.sql`,
+  `003_media_mime_check.sql`; детерминированный сид: 8 каналов, 32 кампании, 4 000 клиентов, 14 месяцев статистики.
 - Один stylesheet `public/css/app.css`, локальные шрифты Inter / Inter Tight / знак BYN, без CDN.
 
-Движка метрик, импорта, графиков и сценариев ещё нет: KPI показывают «—», а не выдуманные числа. Дальше по
-дорожной карте — M2 (данные и администрирование), M3 (расчёт CAC/LTV/ROMI), M4 (React-аналитика),
-M5 (решения), M6 (полировка и деплой). Полный план: [`docs/superpowers/plans/2026-11-21-metrika-roadmap.md`](docs/superpowers/plans/2026-11-21-metrika-roadmap.md).
+Движка метрик, графиков и сценариев ещё нет: KPI показывают «—», а не выдуманные числа. Дальше по дорожной
+карте — M3 (расчёт CAC/LTV/ROMI), M4 (React-аналитика), M5 (решения), M6 (полировка и деплой). Полный план:
+[`docs/superpowers/plans/2026-11-21-metrika-roadmap.md`](docs/superpowers/plans/2026-11-21-metrika-roadmap.md).
 
 ## Стек
 
@@ -35,7 +43,7 @@ M5 (решения), M6 (полировка и деплой). Полный пл�
 | Auth | `express-session` + `connect-pg-simple`, `@node-rs/argon2`, CSRF, `express-rate-limit` |
 | Безопасность | helmet с явной CSP, параметризованный SQL, экранирование EJS |
 | Тесты | Vitest + Supertest |
-| Клиент | React 19 + Vite 7 + Recharts 3 — появятся в M4; в M1 только серверный рендер |
+| Клиент | React 19 + Vite 7 + Recharts 3 — появятся в M4; в M1–M2 серверный рендер EJS и небольшие vanilla-острова загрузки |
 
 TypeScript не используется. Второго CSS-файла, CSS-фреймворков и CDN нет.
 
@@ -141,9 +149,10 @@ npm run seed         # детерминированный демо-сид
 npm run dev          # http://localhost:3000
 ```
 
-`db:setup` создаёт только пустые базы. Схему даёт `migrate`, данные — `seed`. Пароль из сида не логируется.
-Повторный `npm run seed` очищает таблицу `sessions`, поэтому всех, кто уже вошёл на стенд, разлогинит: запускайте
-сид до входа или предупредите пользователей.
+`db:setup` создаёт только пустые базы. Схему дают миграции `001`–`003`, данные — `seed`. Пароль из сида не
+логируется. Повторный `npm run seed` очищает `sessions` и `media_assets` (кроме детерминированной OG-обложки),
+поэтому всех, кто уже вошёл на стенд, разлогинит, а загруженные аватары исчезнут: запускайте сид до входа или
+предупредите пользователей.
 
 Проверка: `http://localhost:3000/health` возвращает `{"status":"ok","db":"up","version":"0.1.0"}`.
 
@@ -157,14 +166,37 @@ npm run dev          # http://localhost:3000
 
 Пароль всех трёх аккаунтов: **`Metrika2026!`**
 
-**Что уже работает в M1:** лендинг, вход и выход, дашборд с якорем данных и честными пустыми KPI, read-only
-список пользователей для администратора, RBAC-страница 403, страницы 404/500, `/health`. Разделы каналов,
-кампаний, когорт, атрибуции, сценариев, алертов, целей, импорта, аудита и профиля пока показывают заглушку «Раздел
-появится на следующем этапе»: их интерфейсы и маршруты экспорта появятся в M2–M5, расчёт метрик — в M3–M4. Права
-роли при этом проверяются уже сейчас: прямой URL без нужного права возвращает 403.
+**Что уже работает в M2:** аналитик заводит каналы, кампании и цели, импортирует CSV и выгружает отчёты; администратор
+управляет пользователями, смотрит аудит и обновляет OG-обложку; наблюдатель видит списки и выгружает CSV, но не
+меняет данные. Дашборд по-прежнему честно показывает «—»: формулы CAC, LTV и ROMI появятся в M3. Заглушки остались
+только у когорт, атрибуции, сценариев и алертов — это следующие этапы.
 
 > Это демонстрационный стенд с вымышленными данными. Пароль опубликован намеренно и для production не годится:
 > перед любым публичным запуском смените пароли, `SESSION_SECRET`, включите `COOKIE_SECURE=true` и HTTPS.
+
+## Маршруты
+
+| Метод и путь | Доступ | Назначение |
+|---|---|---|
+| `GET /`, `GET /login`, `POST /login`, `POST /logout` | все | лендинг и вход; `/logout` защищён CSRF |
+| `GET /health`, `/robots.txt`, `/sitemap.xml` | все | служебные ответы |
+| `GET /media/:id`, `GET /media/slug/:slug` | все | изображения из БД с `ETag` и `304` |
+| `GET /app/dashboard` | вход | якорь данных и пустые KPI до M3 |
+| `GET /app/channels`, `/app/channels/:id` | `channels:view` | список и карточка канала |
+| `POST /app/channels`, `POST /app/channels/:id`, `POST /app/channels/:id/archive` | `channels:manage` | CRUD и архив |
+| `GET /app/campaigns` | `campaigns:view` | список с фильтрами |
+| `POST /app/campaigns`, `POST /app/campaigns/:id`, `POST /app/campaigns/:id/delete` | `campaigns:manage` | CRUD кампаний |
+| `GET /app/goals` | `goals:view` | цели и плановые показатели |
+| `POST /app/goals`, `POST /app/goals/:id`, `POST /app/goals/:id/delete` | `goals:manage` | CRUD целей |
+| `GET /app/import`, `/app/import/batches/:id`, `/app/import/templates/:kind.csv` | `import:run` | импорт и отчёты |
+| `POST /api/v1/import` | `import:run` + CSRF | multipart CSV, dry-run и боевой импорт |
+| `GET /app/export/:dataset.csv` | `export` | CSV каналов, кампаний, статистики, заказов |
+| `GET /app/audit` | `audit:view` | журнал действий с фильтрами |
+| `GET /app/admin/users`, `POST /app/admin/users/*` | `users:manage` | пользователи, роли, блокировка, сброс |
+| `POST /api/v1/profile/avatar`, `POST /api/v1/admin/media/og-cover` | вход / `users:manage` + CSRF | загрузка изображений |
+| `GET /app/profile`, `POST /app/profile/password` | вход | профиль и смена своего пароля |
+
+Страницы `/app/*` закрыты от индексации; API отвечает JSON и на ошибки доступа, страницы — styled 403.
 
 ## Скрипты
 
@@ -189,17 +221,19 @@ src/
   config/                    env, матрица прав
   routes/                    публичные, auth и /app-маршруты
   controllers/               HTTP: разбор входа, Zod, выбор шаблона
+  validators/                Zod-схемы форм, импорта и экспорта
   services/                  бизнес-логика без Express
   repositories/              параметризованный SQL и маппинг строк
-  middleware/                auth, CSRF, rate-limit, ошибки, request id
-  lib/                       логгер, БД, сессии, CSRF, SEO, даты
+  middleware/                auth, CSRF, rate-limit, upload, ошибки, request id
+  lib/                       логгер, БД, сессии, CSRF, SEO, даты, деньги, CSV
   views/                     EJS: layouts, partials, pages, errors
 db/
-  migrations/                SQL-схема
+  migrations/                001_init, 002_m2_data, 003_media_mime_check
   migrate.js, setup.js       раннер миграций и bootstrap баз
   seed/                      детерминированный генератор демо-данных
 public/
   css/app.css                единственный stylesheet
+  js/                        острова загрузки файлов без фреймворка
   fonts/, img/               локальные шрифты и SVG
 tests/
   unit/, integration/        Vitest + Supertest
@@ -216,7 +250,9 @@ docs/
 - [Трассировка требований задания](docs/superpowers/specs/2026-11-21-assignment-traceability.md)
 - [Дорожная карта M1–M6](docs/superpowers/plans/2026-11-21-metrika-roadmap.md)
 - [План этапа M1](docs/superpowers/plans/2026-11-21-metrika-m1-foundation.md)
+- [План этапа M2](docs/superpowers/plans/2026-11-21-metrika-m2-data.md)
 - [Журнал E2E и скриншоты M1](docs/screenshots/m1/README.md)
+- [Журнал E2E и скриншоты M2](docs/screenshots/m2/README.md)
 - [Отложенные улучшения](IMPROVEMENTS.md)
 
 ## Windows 10

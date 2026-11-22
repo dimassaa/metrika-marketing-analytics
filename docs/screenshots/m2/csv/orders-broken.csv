@@ -1,0 +1,4 @@
+external_id;customer_external_id;campaign_code;occurred_at;revenue;margin
+m2_e2e_bad_0001;m2_e2e_0001;tg_seeds_nov;2026-02-30T12:00:00+03:00;99,00;40,00
+m2_e2e_bad_0002;no_such_customer_9999;tg_seeds_nov;2026-11-20T12:00:00+03:00;99,00;40,00
+m2_e2e_bad_0003;m2_e2e_0002;tg_seeds_nov;2026-11-20T13:00:00+03:00;50,00;60,00

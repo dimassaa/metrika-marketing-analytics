@@ -346,9 +346,30 @@ Non-critical findings recorded during implementation. Priority is decided by the
 - **An invalid filter value silently widens the export.** `?kind=bogus` falls back to “all” (like the list screens),
   which can hand the caller more rows than they asked for. A strict 400 would be safer for a download endpoint, but it
   would diverge from the screen filters; revisit together with them.
-- **Export SQL repeats the list repositories' filter clauses.** `export.repo.js` mirrors the channels, campaigns and
-  daily-stats WHERE/ORDER fragments so a download matches its screen. When M3 adds the stats/orders screens, extract
-  the shared predicates into repository helpers instead of keeping three copies in sync by hand.
+- **Export SQL repeats the list repositories' filter clauses.** `export.repo.js` mirrors the channels, campaigns,
+  daily-stats and orders WHERE/ORDER fragments so a download matches its screen. When M3 adds the stats/orders screens,
+  extract the shared predicates into repository helpers instead of keeping four copies in sync by hand.
+- **The exported orders file is not accepted by the orders importer as-is.** Export writes `revenue_byn` and
+  `margin_byn` (the same `_byn` suffix as every other export), while `validateImportRow('orders', …)` requires
+  `revenue` and `margin`; `first_channel_code` is extra and ignored. So «download orders → upload the same file»
+  fails with «Укажите сумму выручки», which reads as a broken round trip even though both sides work in isolation.
+  Align the two header sets, or add an explicit alias map in the importer, when the export format is next revised.
+- **Exported order timestamps keep microseconds but re-import keeps only milliseconds.** `listOrders` formats
+  `occurred_at` with `to_char(..., '…SS.US')`, while `timestamp()` in the import validator runs the string through
+  `new Date(...).toISOString()`, which truncates to milliseconds. A value stored with sub-millisecond precision
+  therefore changes on a round trip. Either export milliseconds (`.MS`) or parse the offset-aware string without
+  `Date` on import; the seed writes whole seconds, so the demo does not expose it.
+- **`export.repo.js` list helpers have no `= {}` defaults.** `listChannels()`, `listCampaigns()`,
+  `listDailyStats()` and `listOrders()` throw on a missing argument object instead of falling back to the screen
+  defaults, unlike the other repositories. The service always passes an object today, but a future caller that omits
+  the argument gets a `TypeError` rather than a validation error. Restore the defaults or make the argument
+  mandatory in JSDoc and enforce it.
+- **Plan drift found while closing M2.** The plan's interface block advertised
+  `exportService.exportDataset({ dataset, filters, actor }) → { filename, csvContent, rowsCount }`, while the code
+  takes no actor and returns `truncated`/`limit` as well; the plan was corrected in Task 8. The Task 6 report prose
+  still describes the pre-fix behaviour (advertised cap and truncation handling), and the plan's goal section named
+  `002_m2_data.sql` as the source of `goals_unique_idx`, which has always lived in `001_init.sql`. Treat the plan as
+  intent, the code and tests as the contract, and fix report prose in the same change that lands the code.
 
 
 ## M2 media assets (task 7 follow-ups)
