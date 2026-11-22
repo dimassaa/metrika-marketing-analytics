@@ -390,6 +390,21 @@ Non-critical findings recorded during implementation. Priority is decided by the
 - **The image size cap (1 MB) differs from the CSV cap (2 MB) by design.** They are separate upload families with
   separate messages; keep them separate instead of sharing one `LIMIT_FILE_SIZE` constant.
 
+## M3 cleanups (agreed priority)
+
+- **Orders export/import header alias — first cleanup in M3.** `export.repo.js` writes `revenue_byn`/`margin_byn`, while
+  `validateImportRow('orders', …)` expects `revenue`/`margin`, so «download orders → upload the same file» fails with
+  «Укажите сумму выручки». Accept both spellings in the importer (explicit alias map, not a silent rename) and cover
+  the round trip with an integration test; the same file already records the timestamp-precision half of the issue.
+- **Consolidate the repeated vocabulary and defaults.** `campaignDefaults: { startedOn: dataAnchor }` is built in both
+  campaign controllers; `MAX_BIGINT_ID`/id parsing still has copies in `channels.controller.js`,
+  `campaigns.controller.js`, `campaigns.schema.js`, `export.schema.js` and `users.schema.js` beside the shared
+  `src/lib/ids.js`; the goal metric labels exist twice (`audit.service.js` `GOAL_METRIC_LABELS` and
+  `goals.service.js`). Move each to one module so a new metric, id rule or default cannot drift between screens.
+- **Cap or paginate the unbounded goals and users lists.** Both screens render every row, unlike campaigns (200-row cap
+  with an honest truncation note) and the audit journal (50-row pager). Add the same explicit cap/pager before either
+  list can grow past a demo-sized stand.
+
 ## Resolved during the M1 final fix wave
 
 Recorded so the deferred findings do not disappear from history when the open entries above are closed.

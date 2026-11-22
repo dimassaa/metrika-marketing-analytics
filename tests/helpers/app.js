@@ -11,10 +11,12 @@ export const DEMO_PASSWORD = 'Metrika2026!';
  * A new app per test also means a fresh login rate-limit store: the limiter lives inside `createApp`, so attempts
  * made by one test cannot consume another test's window. The session store defaults to the PostgreSQL table and
  * therefore uses `getTestPool()`, never the development database.
+ * @param {{ trustProxy?: false | true | number | string }} [options] Forwarded to `createApp`; the forged-header
+ *   regressions pass `trustProxy: 1` to make Express read `X-Forwarded-For`.
  * @returns {import('express').Express}
  */
-export function makeApp() {
-  return createApp({ db: getTestPool() });
+export function makeApp(options = {}) {
+  return createApp({ db: getTestPool(), ...options });
 }
 
 /**

@@ -214,6 +214,47 @@ describe('campaign mutations', () => {
     expect(await campaignRow('Bad Code!')).toBeUndefined();
   });
 
+  it('rejects a budget above the BIGINT ceiling on create without writing a campaign', async () => {
+    const agent = await signedIn(ANALYST);
+    const csrf = await getAppCsrf(agent);
+    const instagram = await channelId('instagram');
+
+    const res = await agent.post('/app/campaigns').type('form').send(
+      createPayload({
+        channelId: instagram,
+        code: 'campaign_huge_budget',
+        budgetByn: '92233720368547758,08',
+        _csrf: csrf,
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.headers['content-type']).toContain('text/html');
+    expect(res.text).toContain('Сумма слишком велика');
+    expect(await campaignRow('campaign_huge_budget')).toBeUndefined();
+  });
+
+  it('rejects a budget above the BIGINT ceiling on edit and keeps the stored amount', async () => {
+    const agent = await signedIn(ANALYST);
+    const csrf = await getAppCsrf(agent);
+    const before = await campaignRow('instagram_retarget');
+
+    const res = await agent.post(`/app/campaigns/${before.id}`).type('form').send({
+      name: before.name,
+      status: before.status,
+      startedOn: before.started_on,
+      endedOn: '',
+      budgetByn: '92233720368547758,08',
+      _csrf: csrf,
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.headers['content-type']).toContain('text/html');
+    expect(res.text).toContain('Сумма слишком велика');
+    const after = await campaignRow('instagram_retarget');
+    expect(after.budget_cents).toBe(before.budget_cents);
+  });
+
   it('keeps the form with Russian messages for an inverted date range and an archived channel', async () => {
     const agent = await signedIn(ANALYST);
     const csrf = await getAppCsrf(agent);

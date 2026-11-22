@@ -7,6 +7,7 @@ import helmet from 'helmet';
 import compression from 'compression';
 import { pinoHttp } from 'pino-http';
 import { HTTP_LOG_SERIALIZERS, logger } from './lib/logger.js';
+import { env } from './config/env.js';
 import { requestId } from './middleware/requestId.js';
 import { errorHandler, notFound } from './middleware/errors.js';
 import { createPublicRouter } from './routes/public.routes.js';
@@ -54,11 +55,13 @@ const publicDir = fileURLToPath(new URL('../public', import.meta.url));
  *     connect: () => Promise<import('pg').PoolClient>,
  *   } & Partial<import('pg').Pool>,
  *   sessionStore?: import('express-session').Store,
+ *   trustProxy?: false | true | number | string,
  * }} deps `db.connect` backs `withTransaction`: the import writes data, its batch and its audit row in one
  *   transaction. Integration tests pass a pool pointed at the test database, never the shared one.
+ *   `trustProxy` defaults to `TRUST_PROXY`; tests inject it to exercise the forged `X-Forwarded-For` path.
  * @returns {import('express').Express}
  */
-export function createApp({ db, sessionStore } = {}) {
+export function createApp({ db, sessionStore, trustProxy = env.trustProxy } = {}) {
   if (!db || typeof db.query !== 'function') {
     throw new TypeError('createApp requires a db object with a query(text, params) method');
   }
@@ -90,7 +93,9 @@ export function createApp({ db, sessionStore } = {}) {
   const store = sessionStore ?? createPgSessionStore(db);
 
   const app = express();
-  app.set('trust proxy', 1);
+  // Never trust a proxy hop unless TRUST_PROXY says so: a direct request then cannot forge req.ip through
+  // X-Forwarded-For and poison the audit journal or the login limiter key.
+  app.set('trust proxy', trustProxy);
   app.disable('x-powered-by');
 
   // Server-rendered EJS with one public layout; React islands will add their own scripts in later milestones.

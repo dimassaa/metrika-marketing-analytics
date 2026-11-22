@@ -1,4 +1,5 @@
 import rateLimit from 'express-rate-limit';
+import { clientIp } from '../lib/clientIp.js';
 import { renderLoginPage } from '../lib/loginPage.js';
 import { normalizeEmail } from '../services/auth.service.js';
 import { safeRedirectTarget } from './auth.js';
@@ -12,6 +13,16 @@ const RATE_LIMIT_MESSAGE = 'Слишком много попыток входа.
 const IMPORT_WINDOW_MS = 15 * 60 * 1000;
 const IMPORT_ATTEMPT_LIMIT = 20;
 const IMPORT_RATE_LIMIT_MESSAGE = 'Слишком много импортов. Попробуйте снова через 15 минут.';
+
+/**
+ * Address part of a limiter key. `req.ip` is only used when it is an IP literal: a forged header accepted by an
+ * over-trusted proxy must not rotate the key. The socket address is the honest fallback.
+ * @param {import('express').Request} req
+ * @returns {string}
+ */
+function rateLimitAddress(req) {
+  return clientIp(req) ?? req.socket?.remoteAddress ?? 'unknown';
+}
 
 /**
  * Builds a dedicated login limiter with its own in-memory store.
@@ -32,7 +43,7 @@ export function createLoginRateLimiter() {
     skipSuccessfulRequests: true,
     // Keying by address alone would let one office IP exhaust every account; keying by e-mail alone would let an
     // attacker lock a known account from anywhere. The pair limits both vectors.
-    keyGenerator: (req) => `${req.ip}:${normalizeEmail(req.body?.email).slice(0, 254)}`,
+    keyGenerator: (req) => `${rateLimitAddress(req)}:${normalizeEmail(req.body?.email).slice(0, 254)}`,
     handler: (req, res) => {
       renderLoginPage(req, res, {
         status: 429,
@@ -59,7 +70,7 @@ export function createImportRateLimiter() {
     limit: IMPORT_ATTEMPT_LIMIT,
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: (req) => String(req.session?.user?.id ?? req.ip),
+    keyGenerator: (req) => String(req.session?.user?.id ?? rateLimitAddress(req)),
     handler: (req, res) => {
       res.status(429).json({
         error: { code: 'RATE_LIMITED', message: IMPORT_RATE_LIMIT_MESSAGE },

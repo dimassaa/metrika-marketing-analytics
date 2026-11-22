@@ -37,4 +37,13 @@ describe('parseEnv', () => {
       parseEnv({ ...base, NODE_ENV: 'production', SESSION_SECRET: 's'.repeat(32), COOKIE_SECURE: 'true' }),
     ).toMatchObject({ nodeEnv: 'production', cookieSecure: true });
   });
+  it('defaults trust proxy to false', () => {
+    expect(parseEnv(base).trustProxy).toBe(false);
+  });
+  it('parses TRUST_PROXY as a boolean, hop count or subnet list', () => {
+    expect(parseEnv({ ...base, TRUST_PROXY: 'false' }).trustProxy).toBe(false);
+    expect(parseEnv({ ...base, TRUST_PROXY: 'true' }).trustProxy).toBe(true);
+    expect(parseEnv({ ...base, TRUST_PROXY: '1' }).trustProxy).toBe(1);
+    expect(parseEnv({ ...base, TRUST_PROXY: 'loopback' }).trustProxy).toBe('loopback');
+  });
 });

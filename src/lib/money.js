@@ -8,6 +8,8 @@ import { ValidationError } from './errors.js';
 const BYN_AMOUNT = /^(\d+)(?:[.,](\d{1,2}))?$/;
 /** Integer cents as returned by node-postgres for a BIGINT column. */
 const INTEGER_CENTS = /^\d+$/;
+/** Largest value the BIGINT money columns can hold (2^63 - 1 kopecks). */
+const MAX_BIGINT_CENTS = 9223372036854775807n;
 
 /**
  * Converts a user-entered BYN amount into integer kopecks.
@@ -18,7 +20,7 @@ const INTEGER_CENTS = /^\d+$/;
  *
  * @param {string | number} input Amount in Belarusian roubles; a number is accepted for internal callers.
  * @returns {bigint} Amount in kopecks.
- * @throws {ValidationError} On negative, empty, non-numeric or over-precise input.
+ * @throws {ValidationError} On negative, empty, non-numeric, over-precise or above-BIGINT input.
  */
 export function parseBynToCents(input) {
   if (input === null || input === undefined) {
@@ -49,7 +51,13 @@ export function parseBynToCents(input) {
   }
 
   const [, whole, fraction = ''] = match;
-  return BigInt(whole) * 100n + BigInt(fraction.padEnd(2, '0'));
+  const cents = BigInt(whole) * 100n + BigInt(fraction.padEnd(2, '0'));
+  // BIGINT is the ceiling of every `*_cents` column. Checking here keeps an oversized form value from reaching
+  // `$::bigint` and answering 400/500 only after PostgreSQL raises SQLSTATE 22003.
+  if (cents > MAX_BIGINT_CENTS) {
+    throw new ValidationError('Сумма слишком велика');
+  }
+  return cents;
 }
 
 /**

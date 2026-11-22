@@ -196,7 +196,7 @@ export function createAuditService({ auditRepository }) {
      * @param {string} entry.entity
      * @param {string | null} [entry.entityId]
      * @param {Record<string, unknown>} [entry.payload] Never put passwords, tokens or session ids here.
-     * @param {string | null} [entry.ip]
+     * @param {string | null} [entry.ip] Caller address; the repository stores a malformed value as NULL.
      * @returns {Promise<void>}
      */
     async record({ userId = null, action, entity, entityId = null, payload = {}, ip = null }) {

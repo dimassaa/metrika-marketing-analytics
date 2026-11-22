@@ -5,6 +5,26 @@ const postgresUrl = z
   .string()
   .regex(/^postgres(ql)?:\/\/.+/, 'must be a postgres:// connection string');
 
+/**
+ * Maps the `TRUST_PROXY` string to the value Express accepts.
+ *
+ * `false` is the safe default: a directly reachable instance must ignore `X-Forwarded-For`, otherwise a client can
+ * forge `req.ip` for the rate limiter and the audit journal. Behind a reverse proxy the operator opts in with a hop
+ * count (`1`) or a subnet list; `true` trusts the whole chain and is only correct when the app is unreachable
+ * directly.
+ *
+ * @param {string} value Raw environment value.
+ * @returns {false | true | number | string} Value for `app.set('trust proxy', …)`.
+ */
+function parseTrustProxy(value) {
+  const normalized = value.trim();
+  const lowered = normalized.toLowerCase();
+  if (lowered === '' || lowered === 'false') return false;
+  if (lowered === 'true') return true;
+  if (/^\d+$/.test(normalized)) return Number(normalized);
+  return normalized;
+}
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
@@ -14,6 +34,7 @@ const envSchema = z.object({
   SESSION_SECRET: z.string().min(32, 'must be at least 32 characters'),
   APP_URL: z.url('must be a valid URL'),
   COOKIE_SECURE: z.enum(['true', 'false']).transform((value) => value === 'true'),
+  TRUST_PROXY: z.string().default('false').transform(parseTrustProxy),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
 
@@ -56,6 +77,7 @@ const productionSchema = envSchema.superRefine((data, context) => {
  *   sessionSecret: string,
  *   appUrl: string,
  *   cookieSecure: boolean,
+ *   trustProxy: false | true | number | string,
  *   logLevel: string,
  * }}
  * @throws {Error} When a variable is missing or invalid; the message names every offending key.
@@ -78,6 +100,7 @@ export function parseEnv(source) {
     sessionSecret: data.SESSION_SECRET,
     appUrl: data.APP_URL,
     cookieSecure: data.COOKIE_SECURE,
+    trustProxy: data.TRUST_PROXY,
     logLevel: data.LOG_LEVEL,
   };
 }

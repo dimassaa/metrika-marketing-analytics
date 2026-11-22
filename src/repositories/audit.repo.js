@@ -1,3 +1,5 @@
+import { normalizeIp } from '../lib/clientIp.js';
+
 /**
  * Columns shared by the audit list and its count. The actor's e-mail comes from a LEFT JOIN because `user_id` is
  * `ON DELETE SET NULL`: a row whose actor disappeared must stay visible instead of dropping out of the journal.
@@ -63,14 +65,16 @@ export function createAuditRepository(db) {
      * @param {string} entry.entity Affected entity type.
      * @param {string | null} entry.entityId Affected entity id.
      * @param {Record<string, unknown>} entry.payload Structured context; must never contain secrets.
-     * @param {string | null} entry.ip Caller address for INET.
+     * @param {string | null} entry.ip Caller address for INET; malformed values become NULL.
      * @returns {Promise<void>}
      */
     async insert({ userId, action, entity, entityId, payload, ip }) {
+      // This is the one write choke point: every audit caller goes through here, so a spoofed or malformed address
+      // can never reach the INET column and fail an already-committed mutation with SQLSTATE 22P02.
       await db.query(
         `INSERT INTO audit_log (user_id, action, entity, entity_id, payload, ip)
          VALUES ($1, $2, $3, $4, $5, $6)`,
-        [userId, action, entity, entityId, payload, ip],
+        [userId, action, entity, entityId, payload, normalizeIp(ip)],
       );
     },
 

@@ -20,6 +20,12 @@ describe('parseBynToCents', () => {
     expect(() => parseBynToCents('abc')).toThrow(ValidationError);
     expect(() => parseBynToCents('')).toThrow(ValidationError);
   });
+
+  it('accepts the largest BIGINT kopeck value and rejects one kopeck more', () => {
+    expect(parseBynToCents('92233720368547758,07')).toBe(9223372036854775807n);
+    expect(() => parseBynToCents('92233720368547758,08')).toThrow('Сумма слишком велика');
+    expect(() => parseBynToCents('999999999999999999')).toThrow('Сумма слишком велика');
+  });
 });
 
 describe('centsFromDb', () => {

@@ -298,6 +298,44 @@ describe('channel mutations', () => {
     expect(await channelRow('Bad-Code!')).toBeUndefined();
   });
 
+  it('rejects a CAC above the BIGINT ceiling on create without writing a channel', async () => {
+    const agent = await signedIn(ANALYST);
+    const csrf = await getAppCsrf(agent);
+
+    const res = await agent.post('/app/channels').type('form').send({
+      code: 'huge_cac',
+      name: 'Huge CAC',
+      kind: 'paid',
+      targetCacByn: '92233720368547758,08',
+      _csrf: csrf,
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.headers['content-type']).toContain('text/html');
+    expect(res.text).toContain('Сумма слишком велика');
+    expect(await channelRow('huge_cac')).toBeUndefined();
+  });
+
+  it('rejects a CAC above the BIGINT ceiling on update and keeps the stored target', async () => {
+    const agent = await signedIn(ANALYST);
+    const csrf = await getAppCsrf(agent);
+    const before = await channelRow('instagram');
+
+    const res = await agent.post(`/app/channels/${before.id}`).type('form').send({
+      name: 'Instagram',
+      kind: 'paid',
+      targetCacByn: '92233720368547758,08',
+      targetRomiPct: '100',
+      _csrf: csrf,
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.headers['content-type']).toContain('text/html');
+    expect(res.text).toContain('Сумма слишком велика');
+    const after = await channelRow('instagram');
+    expect(after.target_cac_cents).toBe(before.target_cac_cents);
+  });
+
   it('refuses to archive a channel that still has active campaigns', async () => {
     const agent = await signedIn(ANALYST);
     const csrf = await getAppCsrf(agent);
@@ -328,6 +366,36 @@ describe('channel mutations', () => {
     const actions = await auditActions(before.id);
     expect(actions).toContain(AUDIT_ACTIONS.CHANNEL_ARCHIVE);
     expect(actions).toContain(AUDIT_ACTIONS.CHANNEL_RESTORE);
+  });
+
+  it('creates the channel and stores a NULL audit IP when X-Forwarded-For is not an IP', async () => {
+    // trustProxy: 1 reproduces the over-trusted deployment: Express then copies the forged header into req.ip.
+    const trustedApp = makeApp({ trustProxy: 1 });
+    const agent = request.agent(trustedApp);
+    const login = await loginAs(agent, ANALYST);
+    expect(login.status).toBe(302);
+    const csrf = await getAppCsrf(agent);
+
+    const res = await agent
+      .post('/app/channels')
+      .set('X-Forwarded-For', 'not-an-ip')
+      .type('form')
+      .send({ code: 'xff_audit', name: 'XFF audit', kind: 'paid', targetCacByn: '10,00', _csrf: csrf });
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/app/channels');
+    const created = await channelRow('xff_audit');
+    expect(created).toBeDefined();
+
+    const { rows } = await pool.query(
+      `SELECT ip::text AS ip
+         FROM audit_log
+        WHERE action = $1 AND entity = 'channel' AND entity_id = $2`,
+      [AUDIT_ACTIONS.CHANNEL_CREATE, created.id],
+    );
+    // The mutation committed, the audit row exists, and the unusable address became NULL instead of a 500.
+    expect(rows).toHaveLength(1);
+    expect(rows[0].ip).toBeNull();
   });
 
   it('stores a script-like name literally and escapes it on the list page', async () => {

@@ -103,6 +103,30 @@ describe('POST /login', () => {
     expect(res.text).not.toContain('не найден');
   });
 
+  it('signs in and writes the audit row when X-Forwarded-For is not an IP', async () => {
+    // trustProxy: 1 reproduces the over-trusted deployment: Express then copies the forged header into req.ip.
+    const trustedApp = makeApp({ trustProxy: 1 });
+    const agent = request.agent(trustedApp);
+    const csrf = await getCsrf(agent);
+
+    const res = await agent
+      .post('/login')
+      .set('X-Forwarded-For', 'not-an-ip')
+      .type('form')
+      .send({ email: ADMIN, password: DEMO_PASSWORD, _csrf: csrf });
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/app/dashboard');
+    expect(await countSessions()).toBeGreaterThan(0);
+
+    const { rows } = await pool.query(
+      "SELECT ip::text AS ip FROM audit_log WHERE action = 'auth.login' ORDER BY id DESC LIMIT 1",
+    );
+    // The login succeeded, the session exists, and the address that could not be an INET became NULL.
+    expect(rows).toHaveLength(1);
+    expect(rows[0].ip).toBeNull();
+  });
+
   it('answers an unknown email with the same generic message and no authenticated session', async () => {
     const agent = newAgent();
     const csrf = await getCsrf(agent);
@@ -213,6 +237,27 @@ describe('POST /login', () => {
     const statuses = [];
     for (let index = 0; index < 6; index += 1) {
       statuses.push((await attempt()).status);
+    }
+
+    expect(statuses.slice(0, 5)).toEqual([401, 401, 401, 401, 401]);
+    expect(statuses[5]).toBe(429);
+  });
+
+  it('ignores rotated forged X-Forwarded-For values when counting failed attempts', async () => {
+    // Even with a hop trusted, a non-IP header is not a key: every attempt falls back to the same socket address.
+    const trustedApp = makeApp({ trustProxy: 1 });
+    const agent = request.agent(trustedApp);
+    const csrf = await getCsrf(agent);
+    const attempt = (index) =>
+      agent
+        .post('/login')
+        .set('X-Forwarded-For', `forged-${index}`)
+        .type('form')
+        .send({ email: VIEWER, password: 'definitely-not-the-password', _csrf: csrf });
+
+    const statuses = [];
+    for (let index = 0; index < 6; index += 1) {
+      statuses.push((await attempt(index)).status);
     }
 
     expect(statuses.slice(0, 5)).toEqual([401, 401, 401, 401, 401]);
