@@ -203,6 +203,19 @@ describe('daily statistics export', () => {
     const from = addDays(anchor, -29);
     expect(rows.every((row) => row.stat_date >= from && row.stat_date <= anchor)).toBe(true);
   });
+
+  it('clamps a future upper bound to the data anchor instead of promising rows that do not exist', async () => {
+    const agent = await signedIn(VIEWER);
+
+    const res = await agent.get('/app/export/daily_stats.csv').query({ to: addDays(anchor, 30) });
+
+    expect(res.status).toBe(200);
+    const { rows } = csvOf(res);
+    expect(rows.length).toBeGreaterThan(0);
+    const from = addDays(anchor, -29);
+    expect(rows.every((row) => row.stat_date >= from && row.stat_date <= anchor)).toBe(true);
+    expect(rows.some((row) => row.stat_date > anchor)).toBe(false);
+  });
 });
 
 describe('orders export', () => {

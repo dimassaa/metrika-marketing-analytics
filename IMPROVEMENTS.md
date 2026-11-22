@@ -433,3 +433,10 @@ Recorded so the deferred findings do not disappear from history when the open en
   (SQLSTATE для ошибок `pg`). Вернуть эти поля в M2, иначе диагностика БД станет хуже.
 - `imagePath` в `src/lib/seo.js` не валидируется: вызывающий код может отдать внешний `og:image`. Нормализовать так же,
   как canonical.
+
+## Metrics engine (M3)
+
+- **A free channel can never be `healthy`.** Email and SEO have customers but `spend = 0`, so CAC is `0n` (`free`),
+  while ROMI is `null` by metrics spec §3.2; health §3.4 then falls back to `no_data` even though the channel acquired
+  customers at zero cost. This is the literal spec ruling and must not be changed silently — it needs an owner
+  decision (for example, treat ROMI as not applicable instead of missing for a free channel).

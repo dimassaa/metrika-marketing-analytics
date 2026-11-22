@@ -1,3 +1,4 @@
+import { roundNumber } from './metrics-math.js';
 import { centsFromDb } from './money.js';
 
 /** Typographic minus: the UI shows `−8,1%`, never the ASCII hyphen of a form field. */
@@ -65,6 +66,54 @@ export function formatPercent(value, { signed = false } = {}) {
   const sign = negative ? MINUS : numeric > 0 && signed ? '+' : '';
   // `toFixed` only runs after the value is known finite, and percentages are not money, so a float is acceptable.
   return `${sign}${withCommaDecimals(absolute.toFixed(2))}%`;
+}
+
+/**
+ * Renders a month count without fake precision: `12`, `12,5`, `—`. Used by payback and LTV horizons, where a whole
+ * month must not read as `12,00` and a percentage formatter would add a misleading `%`.
+ *
+ * @param {string | number | null | undefined} value Months, usually the NUMERIC text `pg` returns.
+ * @returns {string} Ready-to-display month count, or `—` for NULL.
+ * @throws {TypeError} When the value is not numeric.
+ */
+export function formatMonths(value) {
+  if (value === null || value === undefined || value === '') return EM_DASH;
+
+  const text = (typeof value === 'string' ? value.trim() : String(value)).replace(',', '.');
+  if (!Number.isFinite(Number(text))) {
+    throw new TypeError(`formatMonths expected a finite number, got ${JSON.stringify(value)}`);
+  }
+
+  const negative = text.startsWith('-');
+  const unsigned = text.replace(/^[+-]/, '');
+  const [whole, fraction = ''] = unsigned.split('.');
+  const trimmed = fraction.replace(/0+$/, '');
+  const body = trimmed === '' ? whole : `${whole},${trimmed}`;
+  return `${negative ? MINUS : ''}${body}`;
+}
+
+/**
+ * Renders a coefficient with a fixed number of decimals and a comma: `2,999`, `2,50`.
+ *
+ * @param {string | number | null | undefined} value Ratio value, e.g. LTV:CAC.
+ * @param {{ decimals?: number }} [options] Decimal places, default 3 per metrics spec §0.
+ * @returns {string} Ready-to-display ratio, or `—` for NULL.
+ * @throws {TypeError} When the value is not finite or the precision is invalid.
+ */
+export function formatRatio(value, { decimals = 3 } = {}) {
+  if (value === null || value === undefined || value === '') return EM_DASH;
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 20) {
+    throw new TypeError(`formatRatio decimals must be an integer between 0 and 20, got ${String(decimals)}`);
+  }
+
+  const numeric = typeof value === 'string' ? Number(value.trim().replace(',', '.')) : Number(value);
+  if (!Number.isFinite(numeric)) {
+    throw new TypeError(`formatRatio expected a finite number, got ${JSON.stringify(value)}`);
+  }
+
+  const rounded = roundNumber(numeric, decimals);
+  const sign = rounded < 0 ? MINUS : '';
+  return `${sign}${Math.abs(rounded).toFixed(decimals).replace('.', ',')}`;
 }
 
 /**

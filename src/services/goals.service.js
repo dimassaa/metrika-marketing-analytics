@@ -2,7 +2,7 @@ import { AUDIT_ACTIONS } from '../config/audit-actions.js';
 import { withTransaction } from '../lib/db.js';
 import { formatDateRu } from '../lib/dates.js';
 import { NotFoundError, ValidationError } from '../lib/errors.js';
-import { formatCentsToByn, formatInteger, formatPercent } from '../lib/format.js';
+import { formatCentsToByn, formatInteger, formatMonths, formatPercent, formatRatio } from '../lib/format.js';
 import { parseBynToCents } from '../lib/money.js';
 import { createGoalsRepository } from '../repositories/goals.repo.js';
 import { GOAL_METRICS } from '../validators/goals.schema.js';
@@ -41,27 +41,6 @@ const STATUS_LABELS = Object.freeze({
 const STATUS_TONES = Object.freeze({ active: 'healthy', planned: 'watch', finished: 'neutral' });
 
 /**
- * Formats the ratio with the two decimals the column stores: `3,00`.
- * @param {string} value NUMERIC text from the repository.
- * @returns {string}
- */
-function formatRatio(value) {
-  const [whole, fraction = ''] = String(value).split('.');
-  return `${whole},${fraction.padEnd(2, '0').slice(0, 2)}`;
-}
-
-/**
- * Months read as a whole number when the stored value has no fraction: `12`, not `12,00`.
- * @param {string} value NUMERIC text from the repository.
- * @returns {string}
- */
-function formatMonths(value) {
-  const [whole, fraction = ''] = String(value).split('.');
-  const trimmed = fraction.replace(/0+$/, '');
-  return trimmed === '' ? whole : `${whole},${trimmed}`;
-}
-
-/**
  * @param {string} metric
  * @param {string} value NUMERIC text from the repository.
  * @returns {{ targetLabel: string, targetIsByn: boolean }}
@@ -76,7 +55,7 @@ function formatTarget(metric, value) {
     case 'romi':
       return { targetLabel: formatPercent(value), targetIsByn: false };
     case 'ltv_cac':
-      return { targetLabel: formatRatio(value), targetIsByn: false };
+      return { targetLabel: formatRatio(value, { decimals: 2 }), targetIsByn: false };
     case 'payback':
       return {
         targetLabel: `${formatMonths(value)} мес.`,

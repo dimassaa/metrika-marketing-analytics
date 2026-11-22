@@ -1,15 +1,13 @@
 import { addDays, minskDayStart } from '../lib/dates.js';
 import { ValidationError } from '../lib/errors.js';
 import { stringifyCsv } from '../lib/csv.js';
+import { resolvePeriod } from '../lib/periods.js';
 
 /**
  * Hard cap shared by every export dataset. A single synchronous response must not try to serialise an unbounded
  * table into memory; the controller advertises the cap only when it actually truncated the file.
  */
 export const EXPORT_ROW_LIMIT = 50_000;
-
-/** Default reporting window fixed by metrics spec §0.1: 30 calendar days counted back from the data anchor. */
-const DEFAULT_PERIOD_DAYS = 29;
 
 const HEADERS = Object.freeze({
   channels: ['code', 'name', 'kind', 'is_active', 'target_cac_byn', 'target_romi_pct', 'campaigns_count'],
@@ -49,23 +47,6 @@ export function formatCentsForCsv(cents) {
 function formatNumericForCsv(value) {
   if (value === null) return '';
   return String(value).replace('.', ',');
-}
-
-/**
- * Applies the documented 30-day default from the data anchor. An explicit upper bound is kept, so
- * `?to=2026-10-31` means that month rather than "until today"; `?from=` alone runs through the anchor.
- * @param {{ from: string | null, to: string | null }} filters
- * @param {string} anchor
- * @returns {{ from: string, to: string }}
- * @throws {ValidationError} When the resolved range is reversed.
- */
-function resolvePeriod({ from, to }, anchor) {
-  const resolvedTo = to ?? anchor;
-  const resolvedFrom = from ?? addDays(resolvedTo, -DEFAULT_PERIOD_DAYS);
-  if (resolvedFrom > resolvedTo) {
-    throw new ValidationError('Начало периода не может быть позже окончания');
-  }
-  return { from: resolvedFrom, to: resolvedTo };
 }
 
 /**
@@ -148,7 +129,7 @@ export function createExportService({ exportRepository, referenceRepository, row
         formatCentsForCsv(campaign.spendCents),
       ]);
     } else if (dataset === 'daily_stats') {
-      const period = resolvePeriod(filters, anchor);
+      const period = resolvePeriod({ anchor, from: filters.from, to: filters.to });
       const capped = await fetchWithCap((limit) =>
         exportRepository.listDailyStats({
           channelId: filters.channelId,
@@ -168,7 +149,7 @@ export function createExportService({ exportRepository, referenceRepository, row
         formatCentsForCsv(stat.spendCents),
       ]);
     } else if (dataset === 'orders') {
-      const period = resolvePeriod(filters, anchor);
+      const period = resolvePeriod({ anchor, from: filters.from, to: filters.to });
       // Half-open instants keep the predicate sargable and match Minsk calendar days exactly, DST included.
       const fromInstant = minskDayStart(period.from);
       const toExclusive = minskDayStart(addDays(period.to, 1));
