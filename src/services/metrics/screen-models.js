@@ -1,6 +1,6 @@
 import { METRICS_CONFIG } from '../../config/metrics.js';
 import { formatDateRu } from '../../lib/dates.js';
-import { formatCentsToByn, formatPercent } from '../../lib/format.js';
+import { formatCentsToByn, formatInteger, formatPercent } from '../../lib/format.js';
 import { heatBucket } from '../../lib/heat-scale.js';
 import { CHANNEL_KIND_LABELS } from '../../lib/metrics-labels.js';
 import { buildQueryString } from '../../lib/query.js';
@@ -9,10 +9,12 @@ import {
   buildCacChart,
   buildCacLtvScatter,
   buildChannelSpendChart,
+  buildCohortLtvChart,
   buildFunnelSteps,
   buildRomiChart,
   buildSpendRevenueChart,
   daysLabel,
+  monthsLabel,
   weeksLabel,
 } from './chart-series.js';
 
@@ -696,5 +698,219 @@ export function buildChannelFilterControl({ options = [], query = {} } = {}) {
     options,
     periodFields,
     resetHref: queryString === '' ? '/app/dashboard' : `/app/dashboard?${queryString}`,
+  };
+}
+
+/**
+ * Normalises an M3 cohort month into `YYYY-MM-01` once, at the screen-model boundary.
+ *
+ * The service returns a full first-of-month date today, but the model must also accept a month-only key. Doing the
+ * conversion here keeps every React component free of `new Date('2026-11')`, which is parsed in the local timezone
+ * and can shift the month by one on a machine west of UTC.
+ *
+ * @param {unknown} value `YYYY-MM` or `YYYY-MM-DD`.
+ * @returns {string} `YYYY-MM-01`.
+ * @throws {TypeError} When the value is not a real month key.
+ */
+function cohortMonthDateOf(value) {
+  if (typeof value !== 'string') {
+    throw new TypeError(`cohortMonth must be a string, got ${JSON.stringify(value)}`);
+  }
+  const month = /^\d{4}-\d{2}$/.test(value)
+    ? value
+    : /^\d{4}-\d{2}-\d{2}$/.test(value)
+      ? value.slice(0, 7)
+      : null;
+  if (month === null) {
+    throw new TypeError(`cohortMonth must be YYYY-MM or YYYY-MM-DD, got ${JSON.stringify(value)}`);
+  }
+  const numericMonth = Number(month.slice(5, 7));
+  if (numericMonth < 1 || numericMonth > 12) {
+    throw new RangeError(`cohortMonth has an impossible month: ${JSON.stringify(value)}`);
+  }
+  return `${month}-01`;
+}
+
+/**
+ * @param {{ monthOffset: number, retentionPct: number | null, cumLtvCents: string | null }} cell
+ * @returns {string} Tooltip/title text for one cell. Colour and title supplement the visible number, never replace it.
+ */
+function heatCellTitle(cell) {
+  if (cell.retentionPct === null) return 'Месяц ещё не наступил — удержание не измерено';
+  if (cell.cumLtvCents === null) return `Смещение ${cell.monthOffset}: маржа ещё не наблюдалась`;
+  return `Накопленный LTV на смещении ${cell.monthOffset}: ${formatCentsToByn(cell.cumLtvCents)} BYN`;
+}
+
+/**
+ * Maps one M3 cohort row into the cohorts screen row. Raw numeric values stay in the model because the island needs
+ * the percentage to choose a heat class; the labels are ready strings so React never formats money or percent itself.
+ *
+ * @param {object} cohort M3 matrix row.
+ * @returns {object}
+ */
+function toCohortScreenRow(cohort) {
+  return {
+    cohortMonth: cohort.cohortMonth,
+    cohortMonthDate: cohortMonthDateOf(cohort.cohortMonth),
+    cohortLabel: cohort.cohortLabel,
+    cohortSize: cohort.cohortSize,
+    cohortSizeLabel: formatInteger(cohort.cohortSize),
+    ltvCents: cohort.ltvCents,
+    ltvLabel: cohort.ltvLabel ?? formatCentsToByn(cohort.ltvCents),
+    isComplete: cohort.isComplete === true,
+    isPartial: cohort.isComplete !== true,
+    monthsObserved: cohort.monthsObserved,
+    cells: cohort.cells.map((cell) => ({
+      monthOffset: cell.monthOffset,
+      retentionPct: cell.retentionPct,
+      retentionLabel: formatPercent(cell.retentionPct),
+      heatClass: heatBucket(cell.retentionPct),
+      cumLtvCents: cell.cumLtvCents,
+      cumLtvLabel: formatCentsToByn(cell.cumLtvCents),
+      title: heatCellTitle(cell),
+    })),
+  };
+}
+
+/**
+ * The heatmap's accessible table contract. The rows carry the same values as `cohorts` in the shape a real `<table>`
+ * needs (a header, a row header and one cell per month), so a consumer can render the matrix without re-deriving a
+ * label or a heat class.
+ *
+ * @param {{ cohorts: object[], horizonMonths: number }} input
+ * @returns {{
+ *   caption: string,
+ *   columns: Array<{ key: string, label: string, numeric: boolean, monthOffset?: number }>,
+ *   rows: object[],
+ * }}
+ */
+function buildCohortsTable({ cohorts, horizonMonths }) {
+  return {
+    caption: `Удержание клиентов по когортам за ${monthsLabel(horizonMonths)} от первого заказа`,
+    columns: [
+      { key: 'cohort', label: 'Когорта', numeric: false },
+      { key: 'size', label: 'Клиенты', numeric: true },
+      ...Array.from({ length: horizonMonths }, (_, monthOffset) => ({
+        key: `m${monthOffset}`,
+        label: String(monthOffset),
+        numeric: true,
+        monthOffset,
+      })),
+      { key: 'ltv', label: `LTV${horizonMonths}`, numeric: true },
+    ],
+    rows: cohorts.map((cohort) => ({
+      key: cohort.cohortMonth,
+      cohortMonth: cohort.cohortMonth,
+      cohortMonthDate: cohort.cohortMonthDate,
+      cohortLabel: cohort.cohortLabel,
+      cohortSizeLabel: cohort.cohortSizeLabel,
+      isPartial: cohort.isPartial,
+      cells: cohort.cells.map((cell) => ({
+        monthOffset: cell.monthOffset,
+        label: cell.retentionLabel,
+        heatClass: cell.heatClass,
+        title: cell.title,
+      })),
+      ltvLabel: cohort.ltvLabel,
+    })),
+  };
+}
+
+/**
+ * @param {object} row M3 channel LTV row.
+ * @returns {object} JSON-safe row with ready display labels, raw kopecks retained for API consumers.
+ */
+function toChannelLtvRow(row) {
+  return {
+    channelId: row.channelId,
+    channelCode: row.channelCode,
+    ltvCents: row.ltvCents,
+    ltvLabel: formatCentsToByn(row.ltvCents),
+    customerCount: row.customerCount,
+    customerCountLabel: formatInteger(row.customerCount),
+    cohortCount: row.cohortCount,
+    status: row.status,
+  };
+}
+
+/**
+ * Builds the cohorts screen model shared by `data-props` and `/api/v1/cohorts`.
+ *
+ * The matrix is M3's result unchanged in meaning: incomplete cohorts stay in the heatmap and are also listed in
+ * `excludedIncomplete`, because they do not move the LTV curve. Future cells keep `retentionPct: null` and a real
+ * zero stays `0`; the two facts must never collapse into one another.
+ *
+ * @param {{ matrix: object, curve: Array<object> }} input
+ * @returns {{
+ *   page: 'cohorts',
+ *   horizonMonths: number,
+ *   anchor: string,
+ *   hasData: boolean,
+ *   incompleteCount: number,
+ *   cohorts: object[],
+ *   excludedIncomplete: object[],
+ *   channelLtv: object[],
+ *   charts: { ltv: object },
+ *   table: object,
+ * }}
+ */
+export function buildCohortsScreen({ matrix, curve }) {
+  const horizonMonths = matrix.horizonMonths;
+  const cohorts = matrix.cohorts.map(toCohortScreenRow);
+  const excludedIncomplete = (matrix.excludedIncomplete ?? matrix.cohorts.filter((cohort) => !cohort.isComplete)).map(
+    (cohort) => ({
+      cohortMonth: cohort.cohortMonth,
+      cohortMonthDate: cohortMonthDateOf(cohort.cohortMonth),
+      cohortLabel: cohort.cohortLabel,
+      cohortSize: cohort.cohortSize,
+      cohortSizeLabel: formatInteger(cohort.cohortSize),
+      ltvCents: cohort.ltvCents,
+      ltvLabel: cohort.ltvLabel ?? formatCentsToByn(cohort.ltvCents),
+      monthsObserved: cohort.monthsObserved,
+    }),
+  );
+
+  return {
+    page: 'cohorts',
+    horizonMonths,
+    anchor: matrix.anchor,
+    hasData: cohorts.length > 0,
+    incompleteCount: excludedIncomplete.length,
+    cohorts,
+    excludedIncomplete,
+    channelLtv: (matrix.channelLtv ?? []).map(toChannelLtvRow),
+    charts: { ltv: buildCohortLtvChart({ curve, horizonMonths }) },
+    table: buildCohortsTable({ cohorts, horizonMonths }),
+  };
+}
+
+/**
+ * Page-only horizon switch for the cohorts screen. It is not part of the screen model: the API returns data, while
+ * these links are presentation of the same HTML frame.
+ *
+ * Links replay the whole current query, so a manually supplied `channelId` or a stray `days` survives a horizon
+ * change. The default horizon is omitted to keep an untouched URL short, matching the other filters in the app.
+ *
+ * @param {{ query?: Record<string, unknown>, horizon?: number }} [input]
+ * @returns {{
+ *   current: number,
+ *   options: Array<{ value: number, label: string, href: string, active: boolean, ariaCurrent: 'page' | null }>,
+ * }}
+ */
+export function buildCohortsHorizonControl({ query = {}, horizon = METRICS_CONFIG.ltv.defaultHorizon } = {}) {
+  const defaultHorizon = METRICS_CONFIG.ltv.defaultHorizon;
+  return {
+    current: horizon,
+    options: METRICS_CONFIG.ltv.horizons.map((value) => {
+      const queryString = buildQueryString(query, { horizon: value === defaultHorizon ? null : value });
+      const active = value === horizon;
+      return {
+        value,
+        label: monthsLabel(value),
+        href: queryString === '' ? '/app/cohorts' : `/app/cohorts?${queryString}`,
+        active,
+        ariaCurrent: active ? 'page' : null,
+      };
+    }),
   };
 }

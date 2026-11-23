@@ -1,0 +1,31 @@
+<%#
+  Cohorts frame. The page owns the heading and the horizon switch; the retention heatmap, the incomplete-cohort note
+  and the cumulative LTV curve are rendered by `client/entries/cohorts.jsx` from `model` — the same object
+  `/api/v1/cohorts` returns.
+
+  There is no topbar period control on this screen: cohorts live on a monthly horizon, not on the dashboard's day
+  window. The anchor stays visible in the topbar.
+%>
+<section class="app-section">
+  <div class="stack stack--lg">
+    <div class="stack stack--sm">
+      <h2>Когорты клиентов</h2>
+      <p class="u-muted">
+        Клиенты сгруппированы по месяцу первого заказа. Удержание показывает, сколько из когорты вернулось в каждый
+        следующий месяц, а кривая — средний накопленный LTV по когортам, у которых горизонт уже прошёл полностью.
+      </p>
+    </div>
+
+    <nav class="segmented" aria-label="Горизонт когорт">
+      <% for (const option of horizonControl.options) { %>
+        <% if (option.active) { %>
+      <a class="segmented__item is-active" href="<%= option.href %>" aria-current="page"><%= option.label %></a>
+        <% } else { %>
+      <a class="segmented__item" href="<%= option.href %>"><%= option.label %></a>
+        <% } %>
+      <% } %>
+    </nav>
+
+    <%- include('../partials/island', { name: 'cohorts', model }) %>
+  </div>
+</section>

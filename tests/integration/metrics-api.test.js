@@ -246,6 +246,79 @@ describe('GET /api/v1/channels/:id', () => {
   });
 });
 
+describe('GET /api/v1/cohorts', () => {
+  it('requires a session and the cohorts:view permission', async () => {
+    expect(METRICS_API_PERMISSIONS['/cohorts']).toBe('cohorts:view');
+
+    const anonymous = await request(app).get('/api/v1/cohorts');
+    expect(anonymous.status).toBe(401);
+    expect(anonymous.body.error.code).toBe('UNAUTHORIZED');
+
+    const agent = await signedIn();
+    const res = await agent.get('/api/v1/cohorts');
+
+    expect(res.status).toBe(200);
+    expect(res.type).toMatch(/application\/json/);
+    expect(res.headers['cache-control']).toBe('no-store');
+    expect(res.body.page).toBe('cohorts');
+    expect(res.body.horizonMonths).toBe(12);
+    expect(res.body.cohorts.length).toBeGreaterThan(0);
+    expect(JSON.stringify(res.body)).not.toMatch(/NaN|Infinity/);
+  });
+
+  it('honours horizon=3 and horizon=6 as real matrix widths', async () => {
+    const agent = await signedIn();
+
+    for (const horizon of [3, 6]) {
+      const res = await agent.get(`/api/v1/cohorts?horizon=${horizon}`);
+
+      expect(res.status, String(horizon)).toBe(200);
+      expect(res.body.horizonMonths).toBe(horizon);
+      expect(res.body.table.columns).toHaveLength(horizon + 3);
+      expect(res.body.charts.ltv.series).toHaveLength(horizon);
+    }
+  });
+
+  it('rejects an unsupported horizon and a malformed filter with 400', async () => {
+    const agent = await signedIn();
+
+    for (const query of [
+      'horizon=7',
+      'horizon=0',
+      'horizon=abc',
+      'horizon=',
+      'channelId=abc',
+      'channelId=',
+      'fromCohortMonth=2026-13',
+    ]) {
+      const res = await agent.get(`/api/v1/cohorts?${query}`);
+
+      expect(res.status, query).toBe(400);
+      expect(res.body.error.code, query).toBe('VALIDATION_ERROR');
+      expect(res.body.error.message, query).toMatch(/[А-Яа-яЁё]/);
+    }
+  });
+
+  it('accepts a channel filter and returns that channel in the LTV rows', async () => {
+    const { rows } = await pool.query(
+      `SELECT c.id::text AS id
+         FROM channels c
+        WHERE EXISTS (SELECT 1 FROM customers cu WHERE cu.first_channel_id = c.id)
+        ORDER BY c.code
+        LIMIT 1`,
+    );
+    const id = rows[0].id;
+    const agent = await signedIn();
+
+    const res = await agent.get(`/api/v1/cohorts?channelId=${id}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.channelLtv).toHaveLength(1);
+    expect(res.body.channelLtv[0].channelId).toBe(id);
+    expect(res.body.cohorts.length).toBeGreaterThan(0);
+  });
+});
+
 describe('GET /api/v1/ranking', () => {
   it('is guarded by channels:view and returns the raw M3 ranking report', async () => {
     expect(METRICS_API_PERMISSIONS['/ranking']).toBe('channels:view');

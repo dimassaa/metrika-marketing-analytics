@@ -2628,6 +2628,115 @@ input[type='file'] {
   line-height: 1.5;
 }
 
+/* Cohorts: horizon switch and the heatmap legend. The active segment is a pale sky wash, not a second filled CTA;
+   the page keeps exactly one cyan-filled action. */
+.segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-4);
+  align-self: flex-start;
+  padding: 2px;
+  border: 1px solid var(--color-stone-border);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-pure-white);
+}
+
+.segmented__item {
+  padding: 5px var(--spacing-12);
+  border-radius: var(--radius-pill);
+  color: var(--color-warm-gray);
+  font-size: 13px;
+  line-height: 1.4;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.segmented__item:hover {
+  background-color: var(--color-stone-canvas);
+  color: var(--color-ink-black);
+}
+
+.segmented__item:focus-visible {
+  outline: 2px solid var(--color-cyan-edge);
+  outline-offset: 2px;
+}
+
+.segmented__item.is-active {
+  background-color: var(--color-sky-wash);
+  color: var(--color-soot);
+}
+
+.matrix-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-8) var(--spacing-16);
+  margin: 0;
+  padding: 0;
+  color: var(--color-warm-gray);
+  font-size: 12px;
+  line-height: 1.4;
+  list-style: none;
+}
+
+.matrix-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-4);
+}
+
+.matrix-legend__swatch {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--color-stone-border);
+  border-radius: 2px;
+}
+
+.matrix-legend__swatch--empty {
+  background-color: var(--color-stone-canvas);
+}
+
+.matrix-legend__line {
+  flex: none;
+  width: 14px;
+  border-top: 2px dashed var(--color-ash-gray);
+}
+
+.cohort-excluded {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cohort-excluded__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--spacing-8);
+  padding: var(--spacing-8) 0;
+  border-bottom: 1px solid var(--color-stone-border);
+}
+
+.cohort-excluded__row:last-child {
+  border-bottom: 0;
+}
+
+.cohort-excluded__name {
+  color: var(--color-ink-black);
+  font-weight: 500;
+}
+
+.cohort-excluded__meta {
+  color: var(--color-warm-gray);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 .heat-0 {
   background-color: color-mix(in srgb, var(--color-cyan-signal) 6%, var(--color-pure-white));
 }

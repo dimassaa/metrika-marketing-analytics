@@ -100,6 +100,43 @@ export function parseChannelIds(value) {
 /** Period-only query, used by screens without a channel filter. */
 export const periodQuerySchema = z.object(periodShape).refine(hasNoPeriodConflict, PERIOD_CONFLICT);
 
+/**
+ * Cohort horizon. The API and the page share the same allowed set, so a bookmarked `horizon=7` cannot silently
+ * render a matrix whose completeness rule nobody designed (the spec has 3/6/12-month LTV horizons only).
+ */
+const horizonField = z.preprocess(
+  (value) => {
+    if (value === undefined) return METRICS_CONFIG.ltv.defaultHorizon;
+    if (typeof value === 'string' && value.trim() !== '') return Number(value);
+    return value;
+  },
+  z
+    .number({ error: 'Горизонт указывается числом месяцев' })
+    .int({ error: 'Горизонт указывается целым числом месяцев' })
+    .refine((value) => METRICS_CONFIG.ltv.horizons.includes(value), {
+      message: `Горизонт может быть только ${METRICS_CONFIG.ltv.horizons.join(', ')} месяцев`,
+    }),
+);
+
+/** Cohort month bound accepts `YYYY-MM` or the service's own `YYYY-MM-01` spelling. */
+const cohortMonthField = z
+  .string({ error: 'Месяц когорты указывается в формате ГГГГ-ММ' })
+  .regex(/^\d{4}-\d{2}(-01)?$/, 'Месяц когорты указывается в формате ГГГГ-ММ')
+  .optional();
+
+/** The cohorts screen has a monthly horizon, not a day window: `days` is deliberately absent from this schema. */
+export const cohortsQuerySchema = z
+  .object({
+    horizon: horizonField,
+    channelId: z
+      .string({ error: 'Некорректный идентификатор канала' })
+      .regex(/^\d+$/, 'Некорректный идентификатор канала')
+      .optional(),
+    fromCohortMonth: cohortMonthField,
+    toCohortMonth: cohortMonthField,
+  })
+  .transform((value) => ({ ...value, channelId: value.channelId ?? null }));
+
 /** Dashboard query: a period plus the BO-13 channel filter. */
 export const dashboardQuerySchema = z
   .object({ ...periodShape, channelIds: channelIdsField })

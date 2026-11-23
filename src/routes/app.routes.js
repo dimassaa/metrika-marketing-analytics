@@ -13,7 +13,6 @@ import { createExportController } from '../controllers/export.controller.js';
  * shadow them.
  */
 const PLACEHOLDER_SECTIONS = [
-  { slug: 'cohorts', title: 'Когорты' },
   { slug: 'attribution', title: 'Атрибуция' },
   { slug: 'scenarios', title: 'Сценарии' },
   { slug: 'alerts', title: 'Алерты' },
@@ -72,6 +71,9 @@ export function createAppRouter({
   });
 
   router.get('/dashboard', requireAuth, requirePermission('dashboard:view'), metrics.controllers.dashboard.page);
+
+  // Cohorts are a read-only analytics view: every role with `cohorts:view` can open the matrix.
+  router.get('/cohorts', requireAuth, requirePermission('cohorts:view'), metrics.controllers.cohorts.page);
 
   // Channels carry their own permissions per method: viewing is open to every role, mutations only to analysts.
   router.get('/channels', requireAuth, requirePermission('channels:view'), channelsController.list);

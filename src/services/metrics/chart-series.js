@@ -1,5 +1,5 @@
 import { formatCentsToByn, formatInteger, formatPercent, formatRomi } from '../../lib/format.js';
-import { roundNumber } from '../../lib/metrics-math.js';
+import { centsToApi, roundNumber } from '../../lib/metrics-math.js';
 import {
   hasPlottableData,
   toCacPoints,
@@ -9,17 +9,30 @@ import {
   toSpendRevenuePoints,
 } from '../../lib/series.js';
 
-/** Recharts needs a number for the sparkline; kopecks stay below `Number.MAX_SAFE_INTEGER` for any realistic stand. */
-function sparkValue(cents) {
+/**
+ * Recharts needs a number; a present kopeck value must be an exact safe integer. A value above
+ * `Number.MAX_SAFE_INTEGER` would be silently rounded, so it fails loudly instead.
+ *
+ * @param {string | null | undefined} cents Kopeck value as the API represents it.
+ * @param {string} label Field name for the error message.
+ * @returns {number | null}
+ * @throws {TypeError} When a present value is not an exact integer kopeck string.
+ */
+function chartCentsValue(cents, label) {
   if (cents === null || cents === undefined) return null;
   if (typeof cents === 'string' && !/^-?\d+$/.test(cents)) {
-    throw new TypeError(`sparkline cacCents must be an integer, got ${JSON.stringify(cents)}`);
+    throw new TypeError(`${label} must be an integer, got ${JSON.stringify(cents)}`);
   }
   const value = Number(cents);
   if (!Number.isSafeInteger(value)) {
-    throw new TypeError(`sparkline cacCents must be an integer, got ${JSON.stringify(cents)}`);
+    throw new TypeError(`${label} must be an integer, got ${JSON.stringify(cents)}`);
   }
   return value;
+}
+
+/** Recharts needs a number for the sparkline; kopecks stay below `Number.MAX_SAFE_INTEGER` for any realistic stand. */
+function sparkValue(cents) {
+  return chartCentsValue(cents, 'sparkline cacCents');
 }
 
 /**
@@ -58,6 +71,26 @@ export function channelsLabel(count) {
   if (last === 1) return `${count} канал`;
   if (last >= 2 && last <= 4) return `${count} канала`;
   return `${count} каналов`;
+}
+
+/** @param {number} count */
+export function cohortsLabel(count) {
+  const tail = count % 100;
+  const last = count % 10;
+  if (tail >= 11 && tail <= 14) return `${count} когорт`;
+  if (last === 1) return `${count} когорта`;
+  if (last >= 2 && last <= 4) return `${count} когорты`;
+  return `${count} когорт`;
+}
+
+/** @param {number} count */
+export function monthsLabel(count) {
+  const tail = count % 100;
+  const last = count % 10;
+  if (tail >= 11 && tail <= 14) return `${count} месяцев`;
+  if (last === 1) return `${count} месяц`;
+  if (last >= 2 && last <= 4) return `${count} месяца`;
+  return `${count} месяцев`;
 }
 
 /**
@@ -335,6 +368,155 @@ export function toSparklinePoints(weeklyCacRows) {
     weekLabel: row.weekLabel,
     value: sparkValue(row.cacCents),
   }));
+}
+
+/**
+ * @param {unknown} value Kopeck string from the M3 matrix.
+ * @param {string} context Error context: a cohort month and an offset.
+ * @returns {bigint | null} Null when the cell has no observed cumulative margin.
+ * @throws {TypeError} When a present value is not a non-negative integer kopeck string.
+ */
+function cumulativeCentsFromCell(value, context) {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) {
+    throw new TypeError(`${context} cumLtvCents must be a non-negative integer string, got ${JSON.stringify(value)}`);
+  }
+  return BigInt(value);
+}
+
+/**
+ * Weighted cumulative LTV curve over completed cohorts (metrics spec §2 and M4 owner decision 8).
+ *
+ * At every month offset the average is `Σ cumulative margin / Σ cohortSize`, using completed cohorts only. An
+ * incomplete cohort is excluded from both operands. A completed cohort with no observed margin row contributes `0`
+ * to the numerator but keeps its `cohortSize` in the denominator: that is a measured aggregate zero, not a missing
+ * observation. The result is `null` only when no completed cohort can be observed at the offset at all.
+ *
+ * Keeping the numerator as bigint kopecks means the view-model never rounds a cohort twice: the per-cohort LTV rows
+ * and this curve are two different aggregations of the same margins.
+ *
+ * @param {{
+ *   cohorts: Array<{
+ *     cohortMonth: string, cohortSize: number, isComplete: boolean,
+ *     cells: Array<{ monthOffset: number, cumLtvCents: string | null }>,
+ *   }>,
+ *   horizonMonths: number,
+ * }} input
+ * @returns {Array<{ monthOffset: number, ltvCents: string | null, ltvLabel: string, cohortCount: number }>}
+ * @throws {TypeError} When a size, a cell or the horizon is malformed.
+ */
+export function buildCumulativeLtvCurve({ cohorts, horizonMonths }) {
+  if (!Array.isArray(cohorts)) throw new TypeError('buildCumulativeLtvCurve requires a cohorts array');
+  if (!Number.isInteger(horizonMonths) || horizonMonths < 1) {
+    throw new TypeError(`horizonMonths must be a positive integer, got ${String(horizonMonths)}`);
+  }
+
+  const complete = cohorts.filter((cohort) => cohort.isComplete === true);
+  for (const cohort of complete) {
+    if (!Number.isInteger(cohort.cohortSize) || cohort.cohortSize <= 0) {
+      throw new TypeError(
+        `complete cohort ${String(cohort.cohortMonth)} must have a positive cohortSize, got ${String(cohort.cohortSize)}`,
+      );
+    }
+    if (!Array.isArray(cohort.cells)) {
+      throw new TypeError(`complete cohort ${String(cohort.cohortMonth)} must carry a cells array`);
+    }
+  }
+
+  const points = [];
+  for (let monthOffset = 0; monthOffset < horizonMonths; monthOffset += 1) {
+    let totalCents = 0n;
+    let totalCustomers = 0;
+    let cohortCount = 0;
+
+    for (const cohort of complete) {
+      const cell = cohort.cells.find((item) => item.monthOffset === monthOffset);
+      // A completed cohort observed the whole horizon, so a missing cell is a broken matrix, not empty data.
+      if (!cell) {
+        throw new TypeError(
+          `complete cohort ${String(cohort.cohortMonth)} has no cell for month offset ${monthOffset}`,
+        );
+      }
+      const cellCents = cumulativeCentsFromCell(
+        cell.cumLtvCents,
+        `cohort ${String(cohort.cohortMonth)} offset ${monthOffset}`,
+      );
+      // The cell already holds per-customer cumulative LTV; weighting multiplies it back by the cohort size, and the
+      // final division returns the weighted average per customer. Summing raw cells would average cohorts equally.
+      if (cellCents !== null) totalCents += cellCents * BigInt(cohort.cohortSize);
+      totalCustomers += cohort.cohortSize;
+      cohortCount += 1;
+    }
+
+    let ltvCents = null;
+    if (cohortCount > 0) {
+      if (totalCustomers <= 0) {
+        throw new TypeError(`cohort sizes at month offset ${monthOffset} must sum to a positive number`);
+      }
+      const customers = BigInt(totalCustomers);
+      // Half-up division of non-negative kopecks; the same rounding identity the LTV service uses.
+      ltvCents = (totalCents * 2n + customers) / (2n * customers);
+    }
+
+    points.push({
+      monthOffset,
+      ltvCents: centsToApi(ltvCents),
+      ltvLabel: formatCentsToByn(ltvCents),
+      cohortCount,
+    });
+  }
+
+  return points;
+}
+
+/**
+ * Chart contract for the cumulative LTV curve. Values stay in kopecks so the tooltip and the duplicate table use the
+ * shared formatter; Recharts receives a number and refuses an unsafe one instead of silently losing precision.
+ *
+ * @param {{ curve: Array<{ monthOffset: number, ltvCents: string | null, cohortCount: number }>,
+ *   horizonMonths: number }} input
+ * @returns {object}
+ * @throws {TypeError} When Recharts would have to round a kopeck string it cannot represent exactly.
+ */
+export function buildCohortLtvChart({ curve, horizonMonths }) {
+  if (!Array.isArray(curve)) throw new TypeError('buildCohortLtvChart requires a curve array');
+  if (!Number.isInteger(horizonMonths) || horizonMonths < 1) {
+    throw new TypeError(`horizonMonths must be a positive integer, got ${String(horizonMonths)}`);
+  }
+
+  const cohortCount = curve[0]?.cohortCount ?? 0;
+  const title = 'Накопленный LTV по когортам';
+  // The caption names both the population and the null-margin aggregation rule: a reader must not think a zero
+  // point means "no data" when it is a measured zero over completed cohorts.
+  const detail =
+    `Средний накопленный LTV по завершённым когортам, ${cohortsLabel(cohortCount)}` +
+    ` · горизонт ${monthsLabel(horizonMonths)}. Когорта без наблюдаемой маржи входит нулём.`;
+
+  return {
+    id: 'cohort-ltv',
+    title,
+    caption: captionOf(title, detail),
+    ariaLabel: `${title}: ${detail}`,
+    unit: 'BYN',
+    hasData: curve.some((point) => point.ltvCents !== null),
+    series: curve.map((point) => ({
+      monthOffset: point.monthOffset,
+      monthLabel: `${point.monthOffset} мес.`,
+      ltvLabel: point.ltvLabel,
+      cohortCount: point.cohortCount,
+      value: chartCentsValue(point.ltvCents, 'curve ltvCents'),
+    })),
+    table: {
+      columns: [
+        { key: 'month', label: 'Смещение, мес.', numeric: true },
+        { key: 'value', label: `Средний LTV${horizonMonths}, BYN`, numeric: true },
+      ],
+      rows: curve.map((point) => ({
+        key: String(point.monthOffset),
+        cells: { month: point.monthOffset, value: point.ltvLabel },
+      })),
+    },
+  };
 }
 
 /**

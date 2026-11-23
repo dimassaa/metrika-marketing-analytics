@@ -648,3 +648,21 @@ Still open:
   `data-props`. The cohorts screen keeps the richer model and its own aggregation.
 - **A capped campaign list states the cap.** The passport returns at most `CAMPAIGN_LIST_LIMIT` campaigns and exposes
   `campaignsTruncated`; the island prints “Показаны первые N кампаний” and points to the campaign screen for filters.
+
+## M4 Task 5 — cohorts follow-ups
+
+- **The cohorts screen accepts `channelId` but does not render a channel picker.** This follows the M4 plan's
+  deferred table: the API and page model narrow the matrix, and horizon links preserve the parameter, but the design
+  §8 screen has no channel-control scenario. If the owner wants a visible filter later, it should be one GET select
+  that replays `horizon`; no server change is needed.
+- **The heatmap table contract repeats the cohort rows in `table` and `cohorts`.** `table` is a ready `<table>` shape
+  (header, row header, cell labels, heat classes) used by the island and JSON consumers; `cohorts` keeps the raw
+  `retentionPct`/`cumLtvCents` for API clients. The duplication grows the JSON payload roughly by the matrix size
+  (~30 KB on the demo stand). Dropping one shape would either force every consumer to re-derive labels or remove
+  raw values from the API; the duplication is documented rather than accidental.
+- **`channelLtv` is returned but not drawn.** The model carries the M3 per-channel LTV rows so an API client can use
+  them and a future channel breakdown needs no second request, but the design's cohorts screen is company-wide only.
+  Rendering it on this screen would add a table the owner did not request.
+- **`KNOWN_ENTRIES` was missing `channel` as well as `cohorts`.** The optional-manifest guard in `src/lib/assets.js`
+  is the only typo check before the first build; without `channel` a fresh development clone rendering a passport
+  would throw while `dashboard` worked. Both entries are now listed; the manifest remains authoritative when present.

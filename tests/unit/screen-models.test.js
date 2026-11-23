@@ -5,11 +5,17 @@ import {
   buildChannelsFilterControl,
   buildChannelsScreen,
   buildChannelsWeightsControl,
+  buildCohortsHorizonControl,
+  buildCohortsScreen,
   buildDashboardScreen,
   buildPassportScreen,
   buildPeriodControl,
 } from '../../src/services/metrics/screen-models.js';
-import { buildFunnelSteps, buildRomiByChannelChart } from '../../src/services/metrics/chart-series.js';
+import {
+  buildCumulativeLtvCurve,
+  buildFunnelSteps,
+  buildRomiByChannelChart,
+} from '../../src/services/metrics/chart-series.js';
 import { heatBucket } from '../../src/lib/heat-scale.js';
 
 const LAST_WEEK = '2026-11-09';
@@ -879,5 +885,276 @@ describe('passport screen model', () => {
 
     expect(() => JSON.stringify(screen)).not.toThrow();
     expect(JSON.stringify(screen)).not.toMatch(/NaN|Infinity/);
+  });
+});
+
+describe('cohorts screen model', () => {
+  /**
+   * @param {{ horizonMonths?: number }} [options]
+   * @returns {object} An M3 cohort matrix with one completed and one partial cohort.
+   */
+  function matrixWith({ horizonMonths = 3 } = {}) {
+    const completeCells = Array.from({ length: horizonMonths }, (_, monthOffset) => ({
+      monthOffset,
+      retentionPct: monthOffset === 0 ? 100 : monthOffset === 1 ? 30.82 : 0,
+      cumLtvCents: monthOffset === 0 ? '5797' : monthOffset === 1 ? '7555' : '9339',
+    }));
+    const partialCells = Array.from({ length: horizonMonths }, (_, monthOffset) =>
+      monthOffset === 0
+        ? { monthOffset, retentionPct: 100, cumLtvCents: '5875' }
+        : { monthOffset, retentionPct: null, cumLtvCents: null },
+    );
+
+    return {
+      horizonMonths,
+      anchor: '2026-11-21',
+      cohorts: [
+        {
+          cohortMonth: '2025-10-01',
+          cohortLabel: 'окт 2025',
+          cohortSize: 292,
+          ltvCents: '14311',
+          ltvLabel: '143,11',
+          isComplete: true,
+          monthsObserved: horizonMonths,
+          cells: completeCells,
+        },
+        {
+          cohortMonth: '2026-11-01',
+          cohortLabel: 'ноя 2026',
+          cohortSize: 179,
+          ltvCents: null,
+          ltvLabel: '—',
+          isComplete: false,
+          monthsObserved: 1,
+          cells: partialCells,
+        },
+      ],
+      channelLtv: [
+        {
+          channelId: '1',
+          channelCode: 'instagram',
+          ltvCents: '14903',
+          customerCount: 131,
+          cohortCount: 2,
+          status: 'ok',
+        },
+        {
+          channelId: '2',
+          channelCode: 'google',
+          ltvCents: null,
+          customerCount: 0,
+          cohortCount: 0,
+          status: 'insufficient_history',
+        },
+      ],
+      excludedIncomplete: [
+        {
+          cohortMonth: '2026-11-01',
+          cohortLabel: 'ноя 2026',
+          cohortSize: 179,
+          ltvCents: null,
+          ltvLabel: '—',
+          isComplete: false,
+          monthsObserved: 1,
+        },
+      ],
+    };
+  }
+
+  /**
+   * @param {{ horizonMonths?: number }} [options]
+   * @returns {object} Screen model built exactly like the controller does.
+   */
+  function screenWith(options = {}) {
+    const matrix = matrixWith(options);
+    const curve = buildCumulativeLtvCurve({
+      cohorts: matrix.cohorts,
+      horizonMonths: matrix.horizonMonths,
+    });
+    return buildCohortsScreen({ matrix, curve });
+  }
+
+  it('adds a single YYYY-MM-01 display date without losing the M3 cohort key', () => {
+    const screen = screenWith();
+
+    expect(screen.page).toBe('cohorts');
+    expect(screen.horizonMonths).toBe(3);
+    expect(screen.anchor).toBe('2026-11-21');
+    expect(screen.cohorts[0].cohortMonth).toBe('2025-10-01');
+    expect(screen.cohorts[0].cohortMonthDate).toBe('2025-10-01');
+    expect(screen.table.rows[0].cohortMonth).toBe('2025-10-01');
+    expect(screen.table.rows[0].cohortMonthDate).toBe('2025-10-01');
+
+    // A month-only source is normalised once, at the screen-model boundary.
+    const monthOnly = matrixWith();
+    monthOnly.cohorts[0].cohortMonth = '2025-10';
+    const monthOnlyScreen = buildCohortsScreen({
+      matrix: monthOnly,
+      curve: buildCumulativeLtvCurve({ cohorts: monthOnly.cohorts, horizonMonths: 3 }),
+    });
+    expect(monthOnlyScreen.cohorts[0].cohortMonth).toBe('2025-10');
+    expect(monthOnlyScreen.cohorts[0].cohortMonthDate).toBe('2025-10-01');
+  });
+
+  it('maps retention, cumulative LTV and heat classes, including a future cell', () => {
+    const screen = screenWith();
+    const complete = screen.cohorts[0];
+    const partial = screen.cohorts[1];
+
+    expect(complete.cells[0]).toMatchObject({
+      retentionPct: 100,
+      retentionLabel: '100,0%',
+      heatClass: heatBucket(100),
+      cumLtvCents: '5797',
+      cumLtvLabel: '57,97',
+    });
+    expect(complete.cells[2]).toMatchObject({
+      retentionPct: 0,
+      retentionLabel: '0,0%',
+      heatClass: 'heat-0',
+      cumLtvLabel: '93,39',
+    });
+
+    expect(partial.isPartial).toBe(true);
+    expect(partial.cells[1]).toEqual({
+      monthOffset: 1,
+      retentionPct: null,
+      retentionLabel: '—',
+      heatClass: 'is-empty',
+      cumLtvCents: null,
+      cumLtvLabel: '—',
+      title: 'Месяц ещё не наступил — удержание не измерено',
+    });
+  });
+
+  it('builds the heatmap table with one column per month, a caption and partial rows', () => {
+    const screen = screenWith();
+
+    expect(screen.table.columns).toHaveLength(screen.horizonMonths + 3);
+    expect(screen.table.columns.map((column) => column.key)).toEqual([
+      'cohort',
+      'size',
+      'm0',
+      'm1',
+      'm2',
+      'ltv',
+    ]);
+    expect(screen.table.rows).toHaveLength(2);
+    expect(screen.table.rows[1]).toMatchObject({ isPartial: true, cohortLabel: 'ноя 2026' });
+    expect(screen.table.caption).toContain('Удержание клиентов по когортам');
+    expect(screen.table.rows[0].cells.map((cell) => cell.label)).toEqual(['100,0%', '30,82%', '0,0%']);
+  });
+
+  it('lists exactly the incomplete cohorts the matrix excluded from the curve', () => {
+    const screen = screenWith();
+
+    expect(screen.excludedIncomplete.map((cohort) => cohort.cohortMonth)).toEqual(
+      screen.cohorts.filter((cohort) => cohort.isPartial).map((cohort) => cohort.cohortMonth),
+    );
+    expect(screen.excludedIncomplete[0]).toMatchObject({
+      cohortMonthDate: '2026-11-01',
+      cohortLabel: 'ноя 2026',
+      cohortSizeLabel: '179',
+      monthsObserved: 1,
+    });
+  });
+
+  it('builds the weighted curve chart with the exact aggregation caption', () => {
+    const screen = screenWith();
+    const chart = screen.charts.ltv;
+
+    expect(chart.unit).toBe('BYN');
+    expect(chart.hasData).toBe(true);
+    expect(chart.series).toHaveLength(3);
+    expect(chart.series[0]).toMatchObject({ monthOffset: 0, value: 5797 });
+    expect(chart.series[2]).toMatchObject({ monthOffset: 2, value: 9339 });
+    expect(chart.caption).toContain('Средний накопленный LTV по завершённым когортам, 1 когорта');
+    expect(chart.caption).toContain('Когорта без наблюдаемой маржи входит нулём');
+    expect(chart.table.rows).toHaveLength(3);
+    expect(chart.table.rows[2].cells.value).toBe('93,39');
+  });
+
+  it('keeps the curve null when no cohort is complete, while the heatmap still shows partial rows', () => {
+    const matrix = matrixWith();
+    matrix.cohorts = matrix.cohorts.filter((cohort) => !cohort.isComplete);
+    matrix.excludedIncomplete = [
+      {
+        cohortMonth: matrix.cohorts[0].cohortMonth,
+        cohortLabel: matrix.cohorts[0].cohortLabel,
+        cohortSize: matrix.cohorts[0].cohortSize,
+        ltvCents: null,
+        ltvLabel: '—',
+        isComplete: false,
+        monthsObserved: 1,
+      },
+    ];
+    const screen = buildCohortsScreen({
+      matrix,
+      curve: buildCumulativeLtvCurve({ cohorts: matrix.cohorts, horizonMonths: matrix.horizonMonths }),
+    });
+
+    expect(screen.hasData).toBe(true);
+    expect(screen.charts.ltv.hasData).toBe(false);
+    expect(screen.charts.ltv.series.every((point) => point.value === null)).toBe(true);
+    expect(screen.charts.ltv.caption).toContain('0 когорт');
+    expect(screen.charts.ltv.table.rows.map((row) => row.cells.value)).toEqual(['—', '—', '—']);
+  });
+
+  it('lets the horizon control the number of heatmap columns and curve points', () => {
+    for (const horizonMonths of [3, 6, 12]) {
+      const screen = screenWith({ horizonMonths });
+
+      expect(screen.horizonMonths).toBe(horizonMonths);
+      expect(screen.cohorts[0].cells).toHaveLength(horizonMonths);
+      expect(screen.table.columns).toHaveLength(horizonMonths + 3);
+      expect(screen.charts.ltv.series).toHaveLength(horizonMonths);
+    }
+  });
+
+  it('formats the channel LTV rows without changing the M3 values', () => {
+    const screen = screenWith();
+
+    expect(screen.channelLtv[0]).toMatchObject({
+      channelId: '1',
+      ltvCents: '14903',
+      ltvLabel: '149,03',
+      customerCount: 131,
+      customerCountLabel: '131',
+    });
+    expect(screen.channelLtv[1]).toMatchObject({ ltvCents: null, ltvLabel: '—', status: 'insufficient_history' });
+  });
+
+  it('serialises without a bigint, NaN or Infinity', () => {
+    const screen = screenWith();
+
+    expect(() => JSON.stringify(screen)).not.toThrow();
+    expect(JSON.stringify(screen)).not.toMatch(/NaN|Infinity/);
+  });
+});
+
+describe('cohorts horizon control', () => {
+  it('builds three GET links, marks the active one and preserves channel and days', () => {
+    const control = buildCohortsHorizonControl({
+      query: { horizon: 6, channelId: '4', days: '90' },
+      horizon: 6,
+    });
+
+    expect(control.options.map((option) => option.value)).toEqual([3, 6, 12]);
+    expect(control.options.map((option) => option.label)).toEqual(['3 месяца', '6 месяцев', '12 месяцев']);
+    const active = control.options.find((option) => option.active);
+    expect(active).toMatchObject({ value: 6, ariaCurrent: 'page' });
+    expect(active.href).toContain('horizon=6');
+    expect(active.href).toContain('channelId=4');
+    expect(active.href).toContain('days=90');
+
+    const three = control.options.find((option) => option.value === 3);
+    expect(three.href).toContain('horizon=3');
+    expect(three.href).toContain('channelId=4');
+    expect(three.href).toContain('days=90');
+    // The default horizon keeps a short URL: it is omitted instead of written as horizon=12.
+    const twelve = control.options.find((option) => option.value === 12);
+    expect(twelve.href).not.toContain('horizon=12');
+    expect(twelve.href).toContain('channelId=4');
   });
 });
