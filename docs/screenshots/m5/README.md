@@ -6,6 +6,23 @@
 Десктопные снимки — `1440×1000`, мобильные — `390×844`. Размеры проверены через
 `identify -format "%f %wx%h" docs/screenshots/m5/*.png`.
 
+## Два прохода: что проверено до T7-фикса и что переснято на HEAD
+
+- **17:15–17:20, HEAD `3fe00c0`:** жизненный цикл алертов (авто- и ручной пересчёт, dismiss с аудитом, фильтры,
+  пагинация на 51 временной строке), границы бюджета и клавиатура, RBAC наблюдателя, 390×844, регрессия
+  дашборда/атрибуции, пустой стенд. Скриншоты первого прохода были сняты здесь.
+- **17:21, `7a114cf`:** T7-фикс сделал проверку `curveChannelId` в API строгой и поправил caption последней
+  измеренной недели. Диф не меняет жизненный цикл алертов, границы бюджета, RBAC или пустой builder, поэтому эти
+  проверки не повторялись; их числа ниже относятся к первому проходу.
+- **17:26–17:30, HEAD `7a114cf`:** полный `npm test` (1050 тестов), затем `npm run build` и рестарт сервера.
+  Все пользовательские снимки пересняты на HEAD: `alerts.png`, `scenarios.png`, `scenarios-warning.png`,
+  `scenarios-error.png`, `scenario-detail.png`, `alerts-390.png`, `scenarios-390.png`. Fallback кривой
+  перепроверен отдельно: страница 200, API 400.
+- `scenarios-empty.png` не переснимался после `7a114cf`: диф не затрагивает пустой стенд, и снимок остаётся
+  доказательством того же кода страницы.
+- Поэтому `17:15`/`17:16` в разделе алертов — это сохранённые `detected_at` первого прохода, а не время снимка.
+  Текущий `alerts.png` снят в 17:30 и показывает «Последняя проверка: 23.11.2026 17:30».
+
 ## Как воспроизвести
 
 ### 1. Чистая схема, данные и сборка
@@ -123,13 +140,17 @@ agent-browser --session m5 screenshot docs/screenshots/m5/scenarios-390.png
 
 ### Алерты
 
-- Первый GET аналитика создал две строки: Яндекс Директ и TikTok, правило «Всплеск CAC», важность
-  «Предупреждение», окно **26.10.2026 — 22.11.2026**, «Последняя проверка: 23.11.2026 17:15».
+- Первый GET аналитика (первый проход) создал две строки: Яндекс Директ и TikTok, правило «Всплеск CAC»,
+  важность «Предупреждение», окно **26.10.2026 — 22.11.2026**, «Последняя проверка: 23.11.2026 17:15».
   `GET /api/v1/alerts` вернул тот же объект: `total: 2`, `chart.series` — 12 недель, заголовок
   «CAC: Яндекс Директ, −14,3% за 12 измеренных недель».
 - **Авто-пересчёт ровно раз в час.** Повторное открытие `/app/alerts` в той же сессии оставило
   `MAX(detected_at)` без изменений (`17:15:50`). Кнопка «Пересчитать» обновила его до `17:16:17`, то есть ручной
-  пересчёт не подавляется session-throttle.
+  пересчёт не подавляется session-throttle. Ручной POST отвечает 302 на `/app/alerts`; страница перезагружается,
+  остров заново получает `data-props`, и 12-недельный график CAC отрисовывается с новым stamp проверки.
+- **Повторный пересчёт не плодит строки.** После ручного пересчёта `SELECT count(*) FROM alerts` остался `2`;
+  уникальность `(channel_id, rule, period_start)` удержала те же две записи, а не создала третью. Это же
+  подтверждает интеграционный тест «two recalcs, count stable».
 - **Скрытие с причиной.** У TikTok (`alerts.id=1`) заполнено «Проверено: пик сезонный», POST на
   `/app/alerts/1/dismiss` → 302, строка стала `dismissed`, в активных осталась одна. В `audit_log` появилась
   запись `action=alert.dismiss, entity=alert, entity_id=1` с payload `{rule, reason, severity, channelId,
@@ -205,15 +226,45 @@ Builder по умолчанию: недельный бюджет **2 694,00 BYN*
 Чтобы получить настоящий пустой стенд, не трогая dev-базу:
 
 ```bash
-dropdb --if-exists metrika_m5_empty
-createdb metrika_m5_empty
-export DATABASE_URL="postgres://dimass@localhost:5432/metrika_m5_empty"
-npm run migrate
-npm run seed
-psql "$DATABASE_URL" -c "TRUNCATE daily_stats, customers, touchpoints, orders, alerts, scenarios RESTART IDENTITY CASCADE;"
-PORT=3001 DATABASE_URL="$DATABASE_URL" npm start    # второй процесс, http://localhost:3001
-# viewer входит, открывает /app/scenarios, скриншот; после проверки:
-kill $(lsof -ti:3001); dropdb metrika_m5_empty
+set -a; . ./.env; set +a
+EMPTY_DB=metrika_m5_empty
+# Любая роль с правом CREATEDB из ADMIN_DATABASE_URL; локальный пользователь ОС не нужен.
+EMPTY_DATABASE_URL="${EMPTY_DATABASE_URL:-postgres://postgres:postgres@localhost:5432/$EMPTY_DB}"
+psql "$ADMIN_DATABASE_URL" -c "DROP DATABASE IF EXISTS $EMPTY_DB WITH (FORCE)"
+psql "$ADMIN_DATABASE_URL" -c "CREATE DATABASE $EMPTY_DB"
+DATABASE_URL="$EMPTY_DATABASE_URL" npm run migrate
+DATABASE_URL="$EMPTY_DATABASE_URL" npm run seed
+psql "$EMPTY_DATABASE_URL" -c "TRUNCATE daily_stats, customers, touchpoints, orders, alerts, scenarios RESTART IDENTITY CASCADE;"
+PORT=3001 DATABASE_URL="$EMPTY_DATABASE_URL" npm start > /tmp/metrika-m5-empty.log 2>&1 &
+# второй процесс на http://localhost:3001; дождитесь {"status":"ok"} от /health
+```
+
+`ADMIN_DATABASE_URL` — та же роль с `CREATEDB`, что нужна `npm run db:setup`; если базы уже созданы вручную,
+подойдёт любой URL с правом создавать базы. Замените `postgres:postgres` на свою роль и пароль либо заранее
+экспортируйте `EMPTY_DATABASE_URL`.
+
+Скриншот пустого builder снимается так:
+
+```bash
+agent-browser --session m5e set viewport 1440 1000
+agent-browser --session m5e open http://localhost:3001/login
+agent-browser --session m5e fill 'input[name=email]' "viewer@metrika.by"
+agent-browser --session m5e fill 'input[name=password]' "Metrika2026!"
+agent-browser --session m5e find role button click --name "Войти"
+agent-browser --session m5e wait --url "**/app/dashboard**"
+agent-browser --session m5e open http://localhost:3001/app/scenarios
+agent-browser --session m5e wait --text "Пока нечего распределять"
+agent-browser --session m5e screenshot docs/screenshots/m5/scenarios-empty.png
+agent-browser --session m5e console
+agent-browser --session m5e errors
+
+# API на пустом стенде обязан остаться строгим
+agent-browser --session m5e eval '(async()=>{const r=await fetch("/api/v1/scenarios");return JSON.stringify({status:r.status,body:await r.text()})})()'
+agent-browser --session m5e close
+
+# Уборка в той же оболочке, где заданы EMPTY_DB и ADMIN_DATABASE_URL
+kill $(lsof -ti:3001)          # или завершите процесс из другого терминала
+psql "$ADMIN_DATABASE_URL" -c "DROP DATABASE IF EXISTS $EMPTY_DB WITH (FORCE)"
 ```
 
 Проверено: `/app/scenarios` → 200, «Нет данных для расчёта сценария», `data-island="scenarios"` отсутствует
@@ -266,6 +317,11 @@ agent-browser --session m5v open http://localhost:3000/app/scenarios
 | `scenarios-error.png` | 1440×1000 | Ответ 400 на 8 082,01 BYN: «Бюджет больше 3× текущего недельного бюджета в BYN» (plain text, без шаблона) |
 | `scenario-detail.png` | 1440×1000 | Сохранённый снимок «Зёрна: снимок M5»: автор, дата, отчётная дата, плитки и таблица «До и после» |
 | `scenarios-empty.png` | 1440×1000 | Пустой стенд: «Нет данных для расчёта сценария», объяснение и ссылка «Перейти к импорту» |
+
+`alerts.png` снят до снятия TikTok: таблица начинается ниже сгиба, поэтому строка TikTok на нём ещё активна и в
+кадр не попала. Доказательство dismiss — запись `dismissed` в БД и `alert.dismiss` в `audit_log`, а не снимок;
+отдельный crop таблицы после dismiss не делался. На повторном проходе 17:30 dismiss не выполнялся, поэтому снимок
+показывает две активные строки с «Последняя проверка: 17:30».
 
 Стенд после проверки возвращён к сиду (`npm run seed`, якорь 22.11.2026): алертов и сценариев 0, сессии
 сброшены. Снимки и этот журнал — доказательство прогона; временная база `metrika_m5_empty` удалена.

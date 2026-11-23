@@ -876,3 +876,24 @@ Still open:
 - **The §6.2 linear-curve exclusion is now written into the metrics spec.** The service already excluded
   `linear`/`no_data` from KKT and the UI already showed «Линейная кривая — без оптимума»; Task 8 added the missing
   paragraph so the behaviour is not mistaken for an oversight.
+
+### M5 deferrals — recorded so the review list is complete
+
+- **Per-channel caps and water-filling are not implemented.** The optimizer allocates one total weekly budget under a
+  single 3× cap and cannot express a minimum or maximum per channel. M5's owner decision 4 deliberately says no
+  per-channel caps; adding them later means extending the KKT feasibility set and the allocation contract, not just
+  adding slider limits. Water-filling (redistributing an unused channel's share) is a separate optimisation task.
+- **Scenarios cannot be edited or deleted, and there is no owner check.** The M5 API has list/detail/save only;
+  «Повторить» creates a new snapshot. There is no `scenarios.updated_at`, and any holder of `scenarios:manage` can
+  save under any name. Editing, deletion and an author/admin ownership rule are M6+ work because they need a new
+  mutation route, audit actions and a migration.
+- **The automatic alerts recalculation is throttled per session, not per user.** `alertsRecalculatedAt` lives in
+  `sessions`; two devices signed in as the same analyst can each recalculate once an hour. A true per-person limit
+  needs a `users` column or a separate throttle table. Manual «Пересчитать» is intentionally never throttled.
+- **`alerts.detected_at` means «last check», not «first detected».** Every recalculation overwrites it, so the table
+  cannot answer when a still-active rule first fired. Separate `first_detected_at`/`resolved_at` columns need the
+  next migration and a decision on whether re-opening a `resolved` row keeps the original first detection.
+- **Scenarios and alerts have no CSV export, although four datasets already export.** `export.repo.js` covers
+  channels, campaigns, `daily_stats` and orders; there is no `scenarios.csv` or `alerts.csv`. The owner's M5 ruling
+  keeps the existing datasets only, so an export of either decision screen (with its filters or snapshot JSON) is a
+  separate feature rather than a missing button in this milestone.
