@@ -121,6 +121,13 @@ describe('formatDateTimeRu', () => {
     expect(formatDateTimeRu(new Date('2026-01-01T00:00:00Z'))).toBe('01.01.2026\u00a003:00');
   });
 
+  it('rolls the date over midnight in Minsk and keeps UTC+3 in summer', () => {
+    // 21:00 UTC is already the next calendar day in Minsk; a UTC-based formatter would show 23.11 21:00.
+    expect(formatDateTimeRu('2026-11-23T21:00:00Z')).toBe('24.11.2026\u00a000:00');
+    expect(formatDateTimeRu('2026-07-15T21:00:00Z')).toBe('16.07.2026\u00a000:00');
+    expect(formatDateTimeRu('2026-07-15T10:05:00Z')).toBe('15.07.2026\u00a013:05');
+  });
+
   it('never emits the ICU-specific comma or narrow space of a locale formatter', () => {
     const label = formatDateTimeRu('2026-11-23T10:05:00Z');
     expect(label).not.toContain(',');
@@ -130,8 +137,20 @@ describe('formatDateTimeRu', () => {
   it('keeps a missing or malformed timestamp honest', () => {
     expect(formatDateTimeRu(null)).toBe('—');
     expect(formatDateTimeRu(undefined)).toBe('—');
+    expect(formatDateTimeRu('')).toBe('—');
+    expect(formatDateTimeRu('  ')).toBe('—');
     expect(formatDateTimeRu('not-a-date')).toBe('—');
     expect(formatDateTimeRu(new Date(Number.NaN))).toBe('—');
+  });
+
+  it('rejects a calendar date and non-Date, non-string input instead of inventing a time', () => {
+    // A bare YYYY-MM-DD has no time of day; rendering it as 00:00 or 03:00 would be a fabricated timestamp.
+    expect(() => formatDateTimeRu('2026-11-23')).toThrow(TypeError);
+    expect(() => formatDateTimeRu('2026-11-23')).toThrow(/calendar date/);
+    // Epoch numbers parsed by `new Date` would silently turn a count into a 1970 timestamp.
+    expect(() => formatDateTimeRu(0)).toThrow(TypeError);
+    expect(() => formatDateTimeRu(1_700_000_000_000)).toThrow(TypeError);
+    expect(() => formatDateTimeRu({ toISOString: () => '2026-11-23T10:05:00Z' })).toThrow(TypeError);
   });
 });
 

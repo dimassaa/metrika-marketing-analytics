@@ -770,3 +770,11 @@ Still open:
   data contract is relaxed (nullable acquisition channel), which is a product/spec decision, not a test fixture.
   The render branch itself stays covered by `screen-models.test.js` and `attribution-island.test.js`. M4 не меняет
   the invariant.
+
+## M5 Task 1 — decision config follow-ups
+
+- **The extrapolation warning must read `METRICS_CONFIG.scenarios.warnBudgetMultiplier`.** Metrics spec §6.3 defines
+  one threshold: warn when the new total weekly budget exceeds 2× the actual spend. A separate
+  `scenarios.extrapolationFactor` key was drafted in Task 1 but removed because it duplicated that number and its
+  comment invented a per-channel rule the spec does not contain. Task 7 (`buildScenariosScreen`) must use
+  `budget.warnAboveCents = currentWeeklyCents * warnBudgetMultiplier` and must not add a second 2× literal or key.

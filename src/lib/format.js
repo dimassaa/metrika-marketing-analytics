@@ -259,16 +259,33 @@ const dateTimeFormatter = new Intl.DateTimeFormat('en-US', {
   minute: '2-digit',
 });
 
+/** A bare calendar date is not an instant: it has no time of day, and treating it as midnight would invent one. */
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
 /**
  * Renders an instant as `DD.MM.YYYY HH:mm` in Europe/Minsk with a non-breaking space before the time.
  * Used by the audit journal and the import batch list, where the time of day matters.
- * @param {Date | string | null | undefined} value Instant; a string must be parseable by `new Date`.
- * @returns {string} Ready-to-display timestamp, or `—` for NULL and malformed input.
+ * @param {Date | string | null | undefined} value Instant, or a timestamp string `new Date` can parse.
+ * @returns {string} Ready-to-display timestamp, or `—` for NULL, an empty string and malformed input.
+ * @throws {TypeError} When the value is a calendar date (use `formatDateRu`) or neither a Date nor a string.
  */
 export function formatDateTimeRu(value) {
-  if (value === null || value === undefined || value === '') return EM_DASH;
+  if (value === null || value === undefined) return EM_DASH;
 
-  const instant = value instanceof Date ? value : new Date(value);
+  let instant;
+  if (value instanceof Date) {
+    instant = value;
+  } else if (typeof value === 'string') {
+    const text = value.trim();
+    if (text === '') return EM_DASH;
+    if (DATE_ONLY_PATTERN.test(text)) {
+      throw new TypeError(`formatDateTimeRu needs an instant, not a calendar date: ${JSON.stringify(value)}`);
+    }
+    instant = new Date(text);
+  } else {
+    throw new TypeError(`formatDateTimeRu expected a Date or a timestamp string, got ${typeof value}`);
+  }
+
   if (Number.isNaN(instant.getTime())) return EM_DASH;
 
   const parts = Object.fromEntries(dateTimeFormatter.formatToParts(instant).map((part) => [part.type, part.value]));

@@ -59,10 +59,8 @@ export const METRICS_CONFIG = Object.freeze({
     // One multiplier drives both the slider maximum and the server-side cap (decision 4). A second literal 3 in the
     // UI or the service would let the two disagree, so every caller must read this value.
     maxBudgetMultiplier: 3,
-    // Above twice the current weekly spend the forecast leaves the observed range and the UI warns about it.
+    // Metrics spec §6.3: the forecast is flagged as extrapolation when the new TOTAL weekly budget exceeds 2× the
+    // actual one. Every 2× honesty comparison reads this key.
     warnBudgetMultiplier: 2,
-    // Metrics spec §6.3 uses the same 2× honesty limit for a single channel's predicted spend; the separate key lets
-    // the extrapolation badge read the number without a second literal.
-    extrapolationFactor: 2,
   }),
 });

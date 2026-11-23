@@ -33,15 +33,17 @@ describe('alerts config', () => {
 });
 
 describe('scenarios config', () => {
-  it('caps the weekly budget with one shared multiplier, above which extrapolation is warned', () => {
+  it('caps the weekly budget with one shared multiplier and warns above twice the actual spend', () => {
     expect(METRICS_CONFIG.scenarios.maxBudgetMultiplier).toBe(3);
+    // The extrapolation warning has exactly one threshold; a second 2× key would be a second source of truth.
     expect(METRICS_CONFIG.scenarios.warnBudgetMultiplier).toBe(2);
-    expect(METRICS_CONFIG.scenarios.extrapolationFactor).toBe(2);
+    expect(METRICS_CONFIG.scenarios).not.toHaveProperty('extrapolationFactor');
   });
 });
 
 describe('decision config immutability', () => {
-  it('freezes every M5 subtree, including the ratio objects', () => {
+  it('freezes the whole tree and every M5 subtree, including the ratio objects', () => {
+    expect(Object.isFrozen(METRICS_CONFIG)).toBe(true);
     expect(Object.isFrozen(METRICS_CONFIG.saturation)).toBe(true);
     expect(Object.isFrozen(METRICS_CONFIG.alerts)).toBe(true);
     expect(Object.isFrozen(METRICS_CONFIG.scenarios)).toBe(true);
