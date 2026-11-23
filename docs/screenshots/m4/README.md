@@ -2,40 +2,154 @@
 
 Дата прогона: 23.11.2026. Стенд: `http://localhost:3000`, PostgreSQL 18, Node.js 26.13.0, Chromium через
 `agent-browser 0.41.1` (headless), сессии `m4` (наблюдатель) и `m4a` (аналитик). Якорь данных — **22.11.2026**
-(вчера на момент `npm run seed`). Демо-пароль всех аккаунтов — `Metrika2026!`. Десктопные снимки сделаны на
-`1440×1000`, мобильные — на `390×844`; размеры проверены через
+(вчера на момент `npm run seed`). Демо-пароль всех аккаунтов — `Metrika2026!`. Десктопные снимки — `1440×1000`,
+мобильные — `390×844`; полностраничный пустой дашборд — `1440×2922`. Размеры проверены через
 `identify -format "%f %wx%h" docs/screenshots/m4/*.png`.
 
 ## Как воспроизвести
 
+Команды рассчитаны на bash из корня репозитория. `.env` нужно загрузить в текущую оболочку: `psql` не читает
+`.env` сам, а `npm`-скрипты делают это через `dotenv`.
+
 ```bash
-# 1. Чистая схема, свежая сборка и данные
+# 1. Чистая схема, данные и сборка
+set -a; . ./.env; set +a          # DATABASE_URL, TEST_DATABASE_URL, ADMIN_DATABASE_URL
 npm run db:setup
 psql "$DATABASE_URL" -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
-npm run migrate            # 001–005 с нуля
-npm run migrate            # «database is up to date» — идемпотентно
-npm run seed               # якорь 22.11.2026
-npm run build              # пять входов Vite в public/assets
-npm start                  # http://localhost:3000, /health → 200
+npm run migrate                   # 001–005 с нуля
+npm run migrate                   # «database is up to date» — идемпотентно
+npm run seed                      # якорь 22.11.2026
+npm run build                     # пять входов Vite в public/assets
+npm start                         # http://localhost:3000, /health → 200
+```
 
+Проверка чистого пути в отдельной оболочке: `bash -lc 'set -a; . ./.env; set +a; psql "$DATABASE_URL" -c
+"select current_database(), (select count(*) from channels);"'` печатает `metrika_dev | 8`.
+
+```bash
 # 2. Полный набор тестов — до и после сборки
-npm test                   # с public/assets: 80 файлов, 863 теста
+npm test                          # с public/assets: 80 файлов, 864 теста
 mv public/assets /tmp/assets-backup
-npm test                   # без сборки: 853 passed, 10 skipped (build-output)
+npm test                          # без сборки: 854 passed, 10 skipped (build-output)
 rm -rf public/assets && mv /tmp/assets-backup public/assets
+```
 
-# 3. Браузер
+`npm test` не печатает предупреждений. Единственное предупреждение прогона — сообщение Vite
+`Some chunks are larger than 500 kB after minification` при `npm run build` (общий чанк React + Recharts:
+641,52 kB minified / 193,47 kB gzip). Это известный косметический пункт из `IMPROVEMENTS.md`, а не ошибка сборки:
+входы и страницы укладываются в бюджеты 210/250 KB gzip, проверяемые `build-output.test.js`.
+
+### Скриншоты: наблюдатель
+
+```bash
 agent-browser --session m4 set viewport 1440 1000
 agent-browser --session m4 open http://localhost:3000/login
 agent-browser --session m4 fill 'input[name=email]' "viewer@metrika.by"
 agent-browser --session m4 fill 'input[name=password]' "Metrika2026!"
 agent-browser --session m4 find role button click --name "Войти"
+agent-browser --session m4 wait --url "**/app/dashboard**"
+
+# Десктоп, по одному снимку на экран
+agent-browser --session m4 open http://localhost:3000/app/dashboard
+agent-browser --session m4 wait --text "CAC по неделям"
+agent-browser --session m4 screenshot docs/screenshots/m4/dashboard.png
+
+agent-browser --session m4 open http://localhost:3000/app/channels
+agent-browser --session m4 wait --text "Место"
+agent-browser --session m4 screenshot docs/screenshots/m4/channels.png
+
+agent-browser --session m4 open http://localhost:3000/app/channels/1
+agent-browser --session m4 wait --text "Метрики канала"
+agent-browser --session m4 screenshot docs/screenshots/m4/channel.png
+
+agent-browser --session m4 open http://localhost:3000/app/cohorts
+agent-browser --session m4 wait --text "Когорта"
+agent-browser --session m4 screenshot docs/screenshots/m4/cohorts.png
+
+agent-browser --session m4 open http://localhost:3000/app/attribution
+agent-browser --session m4 wait --text "Выручка по моделям"
+agent-browser --session m4 screenshot docs/screenshots/m4/attribution.png
+
+# Пустое состояние: несуществующий id канала сужает все пять виджетов до нуля.
+# --full обязателен: снимок должен включать раскрытую таблицу ниже сгиба.
+agent-browser --session m4 open "http://localhost:3000/app/dashboard?days=30&channelIds=999999"
+agent-browser --session m4 wait --text "Открыть таблицу данных"
+agent-browser --session m4 find text "Открыть таблицу данных" click --exact
+agent-browser --session m4 wait 500
+# Пауза нужна, чтобы React успел отрисовать строки таблицы до full-page снимка.
+agent-browser --session m4 screenshot docs/screenshots/m4/dashboard-empty.png --full
+
+# Клавиатурный фокус на summary первой таблицы-дубля
+agent-browser --session m4 open http://localhost:3000/app/dashboard
+agent-browser --session m4 wait --text "CAC по неделям"
+agent-browser --session m4 focus "figure details > summary"
+agent-browser --session m4 screenshot docs/screenshots/m4/focus.png
+
+# Мобильные снимки (viewport 390×844, не full page)
+agent-browser --session m4 set viewport 390 844
+agent-browser --session m4 open http://localhost:3000/app/dashboard
+agent-browser --session m4 wait --text "CAC по неделям"
+agent-browser --session m4 screenshot docs/screenshots/m4/mobile-dashboard.png
+
+agent-browser --session m4 open http://localhost:3000/app/channels
+agent-browser --session m4 wait --text "Место"
+agent-browser --session m4 screenshot docs/screenshots/m4/mobile-channels.png
+
+agent-browser --session m4 open http://localhost:3000/app/cohorts
+agent-browser --session m4 wait --text "Когорта"
+agent-browser --session m4 screenshot docs/screenshots/m4/mobile-cohorts.png
+```
+
+### Скриншоты: аналитик и M2-форма
+
+```bash
+agent-browser --session m4a set viewport 1440 1000
+agent-browser --session m4a open http://localhost:3000/login
+agent-browser --session m4a fill 'input[name=email]' "analyst@metrika.by"
+agent-browser --session m4a fill 'input[name=password]' "Metrika2026!"
+agent-browser --session m4a find role button click --name "Войти"
+agent-browser --session m4a wait --url "**/app/dashboard**"
+
+# Правка цели канала: значение меняется и возвращается обратно
+agent-browser --session m4a open http://localhost:3000/app/channels/1
+agent-browser --session m4a wait --text "Метрики канала"
+agent-browser --session m4a fill 'input[name=targetCacByn]' "46,50"
+agent-browser --session m4a find role button click --name "Сохранить"
+# в таблице целей: «Целевой CAC 46,50 BYN 43,71 BYN В цели»
+agent-browser --session m4a fill 'input[name=targetCacByn]' "45,00"
+agent-browser --session m4a find role button click --name "Сохранить"
+
+# Защита архива: у Instagram четыре активные кампании
+agent-browser --session m4a find role button click --name "Архивировать канал"
+# ожидаемо: «Изменение не применено. Нельзя архивировать канал с активными кампаниями…»,
+# URL /app/channels/1/archive, форма периода всё ещё ведёт на /app/channels/1
+agent-browser --session m4a wait 500
+# Chromium иногда отменяет следующий open, пока POST-ответ страницы-заглушки ещё «оседает»
+# (net::ERR_ABORTED); короткая пауза делает блок воспроизводимым.
+
+# Пустой временный канал: создать, проверить пустые состояния, архивировать и вернуть
+agent-browser --session m4a open http://localhost:3000/app/channels
+agent-browser --session m4a wait --text "Новый канал"
+agent-browser --session m4a fill 'input[name=code]' "m4_archive_e2e"
+agent-browser --session m4a fill 'input[name=name]' "M4 архив"
+agent-browser --session m4a select 'select[name=kind]' "paid"
+agent-browser --session m4a fill 'input[name=targetCacByn]' "50,00"
+agent-browser --session m4a fill 'input[name=targetRomiPct]' "100"
+agent-browser --session m4a find role button click --name "Добавить канал"
+agent-browser --session m4a wait --text "m4_archive_e2e"
+agent-browser --session m4a find role link click --name "M4 архив"
+agent-browser --session m4a wait --text "Метрики канала"
+agent-browser --session m4a find role button click --name "Архивировать канал"
+# ожидаемо: статус «В архиве», баннер, кнопка «Вернуть из архива»
+agent-browser --session m4a find role button click --name "Вернуть из архива"
+
+# Вернуть демо-стенд к детерминированному состоянию (канал m4_archive_e2e, аудит и правки исчезнут)
+npm run seed
 ```
 
 Сид: 8 каналов, 32 кампании, 4 000 клиентов, 9 436 заказов, 14 062 касания, 12 691 строка статистики, 4 цели;
-расход 151 404,24 BYN, выручка 1 134 186,98 BYN. После проверки архивного канала выполнен ещё один
-`npm run seed`, поэтому временный канал `m4_archive_e2e`, правки целей и записи аудита исчезли — их фиксируют
-только этот журнал и снимки.
+расход 151 404,24 BYN, выручка 1 134 186,98 BYN. Финальный `npm run seed` возвращает базу к этому состоянию и
+разлогинивает обе сессии; снимки и журнал остаются доказательством прогона.
 
 Строгий манифест проверяется отдельно: `tests/integration/assets-strict.test.js` запускает дочерний процесс с
 `NODE_ENV=production`, временно убирает настоящий манифест и утверждает, что `createApp` отказывается стартовать
@@ -102,9 +216,27 @@ agent-browser --session m4 find role button click --name "Войти"
   математике, распределение по каналам — нет.
 - `?model=bogus` и `?days=15` на странице отвечают 400 `text/plain` с русским сообщением — это зафиксированная
   асимметрия «страница терпима к фильтрам списка, но строга к периоду/модели», а не 500.
-- Пометка о неатрибутированной выручке на сиде не появляется: все 92 978,95 BYN периода атрибутированы
-  (`unattributedNote: null`). Ветка проверена юнит- и островными тестами, но не E2E — сид не создаёт заказ без
-  касания.
+
+#### Пометка о неатрибутированной выручке: ограничение модели, а не пропуск E2E
+
+Пометка `unattributedNote` появляется, когда `totalAttributedCents < totalRevenueCents`, то есть когда
+`attributeRevenue` пропустил заказ. Сервис пропускает заказ только при `firstChannelId === null` и отсутствии
+касаний в окне (`src/services/metrics/attribution.service.js`, ветка `if (order.firstChannelId === null) continue;`).
+В базе это состояние недостижимо:
+
+1. `customers.first_channel_id` объявлен `BIGINT NOT NULL` (`db/migrations/001_init.sql`), а
+   `attribution.repo.js` всегда делает `JOIN customers c` и берёт `c.first_channel_id` как fallback.
+2. Поэтому заказ без касаний всё равно атрибутируется каналу привлечения. Проверено интеграционным тестом
+   `tests/integration/attribution-screen.test.js` → «cannot leave revenue unattributed because every customer has an
+   acquisition channel»: он вставляет клиента и заказ без касаний, ждёт рост итога ровно на 10 000 копеек и
+   `unattributedNote: null`, а также утверждает `is_nullable = 'NO'` и ноль клиентов с `NULL` в БД.
+3. На сиде все 92 978,95 BYN периода атрибутированы (`unattributedNote: null`); SQL-проверка
+   `SELECT count(*) FROM customers WHERE first_channel_id IS NULL` возвращает 0.
+
+Следовательно, видимую пометку нельзя получить на текущих инвариантах без снятия `NOT NULL` (то есть без изменения
+схемы), поэтому снимка для неё нет. Это зафиксировано как ограничение спецификации в `IMPROVEMENTS.md`, а не как
+покрытый E2E сценарий. Ветка отрисовки проверена юнит-тестом `screen-models.test.js` и островным тестом
+`attribution-island.test.js`.
 
 ### Доступность, консоль, API, мобильные ширины
 
@@ -122,18 +254,22 @@ agent-browser --session m4 find role button click --name "Войти"
 
 ## Снимки
 
-| Файл | Разрешение | Что на снимке |
+Все десктопные снимки, кроме `dashboard-empty.png`, — **viewport 1440×1000**, а не вся страница; нижние секции
+на них не видны и описаны в тексте выше. Мобильные — **viewport 390×844**. Только `dashboard-empty.png` снят с
+флагом `--full`.
+
+| Файл | Разрешение | Что реально видно |
 |---|---|---|
-| `dashboard.png` | 1440×1000 | Дашборд по умолчанию: фильтр каналов, 4 KPI, вердикт, начало CAC-графика |
-| `mobile-dashboard.png` | 390×844 | Тот же дашборд в мобильной колонке: свёрнутое меню, KPI, фильтр |
-| `channels.png` | 1440×1000 | Рейтинг каналов: 8 строк, веса, спарклайны, ROMI-bar |
-| `passport.png` | 1440×1000 | Паспорт Instagram: метрики, цели, начало недельных графиков |
-| `cohorts.png` | 1440×1000 | Когорты: heatmap 12 месяцев, LTV12, кривая накопленного LTV |
-| `attribution.png` | 1440×1000 | Атрибуция: три модели, плитки итогов, grouped bars |
-| `mobile-channels.png` | 390×844 | Рейтинг каналов на мобильной ширине, таблица прокручивается внутри |
-| `mobile-cohorts.png` | 390×844 | Матрица удержания на 390 px, виден горизонтальный срез когорт |
-| `dashboard-empty.png` | 1440×2922 (full page) | Пустой дашборд `?channelIds=999999` с открытой таблицей данных |
-| `focus.png` | 1440×1000 | Клавиатурный фокус на `<summary>` таблицы-дубля под CAC-графиком |
+| `dashboard.png` | 1440×1000 | Верх дашборда: фильтр каналов, 4 KPI, вердикт и начало CAC-графика; остальные четыре графика ниже сгиба |
+| `mobile-dashboard.png` | 390×844 | Мобильный верх дашборда: свёрнутое меню «Разделы», topbar, фильтр и первые две KPI-плитки |
+| `channels.png` | 1440×1000 | Верх рейтинга: шапка таблицы и первые строки; спарклайны и ROMI-bar ниже сгиба |
+| `mobile-channels.png` | 390×844 | Рейтинг каналов на 390 px: первые строки внутри горизонтально прокручиваемой карточки |
+| `channel.png` | 1440×1000 | Верх паспорта Instagram: topbar, метрики, цели и начало CAC-графика; воронка, удержание и кампании ниже |
+| `cohorts.png` | 1440×1000 | Верх когорт: переключатель горизонта, шапка heatmap и 11 строк матрицы; кривая LTV ниже сгиба |
+| `mobile-cohorts.png` | 390×844 | Мобильные когорты: заголовок, горизонт 12 месяцев и срез матрицы (Когорта, Клиенты, 0, 1) |
+| `attribution.png` | 1440×1000 | Верх атрибуции: переключатель моделей, три плитки итогов, сводка и начало grouped bars |
+| `dashboard-empty.png` | 1440×2922 (full page) | Пустой дашборд с раскрытой первой таблицей данных; снят с `--full`, поэтому видны все пять виджетов |
+| `focus.png` | 1440×1000 | Viewport после `focus` на `<summary>`: внизу видна рамка фокуса «Показать таблицу» |
 
 Полный набор подтверждён на свежем процессе `npm start` после `npm run build`: пять экранов отдают свои острова
 (5 / 2 / 3 / 1 / 1 фигур, 7 / 10 / 5 / 1 / 1 SVG), консоль пуста, страница не переполняется. Серверный журнал за

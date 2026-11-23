@@ -463,7 +463,7 @@ Still open:
 - **The health report has no single snapshot across its four reads.** CAC, cohort LTV, attribution and the channel
   dimension are consecutive calls; a concurrent import can move one number between them, so rows can mix two
   moments. The cohort service already opens a repeatable-read snapshot for its own reads; extending one snapshot
-  across all four would require a shared transaction and is deferred to the concurrency pass.
+  across all four would require a shared transaction and is deferred to the concurrency pass. M4 не меняет.
 - **Attribution duplicates the ROMI formula inline.** `buildModelView` computes
   `centsPercent(revenueCents - spendCents, spendCents)` instead of `computeRomi`. The two agree today, but a change
   to guard digits or the zero-spend rule would drift. Route it through the shared helper when the attribution
@@ -471,19 +471,20 @@ Still open:
 - **Ranking normalises display-rounded criteria.** CAC is exact, but ROMI, LTV:CAC and the customer count come from
   the health row after display rounding, so `2.9996` and `3.0000` rank identically. This is a ranking semantics
   decision, not a quick fix: either pass exact guard values into the ranking or document that scores intentionally
-  use display precision.
+  use display precision. M4 не меняет.
 - **A free channel cannot be ranked.** CAC `0n` makes LTV:CAC undefined, so the channel is excluded as
   `missing_criterion` even when it acquired customers at zero cost. This follows the free-channel `no_data` ruling;
   if such a channel should rank, it needs an explicit "free" score rather than a fabricated ratio.
 - **`null` and `undefined` defaults are not uniform.** Some service inputs default with `??`, others check
   `=== null` only, so a partial view-model can leak `undefined` where a consumer tests for `null`. Unify the input
-  contract in the next metrics change.
-- **Ranking and dashboard stay last-touch for M4.** Both read the health default model. A model selector is a
-  possible M4 addition; until then a last-touch score must not be labelled as first-touch or linear.
-  `getRankingReport` already has the health service's `attributionModel` parameter to forward when that lands.
-- **Dashboard channel/campaign filters are an M4 service extension (BO-13), not an M3 defect.** The weekly query
-  already accepts `channelIds`; the summary does not expose filters. Wiring them is additive and should not create
-  a second aggregation path.
+  contract in the next metrics change. M4 не меняет.
+- **Ranking and dashboard stay last-touch for M4.** Both read the health default model; the attribution screen has a
+  model selector but the ranking report still forwards the default. A last-touch score must not be labelled as
+  first-touch or linear; `getRankingReport` already has the health service's `attributionModel` parameter to forward
+  when that lands. M4 не меняет.
+- **Dashboard filters are a BO-13 extension, not an M3 defect.** M4 added the channel filter through the existing
+  weekly-query parameter and the shared summary view-model. **M4 не меняет:** фильтр кампаний — он требует
+  campaign-scope в атрибуции, а не второй путь агрегации.
 - **Free channels legitimately show «Мало данных».** Email and SEO acquire customers at zero spend: CAC is `free`
   (`0n`) while ROMI is undefined and LTV:CAC has a zero denominator, so health is `no_data`. This is the literal
   metrics-spec ruling, pinned by the T7 integration suite; changing it needs an owner decision.
@@ -546,9 +547,9 @@ Still open:
 - **Goal metric labels are duplicated from `goals.service.js`.** The M2 labels are private, so
   `goals-progress.service.js` repeats the five Russian names. They must stay byte-identical; moving them into
   `src/lib/metrics-labels.js` is the obvious fix once M2's list is next touched.
-- **`getDashboardSummary` has no channel/campaign filter yet.** BO-13 mentions filters, but T6 only defines the
-  unfiltered view-model; the weekly query already accepts `channelIds`, so the filter can be added without a second
-  aggregation path.
+- **`getDashboardSummary` still has no campaign filter.** BO-13's channel filter shipped in M4 through the same
+  aggregation path; the campaign dimension remains missing because attribution has no campaign scope.
+  **M4 не меняет:** фильтр кампаний.
 
 ### M3 integration, golden numbers and performance (task 7 follow-ups)
 
@@ -572,7 +573,7 @@ Still open:
 - **The health report still loads the channel dimension twice.** `getAttributionReport` reads `channels` for its
   comparison rows, and `getChannelHealthReport` then calls `channelsRepository.listChannels()` again for names and
   sort order. The measured health budget is 12; forwarding the attribution dimension (or asking attribution for a
-  name map) would make it 11. Deferred because it changes the T3/T4 contract, not the T7 test.
+  name map) would make it 11. Deferred because it changes the T3/T4 contract, not the T7 test. M4 не меняет.
 - **The dashboard weekly test recomputes the attributed series instead of summing the dashboard buckets.** T6's
   `weeklySeries` exposes weekly CAC/ROMI but not weekly attributed revenue, so the test calls
   `getAttributionReport` for the same window and compares totals. That proves the window and model agree, but it does
@@ -639,7 +640,7 @@ Still open:
   questions, but the page is long; merging them or moving the management table behind an edit mode is an M5 decision.
 - **The spend/revenue chart is an extra third chart.** The T4 interface named `charts: { cac, romi }`; the grouped
   weekly spend/attributed-revenue bars reuse the existing series and add no query. The campaign-dimension stacked area
-  stays deferred because `listWeeklySeries` has no campaign dimension.
+  stays deferred because `listWeeklySeries` has no campaign dimension. M4 не меняет.
 - **Budget wording:** the 26-query passport budget is service-level (M2 detail, campaign list, M3 passport, cohort
   matrix). A real page request adds the single `getDataAnchor()` read, and the session store query is outside the
   count, matching the other M4 budgets.
@@ -654,7 +655,7 @@ Still open:
 - **The cohorts screen accepts `channelId` but does not render a channel picker.** This follows the M4 plan's
   deferred table: the API and page model narrow the matrix, and horizon links preserve the parameter, but the design
   §8 screen has no channel-control scenario. If the owner wants a visible filter later, it should be one GET select
-  that replays `horizon`; no server change is needed.
+  that replays `horizon`; no server change is needed. M4 не меняет.
 - **The heatmap table contract repeats the cohort rows in `table` and `cohorts`.** `table` is a ready `<table>` shape
   (header, row header, cell labels, heat classes) used by the island and JSON consumers; `cohorts` keeps the raw
   `retentionPct`/`cumLtvCents` for API clients. The duplication grows the JSON payload roughly by the matrix size
@@ -759,8 +760,13 @@ Still open:
   `.strict-test-backup` file and the next production start fails until it is renamed back. Injecting an optional
   `manifestPath` into `createApp` (test-only wiring) would remove the window, but that is a product-code change for
   one test and was deliberately not made in this evidence-only task.
-- **The unattributed-revenue note is unreachable on the seeded stand.** Every seeded order has at least one
-  touchpoint, so `unattributedNote` is always `null` and the E2E cannot exercise the visible warning. The branch is
-  covered by `screen-models.test.js` and the island test, and the API test asserts the null case; a browser pass would
-  need a fixture order without touchpoints. Recording it so a future fixture task does not mistake "not reachable in
-  E2E" for "not implemented".
+- **The unattributed-revenue note is a spec limitation, not an E2E gap.** `attributeRevenue` skips an order only when
+  it has no touchpoint in the window **and** `firstChannelId === null`. The schema makes that second condition
+  impossible: `customers.first_channel_id` is `BIGINT NOT NULL`, and `attribution.repo.js` always joins `customers`
+  and returns that column as the fallback. A fixture order without touchpoints is therefore still attributed to the
+  customer's acquisition channel. `tests/integration/attribution-screen.test.js` pins this with a real order
+  (+10 000 kopecks attributed, `unattributedNote: null`, `is_nullable = 'NO'`, zero NULL customers); the seeded stand
+  also has zero `NULL` channels, and all 92 978,95 BYN are attributed. The visible warning can only appear if the
+  data contract is relaxed (nullable acquisition channel), which is a product/spec decision, not a test fixture.
+  The render branch itself stays covered by `screen-models.test.js` and `attribution-island.test.js`. M4 не меняет
+  the invariant.

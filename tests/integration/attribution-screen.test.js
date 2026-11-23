@@ -182,6 +182,54 @@ describe('attribution screen', () => {
   });
 });
 
+describe('attribution completeness invariant', () => {
+  /**
+   * The warning branch exists in the view-model, but the database cannot reach it: `customers.first_channel_id` is
+   * NOT NULL, and `attributeRevenue` falls back to that acquisition channel whenever an order has no touchpoint in
+   * its window. An order whose customer has neither a touch nor a channel is the only shape that produces the note,
+   * and it requires a NULL the schema forbids. This test feeds the closest possible fixture — an order with no
+   * touchpoint at all — and proves it is still fully attributed, so the note cannot be claimed as E2E-covered.
+   */
+  it('cannot leave revenue unattributed because every customer has an acquisition channel', async () => {
+    const agent = await signedIn();
+    const before = extractDataProps((await agent.get('/app/attribution')).text, 'attribution');
+
+    const customer = await pool.query(
+      `INSERT INTO customers (external_id, first_channel_id, acquired_at, first_order_at)
+       VALUES ('m4_note_customer', 1, '2026-11-01T09:00:00Z', '2026-11-10T10:00:00Z')
+       RETURNING id::text AS id`,
+    );
+    const customerId = customer.rows[0].id;
+    await pool.query(
+      `INSERT INTO orders (external_id, customer_id, occurred_at, revenue_cents, margin_cents)
+       VALUES ('m4_note_order', $1::bigint, '2026-11-10T10:00:00Z', 10000, 4000)`,
+      [customerId],
+    );
+
+    try {
+      const after = extractDataProps((await agent.get('/app/attribution')).text, 'attribution');
+      const addedCents = BigInt(after.summary.totalAttributedCents) - BigInt(before.summary.totalAttributedCents);
+
+      expect(addedCents).toBe(10000n);
+      expect(after.unattributedNote).toBeNull();
+
+      const column = await pool.query(
+        `SELECT is_nullable
+           FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'customers' AND column_name = 'first_channel_id'`,
+      );
+      expect(column.rows).toEqual([{ is_nullable: 'NO' }]);
+      const nullChannels = await pool.query(
+        'SELECT count(*)::int AS count FROM customers WHERE first_channel_id IS NULL',
+      );
+      expect(nullChannels.rows[0].count).toBe(0);
+    } finally {
+      await pool.query('DELETE FROM orders WHERE external_id = $1', ['m4_note_order']);
+      await pool.query('DELETE FROM customers WHERE external_id = $1', ['m4_note_customer']);
+    }
+  });
+});
+
 describe('attribution screen on an empty stand', () => {
   beforeAll(async () => {
     await resetTestDatabase();
