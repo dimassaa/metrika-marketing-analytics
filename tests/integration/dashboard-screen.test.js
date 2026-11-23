@@ -67,6 +67,38 @@ describe('dashboard screen', () => {
     expect(extractDataProps(page.text)).toEqual(api.body);
   });
 
+  it('renders the channel filter form, keeps selected values and the period', async () => {
+    const { rows } = await pool.query('SELECT id::text AS id FROM channels ORDER BY code LIMIT 2');
+    const ids = rows.map((row) => row.id);
+
+    const agent = await signedIn();
+    const res = await agent.get(`/app/dashboard?days=90&channelIds=${ids.join(',')}`);
+
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('name="channelIds"');
+    expect(res.text).toContain('multiple');
+    expect(res.text).toContain('name="days" value="90"');
+    for (const id of ids) {
+      // A filtered page must reopen with the same channels ticked, not with an empty multi-select.
+      expect(res.text).toContain(`<option value="${id}" selected>`);
+    }
+    expect(res.text).toContain('Сбросить');
+    expect(res.text).toContain('href="/app/dashboard?days=90"');
+  });
+
+  it('keeps the page and the API identical under a channel filter', async () => {
+    const { rows } = await pool.query('SELECT id::text AS id FROM channels ORDER BY code LIMIT 2');
+    const ids = rows.map((row) => row.id);
+
+    const agent = await signedIn();
+    const page = await agent.get(`/app/dashboard?days=30&channelIds=${ids.join(',')}`);
+    const api = await agent.get(`/api/v1/dashboard?days=30&channelIds=${ids.join(',')}`);
+
+    expect(page.status).toBe(200);
+    expect(api.status).toBe(200);
+    expect(extractDataProps(page.text)).toEqual(api.body);
+  });
+
   it('accepts a comma-separated filter and a repeated filter as the same screen', async () => {
     const { rows } = await pool.query('SELECT id::text AS id FROM channels ORDER BY code LIMIT 2');
     const [first, second] = rows.map((row) => row.id);
@@ -102,6 +134,33 @@ describe('dashboard screen', () => {
     expect(BigInt(filteredProps.kpis.spendCents)).toBe(rowSpend);
   });
 
+  it('recomputes CAC from the selected channel spend and customers', async () => {
+    const { rows } = await pool.query(
+      `SELECT id::text AS id FROM channels
+        WHERE id IN (SELECT DISTINCT first_channel_id FROM customers WHERE first_channel_id IS NOT NULL)
+        ORDER BY code LIMIT 1`,
+    );
+    const id = rows[0].id;
+
+    const agent = await signedIn();
+    const res = await agent.get(`/app/dashboard?days=30&channelIds=${id}`);
+
+    expect(res.status).toBe(200);
+    const props = extractDataProps(res.text);
+    const row = props.channels[0];
+
+    expect(props.channels).toHaveLength(1);
+    expect(props.kpis.spendCents).toBe(row.spendCents);
+    expect(props.kpis.newCustomers).toBe(row.newCustomers);
+    expect(props.kpis.cacCents).toBe(row.cacCents);
+    // CAC is the quotient of the summed spend and customers, not an independently rounded average.
+    const customers = BigInt(row.newCustomers);
+    const expectedCac = (BigInt(row.spendCents) * 2n + customers) / (2n * customers);
+    expect(BigInt(props.kpis.cacCents)).toBe(expectedCac);
+    expect(props.charts.channelSpend.series).toHaveLength(1);
+    expect(props.charts.cacLtv.table.rows).toHaveLength(1);
+  });
+
   it('serves a 180-day window when days=180 is requested', async () => {
     const agent = await signedIn();
 
@@ -134,6 +193,16 @@ describe('dashboard screen', () => {
     expect(bad.status).toBe(400);
     expect(empty.status).toBe(400);
   });
+
+  it('rejects days together with from or to at the window boundary', async () => {
+    const agent = await signedIn();
+
+    const from = await agent.get('/app/dashboard?days=180&from=2026-10-01');
+    const to = await agent.get('/app/dashboard?days=30&to=2026-11-21');
+
+    expect(from.status).toBe(400);
+    expect(to.status).toBe(400);
+  });
 });
 
 describe('dashboard on an empty stand', () => {
@@ -161,6 +230,15 @@ describe('dashboard on an empty stand', () => {
     // Twelve weeks of measured zero spend/revenue: the arrows are flat at zero, not "no data". The empty-state copy
     // would claim nothing was measured, which is false on this stand.
     expect(props.charts.spendRevenue.hasData).toBe(true);
+    // Spend-by-channel is measured zero on every channel: bars at zero are honest data, not an empty state.
+    expect(props.charts.channelSpend.hasData).toBe(true);
+    expect(props.charts.channelSpend.series.every((row) => row.spend === 0)).toBe(true);
+    // No channel has both CAC and LTV12, so the scatter says so and keeps a dash per channel.
+    expect(props.charts.cacLtv.hasData).toBe(false);
+    expect(props.charts.cacLtv.series).toEqual([]);
+    expect(props.charts.cacLtv.caption).toContain('нет каналов с CAC и LTV12');
+    expect(props.charts.cacLtv.table.rows.length).toBeGreaterThan(0);
+    expect(props.charts.cacLtv.table.rows.every((row) => row.cells.cac === '—')).toBe(true);
     expect(res.text).not.toContain('NaN');
   });
 });

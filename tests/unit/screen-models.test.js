@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { addDays } from '../../src/lib/dates.js';
-import { buildDashboardScreen, buildPeriodControl } from '../../src/services/metrics/screen-models.js';
+import { buildChannelFilterControl, buildDashboardScreen, buildPeriodControl } from '../../src/services/metrics/screen-models.js';
 
 const LAST_WEEK = '2026-11-09';
 const FIRST_WEEK = addDays(LAST_WEEK, -7 * 11);
@@ -22,7 +22,38 @@ function summaryWith({
   },
   verdict = { status: 'healthy', label: 'В норме', reason: 'Расходы окупаются.' },
   weeklySeries,
-  channels = [],
+  channels = [
+    {
+      channelId: '1',
+      code: 'instagram',
+      name: 'Instagram',
+      spendCents: '300000',
+      revenueCents: '600000',
+      newCustomers: 6,
+      cacCents: '50000',
+      ltv12Cents: '150000',
+    },
+    {
+      channelId: '2',
+      code: 'google',
+      name: 'Google Ads',
+      spendCents: '100000',
+      revenueCents: '200000',
+      newCustomers: 2,
+      cacCents: '50000',
+      ltv12Cents: '40000',
+    },
+    {
+      channelId: '3',
+      code: 'offline',
+      name: 'Офлайн',
+      spendCents: '0',
+      revenueCents: '0',
+      newCustomers: 0,
+      cacCents: null,
+      ltv12Cents: null,
+    },
+  ],
   availableChannels = [
     { channelId: '1', code: 'instagram', name: 'Instagram' },
     { channelId: '2', code: 'google', name: 'Google Ads' },
@@ -73,13 +104,15 @@ describe('dashboard screen model', () => {
     expect(screen.period.label).toBe('30 дней');
   });
 
-  it('builds three charts with data, a factual caption and a duplicate table', () => {
+  it('builds five charts with data, a factual caption and a duplicate table', () => {
     const screen = buildDashboardScreen({ summary: summaryWith() });
 
-    expect(Object.keys(screen.charts)).toEqual(['cac', 'romi', 'spendRevenue']);
+    expect(Object.keys(screen.charts)).toEqual(['cac', 'romi', 'spendRevenue', 'channelSpend', 'cacLtv']);
     expect(screen.charts.cac.hasData).toBe(true);
     expect(screen.charts.romi.hasData).toBe(true);
     expect(screen.charts.spendRevenue.hasData).toBe(true);
+    expect(screen.charts.channelSpend.hasData).toBe(true);
+    expect(screen.charts.cacLtv.hasData).toBe(true);
 
     expect(screen.charts.cac.unit).toBe('BYN');
     expect(screen.charts.romi.unit).toBe('%');
@@ -170,9 +203,67 @@ describe('dashboard screen model', () => {
     expect(negative.kpis.items.find((item) => item.id === 'romi').tone).toBe('bad');
   });
 
+  it('sorts channel spend by amount and states the leader and its share', () => {
+    const screen = buildDashboardScreen({ summary: summaryWith() });
+    const chart = screen.charts.channelSpend;
+
+    expect(chart.series.map((row) => row.name)).toEqual(['Instagram', 'Google Ads', 'Офлайн']);
+    expect(chart.series[0]).toMatchObject({ channelId: '1', spend: 300000, highlight: true });
+    expect(chart.series[1].highlight).toBe(false);
+    expect(chart.caption).toContain('3 канала');
+    expect(chart.caption).toContain('лидер Instagram, 3 000,00 BYN (75% расхода)');
+    expect(chart.table.rows).toHaveLength(3);
+    expect(chart.table.rows[2].cells).toEqual({ channel: 'Офлайн', spend: '0,00' });
+  });
+
+  it('plots only complete CAC/LTV pairs while the duplicate table keeps every channel', () => {
+    const screen = buildDashboardScreen({ summary: summaryWith() });
+    const chart = screen.charts.cacLtv;
+
+    expect(chart.series.map((point) => point.name)).toEqual(['Instagram', 'Google Ads']);
+    expect(chart.series[0]).toMatchObject({ cac: 50000, ltv: 150000, newCustomers: 6 });
+    expect(chart.caption).toContain('3 канала');
+    expect(chart.caption).toContain('2 с CAC и LTV12 · LTV выше CAC у 1');
+
+    expect(chart.table.rows).toHaveLength(3);
+    expect(chart.table.rows.find((row) => row.key === '3').cells).toEqual({
+      channel: 'Офлайн',
+      cac: '—',
+      ltv: '—',
+      customers: '0',
+    });
+  });
+
+  it('keeps the honest empty scatter: no complete pair means no bubble and a table of dashes', () => {
+    const channels = summaryWith().channels.map((channel) => ({
+      ...channel,
+      cacCents: null,
+      ltv12Cents: null,
+    }));
+    const screen = buildDashboardScreen({ summary: summaryWith({ channels }) });
+
+    expect(screen.charts.cacLtv.hasData).toBe(false);
+    expect(screen.charts.cacLtv.series).toEqual([]);
+    expect(screen.charts.cacLtv.caption).toContain('нет каналов с CAC и LTV12');
+    expect(screen.charts.cacLtv.table.rows).toHaveLength(3);
+    expect(screen.charts.cacLtv.table.rows.every((row) => row.cells.cac === '—')).toBe(true);
+    // Spend is still measured, so its bars are not empty merely because the scatter is.
+    expect(screen.charts.channelSpend.hasData).toBe(true);
+  });
+
   it('carries the channel filter and the full option list', () => {
     const summary = summaryWith({
-      channels: [{ channelId: '1', code: 'instagram', name: 'Instagram' }],
+      channels: [
+        {
+          channelId: '1',
+          code: 'instagram',
+          name: 'Instagram',
+          spendCents: '100000',
+          newCustomers: 2,
+          cacCents: '50000',
+          ltv12Cents: '150000',
+        },
+      ],
     });
     const screen = buildDashboardScreen({ summary, channelIds: ['1'] });
 
@@ -215,5 +306,38 @@ describe('period control', () => {
     const control = buildPeriodControl({ query: { from: '2026-10-01', to: '2026-10-31' } });
 
     expect(control.preserve).toEqual([]);
+  });
+});
+
+describe('channel filter control', () => {
+  const options = [
+    { value: '1', label: 'Instagram', selected: true },
+    { value: '2', label: 'Google Ads', selected: false },
+  ];
+
+  it('builds a GET form that keeps the period and resets only the channel selection', () => {
+    const control = buildChannelFilterControl({ options, days: 90 });
+
+    expect(control.action).toBe('/app/dashboard');
+    expect(control.days).toBe(90);
+    expect(control.active).toBe(true);
+    expect(control.size).toBe(2);
+    expect(control.selectedCount).toBe(1);
+    expect(control.total).toBe(2);
+    expect(control.resetHref).toBe('/app/dashboard?days=90');
+  });
+
+  it('is inactive and caps the multi-select height for a long channel list', () => {
+    const control = buildChannelFilterControl({
+      options: Array.from({ length: 8 }, (_, index) => ({
+        value: String(index + 1),
+        label: `Канал ${index + 1}`,
+        selected: false,
+      })),
+      days: 30,
+    });
+
+    expect(control.active).toBe(false);
+    expect(control.size).toBe(6);
   });
 });

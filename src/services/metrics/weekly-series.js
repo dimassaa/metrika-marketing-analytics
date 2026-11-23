@@ -93,9 +93,13 @@ export function buildWeeklySeries({ firstWeekStart, weeks, weeklyRows = [], attr
     weeklyRows.map((row) => [row.weekStart, { spendCents: row.spendCents, newCustomers: row.newCustomers }]),
   );
   /** @type {Map<string, bigint>} */
-  const revenueByWeek = new Map(
-    attributedRows.map((row) => [row.weekStart, centsFromDb(row.revenueCents) ?? 0n]),
-  );
+  const revenueByWeek = new Map();
+  for (const row of attributedRows) {
+    // Summation, not last-wins: the contract allows a source to split a week into more than one row, and the week's
+    // attributed revenue must be the sum of its shares. With the current one-row-per-week source this is identity.
+    const revenueCents = centsFromDb(row.revenueCents) ?? 0n;
+    revenueByWeek.set(row.weekStart, (revenueByWeek.get(row.weekStart) ?? 0n) + revenueCents);
+  }
 
   const series = [];
   for (let offset = 0; offset < weeks; offset += 1) {

@@ -1,7 +1,7 @@
 import { buildShellLocals } from './app.controller.js';
 import { resolvePeriod } from '../lib/periods.js';
 import { parseQuery } from '../lib/validation.js';
-import { buildPeriodControl } from '../services/metrics/screen-models.js';
+import { buildChannelFilterControl, buildPeriodControl } from '../services/metrics/screen-models.js';
 import { dashboardQuerySchema } from '../validators/metrics.schema.js';
 
 /**
@@ -55,7 +55,7 @@ export function createDashboardController({ services, screenModels, referenceRep
      * @type {import('express').RequestHandler}
      */
     async page(req, res) {
-      const { query, anchor, screen } = await load(req);
+      const { query, anchor, period, screen } = await load(req);
 
       res.set('Cache-Control', 'no-store');
       res.render('pages/dashboard', {
@@ -63,6 +63,7 @@ export function createDashboardController({ services, screenModels, referenceRep
         model: screen,
         islandEntries: ['dashboard'],
         periodControl: buildPeriodControl({ query }),
+        filterControl: buildChannelFilterControl({ options: screen.channelOptions, days: period.days }),
         currentPath: `${req.baseUrl}${req.path}`,
       });
     },

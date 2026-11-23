@@ -79,6 +79,26 @@ describe('buildWeeklySeries', () => {
     expect(series[0].cacCents).toBeNull();
   });
 
+  it('sums every attributed row of a week and labels the missing weeks as a measured zero', () => {
+    const { firstWeekStart } = resolveWeekRange('2026-11-22', 2);
+
+    const series = buildWeeklySeries({
+      firstWeekStart,
+      weeks: 2,
+      weeklyRows: [],
+      attributedRows: [
+        { weekStart: '2026-11-16', revenueCents: '50000' },
+        { weekStart: '2026-11-16', revenueCents: '90000' },
+      ],
+    });
+
+    expect(series[1].attributedCents).toBe('140000');
+    expect(series[1].attributedLabel).toBe('1 400,00');
+    // No attributed row for the first week is a measured zero, not a missing bucket.
+    expect(series[0].attributedCents).toBe('0');
+    expect(series[0].attributedLabel).toBe('0,00');
+  });
+
   it('rejects an unbounded week count', () => {
     expect(() => buildWeeklySeries({ firstWeekStart: '2026-11-16', weeks: 53 })).toThrow(ValidationError);
   });

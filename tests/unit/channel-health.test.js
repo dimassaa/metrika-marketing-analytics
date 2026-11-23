@@ -103,6 +103,21 @@ describe('channel health filter', () => {
     expect(report.blended.cacCents).toBe('100');
   });
 
+  it('keeps the unfiltered report when no filter is passed', async () => {
+    const { service, ltvService } = serviceWith();
+
+    const report = await service.getChannelHealthReport({ anchor: ANCHOR });
+
+    // Rows are ordered by channel code, not by id: google before instagram.
+    expect(report.rows.map((row) => row.channelId)).toEqual(['2', '1']);
+    expect(report.blended).toMatchObject({ spendCents: '300', revenueCents: '600', newCustomers: 3 });
+    expect(ltvService.getChannelLtv).toHaveBeenCalledWith({
+      anchor: ANCHOR,
+      horizonMonths: 12,
+      channelIds: null,
+    });
+  });
+
   it('returns honest zeros for a filter that matches no channel', async () => {
     const { service } = serviceWith({ ltvBlended: { ltvCents: null } });
 

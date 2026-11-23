@@ -600,22 +600,21 @@ Still open:
   integer basis points), but the visible `Σ contributions` can differ from the score by up to one hundredth after
   per-term rounding. T7 asserts both the exact sum and a `0.05` display tolerance; a UI that prints the sum must use
   the same tolerance rather than an equality check.
-- **The dashboard bundle fits the page budget after the T1 review; the entry budget is raised to 210 KB.** The
-  production build is one file: 699 481 B raw / **205 225 B gzip** (`gzip -9`; Vite reports 208.37 kB with its own
-  gzip). That is the entry and the whole page at once: it clears the 250 KB page budget by about 44 KB and the
-  amended 210 KB entry budget by about 10 KB. The old 160 KB entry figure was unrealistic for React 19 + Recharts
-  3.11: no unused Recharts component is imported, a deep-import experiment produced the same size, and the remaining
-  weight is the React/Recharts core. The earlier 277 KB number came from a development build: `.env` sets
-  `NODE_ENV=development`, Vite loaded it, and the bundle carried react-dom's development branch plus the `jsxDEV`
-  transform. `vite.config.js` now stops Vite reading the Express `.env` (`envDir: false`), derives `NODE_ENV` from
-  the build mode, and defines it explicitly. T7 should re-measure as planned; a later screen that pushes past
-  210 KB still needs a decision (vendor split or lazy charts), not a silent test edit.
+- **The dashboard bundle fits the page budget; the entry budget is raised to 210 KB and is now nearly full.** The
+  T2 build is one production file: 718 510 B raw / **209 664 B gzip** (`gzip -9`; Vite reports 212.80 kB with its own
+  gzip). That is the entry and the whole page at once: it clears the 250 KiB page budget by about 45 KiB but the
+  amended 210 KiB entry budget by only about 5 KiB, because T2 added the two per-channel charts. The old 160 KB entry
+  figure was unrealistic for React 19 + Recharts 3.11: no unused Recharts component is imported and a deep-import
+  experiment produced the same size. The next dashboard addition needs a decision (vendor split or lazy charts), not
+  a silent budget edit; T7 must re-measure.
 - **`formatCompactCents` follows the metrics spec, not the plan's arithmetic example.** `12_340_000` kopecks is
   123 400 BYN, so the axis reads `123,4 тыс.`, not the plan's `12,3 тыс.` (that would be `1_234_000` kopecks).
   The unit test pins both the thousands and the millions boundary; the plan example should be corrected in T7.
-- **The dashboard channel filter has no form control yet.** T1 accepts `channelIds` on the page and API, filters the
-  blended row and every weekly source, and ships the full `channelOptions` list in the props. The `<select multiple>`
-  belongs to T2's page frame; adding it now would duplicate a control T2 rewrites.
+- **The dashboard filter form keeps `days` but not an explicit `from`/`to`.** The page control submits the multi-select
+  plus a hidden `days`; an API-only reader that opens a bookmarked explicit range and then applies a channel filter
+  gets the same-length `days` window instead of that exact range. The alternative — a hidden `from`/`to` pair —
+  would be a guaranteed 400 because the schema forbids `days` with either bound, so the current behaviour is the
+  least surprising one; a UI that exposes explicit ranges needs a separate control.
 - **Two channel repository instances are alive in one app.** M2's channel controller builds its own
   `channelsRepository`, while the metrics composition root builds another. The instances are stateless wrappers
   around one pool, so this costs no connection and no state; moving M2 onto the module is T3's cleanup, together

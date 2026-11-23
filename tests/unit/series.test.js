@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   hasPlottableData,
+  toCacLtvPoints,
   toCacPoints,
+  toChannelSpendPoints,
   toRomiPoints,
   toSpendRevenuePoints,
 } from '../../src/lib/series.js';
@@ -34,5 +36,27 @@ describe('chart points', () => {
   it('refuses a malformed money string instead of plotting NaN', () => {
     expect(() => toCacPoints([{ cacCents: 'abc' }])).toThrow(TypeError);
     expect(() => toSpendRevenuePoints([{ spendCents: '1.5', attributedCents: '0' }])).toThrow(TypeError);
+  });
+
+  it('converts channel spend and keeps a missing CAC or LTV as null for the scatter', () => {
+    expect(
+      toChannelSpendPoints([{ channelId: '1', name: 'Instagram', spendCents: '300000' }]),
+    ).toEqual([{ channelId: '1', name: 'Instagram', spend: 300000 }]);
+
+    expect(
+      toCacLtvPoints([
+        {
+          channelId: '1',
+          name: 'Instagram',
+          cacCents: '50000',
+          ltv12Cents: '150000',
+          newCustomers: 6,
+        },
+        { channelId: '2', name: 'Google Ads', cacCents: '50000', ltv12Cents: null, newCustomers: 2 },
+      ]),
+    ).toEqual([
+      { channelId: '1', name: 'Instagram', cac: 50000, ltv: 150000, newCustomers: 6 },
+      { channelId: '2', name: 'Google Ads', cac: 50000, ltv: null, newCustomers: 2 },
+    ]);
   });
 });

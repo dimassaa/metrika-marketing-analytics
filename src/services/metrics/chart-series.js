@@ -1,5 +1,12 @@
-import { formatCentsToByn, formatRomi } from '../../lib/format.js';
-import { hasPlottableData, toCacPoints, toRomiPoints, toSpendRevenuePoints } from '../../lib/series.js';
+import { formatCentsToByn, formatInteger, formatRomi } from '../../lib/format.js';
+import {
+  hasPlottableData,
+  toCacPoints,
+  toCacLtvPoints,
+  toChannelSpendPoints,
+  toRomiPoints,
+  toSpendRevenuePoints,
+} from '../../lib/series.js';
 
 /**
  * Builds the chart half of a screen model: data, a factual caption and the duplicate table.
@@ -29,18 +36,23 @@ export function daysLabel(days) {
   return `${days} дней`;
 }
 
+/** @param {number} count */
+export function channelsLabel(count) {
+  const tail = count % 100;
+  const last = count % 10;
+  if (tail >= 11 && tail <= 14) return `${count} каналов`;
+  if (last === 1) return `${count} канал`;
+  if (last >= 2 && last <= 4) return `${count} канала`;
+  return `${count} каналов`;
+}
+
 /**
  * @param {string[] | null} channelIds Active filter.
  * @returns {string} ` · выбрано 2 канала`, or an empty string for "all channels".
  */
 function filterSuffix(channelIds) {
   if (!channelIds || channelIds.length === 0) return '';
-  const count = channelIds.length;
-  const tail = count % 100;
-  const last = count % 10;
-  const noun =
-    tail >= 11 && tail <= 14 ? 'каналов' : last === 1 ? 'канал' : last >= 2 && last <= 4 ? 'канала' : 'каналов';
-  return ` · выбрано ${count} ${noun}`;
+  return ` · выбрано ${channelsLabel(channelIds.length)}`;
 }
 
 /**
@@ -140,7 +152,8 @@ export function buildRomiChart({ weeklySeries, channelIds = null }) {
  *
  * @param {{ weeklySeries: object[], channelIds?: string[] | null }} input
  * @returns {object}
- */export function buildSpendRevenueChart({ weeklySeries, channelIds = null }) {
+ */
+export function buildSpendRevenueChart({ weeklySeries, channelIds = null }) {
   const points = toSpendRevenuePoints(weeklySeries);
   // Spend and attributed revenue are always measured (a string, including `0`), so a non-empty series is data even
   // when every value is zero. Treating a measured zero as "no data" would hide the honest answer: the period spent
@@ -176,6 +189,118 @@ export function buildRomiChart({ weeklySeries, channelIds = null }) {
           week: bucket.weekLabel,
           spend: formatCentsToByn(bucket.spendCents),
           revenue: formatCentsToByn(bucket.attributedCents),
+        },
+      })),
+    },
+  };
+}
+
+/**
+ * Horizontal spend-by-channel bars. The rows are `health.rows` of the dashboard summary, already filtered by the
+ * active channel selection; this chart adds no request and no second source of truth.
+ *
+ * The caption names the leader and its share, so the card answers "куда уходят деньги" before the reader decodes
+ * the bars. With no filter the largest channel is highlighted; with a filter every shown channel is selected, so
+ * highlighting is uniform.
+ *
+ * @param {{ channels: object[], channelIds?: string[] | null }} input `channels` are JSON-safe health rows.
+ * @returns {object}
+ */
+export function buildChannelSpendChart({ channels, channelIds = null }) {
+  const selected = channelIds && channelIds.length > 0 ? new Set(channelIds) : null;
+  const rows = toChannelSpendPoints(channels).sort(
+    (left, right) => right.spend - left.spend || left.name.localeCompare(right.name, 'ru'),
+  );
+  const total = rows.reduce((sum, row) => sum + row.spend, 0);
+  const top = rows[0] ?? null;
+  const count = channelsLabel(rows.length);
+
+  let conclusion;
+  if (top === null) conclusion = 'нет каналов для расхода';
+  else if (total === 0) conclusion = 'расход нулевой';
+  else {
+    const share = Math.round((top.spend * 100) / total);
+    conclusion = `лидер ${top.name}, ${formatCentsToByn(top.spend)} BYN (${share}% расхода)`;
+  }
+
+  const detail = `${count} · ${conclusion}`;
+
+  return {
+    id: 'channel-spend',
+    title: 'Расход по каналам',
+    caption: captionOf('Расход по каналам', detail),
+    ariaLabel: `Расход по каналам: ${detail}`,
+    unit: 'BYN',
+    // A channel is a measured zero until its spend row says otherwise: only a filter with no matching channel has
+    // nothing to draw. This mirrors the weekly spend/revenue decision.
+    hasData: rows.length > 0,
+    series: rows.map((row, index) => ({
+      ...row,
+      highlight: selected === null ? index === 0 : selected.has(row.channelId),
+    })),
+    table: {
+      columns: [
+        { key: 'channel', label: 'Канал', numeric: false },
+        { key: 'spend', label: 'Расход, BYN', numeric: true },
+      ],
+      rows: rows.map((row) => ({
+        key: row.channelId,
+        cells: { channel: row.name, spend: formatCentsToByn(row.spend) },
+      })),
+    },
+  };
+}
+
+/**
+ * CAC×LTV12 scatter, one bubble per channel. Both axes are money in BYN and the bubble size is the channel's new
+ * customer count; there is deliberately no third axis.
+ *
+ * A channel missing CAC or LTV12 is not plotted (a point would claim a measurement that does not exist) but stays
+ * in the duplicate table with a dash, so the reader can see which channels were filtered out of the picture and why.
+ *
+ * @param {{ channels: object[], channelIds?: string[] | null }} input `channels` are JSON-safe health rows.
+ * @returns {object}
+ */
+export function buildCacLtvScatter({ channels, channelIds = null }) {
+  const selected = channelIds && channelIds.length > 0 ? new Set(channelIds) : null;
+  const points = toCacLtvPoints(channels);
+  const plottable = points.filter((point) => point.cac !== null && point.ltv !== null);
+  const count = channelsLabel(points.length);
+  const aboveCac = plottable.filter((point) => point.ltv > point.cac).length;
+
+  const conclusion =
+    plottable.length === 0
+      ? 'нет каналов с CAC и LTV12'
+      : `${plottable.length} с CAC и LTV12 · LTV выше CAC у ${aboveCac}`;
+  const detail = `${count} · ${conclusion}`;
+
+  return {
+    id: 'cac-ltv',
+    title: 'CAC и LTV12 по каналам',
+    caption: captionOf('CAC и LTV12 по каналам', detail),
+    ariaLabel: `CAC и LTV12 по каналам: ${detail}`,
+    unit: 'BYN',
+    // A scatter with one missing pair would be an empty box, so plottability depends on complete pairs only.
+    hasData: plottable.length > 0,
+    series: plottable.map((point) => ({
+      ...point,
+      highlight: selected === null ? true : selected.has(point.channelId),
+    })),
+    // The table keeps every filtered channel, including the ones the chart cannot place.
+    table: {
+      columns: [
+        { key: 'channel', label: 'Канал', numeric: false },
+        { key: 'cac', label: 'CAC, BYN', numeric: true },
+        { key: 'ltv', label: 'LTV12, BYN', numeric: true },
+        { key: 'customers', label: 'Новые клиенты', numeric: true },
+      ],
+      rows: points.map((point) => ({
+        key: point.channelId,
+        cells: {
+          channel: point.name,
+          cac: formatCentsToByn(point.cac),
+          ltv: formatCentsToByn(point.ltv),
+          customers: formatInteger(point.newCustomers),
         },
       })),
     },

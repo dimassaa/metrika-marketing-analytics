@@ -1,9 +1,47 @@
 <%#
-  Dashboard frame. The page owns the shell and the single island mount node; KPI tiles, the verdict and all charts
-  are rendered by `client/entries/dashboard.jsx` from `model` (the same object `/api/v1/dashboard` returns).
+  Dashboard frame. The page owns the shell, the channel filter and the single island mount node; KPI tiles, the
+  verdict and all charts are rendered by `client/entries/dashboard.jsx` from `model` (the same object
+  `/api/v1/dashboard` returns).
+
+  The filter is a plain GET form so the URL remains the only state and the screen works without JavaScript. An empty
+  multi-select submits no `channelIds`, which the schema treats as "all channels" — the same value as an absent
+  parameter, never as an empty filter that would silently widen the report.
 %>
 <section class="app-section">
   <div class="stack stack--lg">
+    <% if (locals.filterControl && filterControl.options.length > 0) { %>
+    <form class="card filters" method="get" action="<%= filterControl.action %>" aria-label="Фильтр по каналам">
+      <%# The period lives in the topbar; the filter must preserve it instead of resetting to the default window. %>
+      <input type="hidden" name="days" value="<%= filterControl.days %>">
+
+      <div class="filters__field">
+        <label class="filters__label" for="dashboard-channels">Каналы</label>
+        <select
+          class="select filters__select"
+          id="dashboard-channels"
+          name="channelIds"
+          multiple
+          size="<%= filterControl.size %>"
+        >
+          <% for (const option of filterControl.options) { %>
+          <option value="<%= option.value %>"<%= option.selected ? ' selected' : '' %>><%= option.label %></option>
+          <% } %>
+        </select>
+        <p class="filters__hint">
+          <% if (filterControl.active) { %>Выбрано <%= filterControl.selectedCount %> из <%= filterControl.total %>.
+          <% } else { %>Ничего не выбрано — все каналы. <% } %>Несколько значений: Ctrl или ⌘.
+        </p>
+      </div>
+
+      <div class="filters__actions">
+        <button class="btn btn--ghost btn--sm" type="submit">Применить</button>
+        <% if (filterControl.active) { %>
+        <a class="btn btn--ghost btn--sm" href="<%= filterControl.resetHref %>">Сбросить</a>
+        <% } %>
+      </div>
+    </form>
+    <% } %>
+
     <%- include('../partials/island', { name: 'dashboard', model }) %>
   </div>
 </section>

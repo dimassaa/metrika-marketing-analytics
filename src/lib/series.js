@@ -57,6 +57,53 @@ export function toSpendRevenuePoints(series) {
 }
 
 /**
+ * Spend per channel for the horizontal bar chart. Channels keep their server order; sorting is a presentation
+ * decision and belongs to the chart model, not to this loss-free conversion.
+ *
+ * @param {Array<{ channelId: string, name: string, spendCents: string }>} channels Health rows.
+ * @returns {Array<{ channelId: string, name: string, spend: number }>}
+ * @throws {TypeError} When a spend value is not an integer string.
+ */
+export function toChannelSpendPoints(channels) {
+  return channels.map((channel) => ({
+    channelId: channel.channelId,
+    name: channel.name,
+    spend: toCentsNumber(channel.spendCents, 'channel spendCents'),
+  }));
+}
+
+/**
+ * CAC×LTV points for the scatter. A channel missing either money value keeps `null` on that axis: it stays in the
+ * duplicate table as a dash but is not plotted, because a point on an axis it does not have would be a fabricated
+ * measurement. `newCustomers` drives the bubble size and is validated so a bad row fails loudly.
+ *
+ * @param {Array<{
+ *   channelId: string, name: string, cacCents: string | null, ltv12Cents: string | null, newCustomers: number,
+ * }>} channels Health rows.
+ * @returns {Array<{
+ *   channelId: string, name: string, cac: number | null, ltv: number | null, newCustomers: number,
+ * }>}
+ * @throws {TypeError} When a present money value is not an integer string or the customer count is invalid.
+ */
+export function toCacLtvPoints(channels) {
+  return channels.map((channel) => {
+    if (!Number.isInteger(channel.newCustomers) || channel.newCustomers < 0) {
+      throw new TypeError(
+        `channel newCustomers must be a non-negative integer, got ${String(channel.newCustomers)}`,
+      );
+    }
+
+    return {
+      channelId: channel.channelId,
+      name: channel.name,
+      cac: channel.cacCents === null ? null : toCentsNumber(channel.cacCents, 'channel cacCents'),
+      ltv: channel.ltv12Cents === null ? null : toCentsNumber(channel.ltv12Cents, 'channel ltv12Cents'),
+      newCustomers: channel.newCustomers,
+    };
+  });
+}
+
+/**
  * @param {string} value Decimal kopeck string from a view-model.
  * @param {string} name Field name for the error.
  * @returns {number}

@@ -1,5 +1,14 @@
 import { METRICS_CONFIG } from '../../config/metrics.js';
-import { buildCacChart, buildRomiChart, buildSpendRevenueChart, daysLabel, weeksLabel } from './chart-series.js';
+import { buildQueryString } from '../../lib/query.js';
+import {
+  buildCacChart,
+  buildCacLtvScatter,
+  buildChannelSpendChart,
+  buildRomiChart,
+  buildSpendRevenueChart,
+  daysLabel,
+  weeksLabel,
+} from './chart-series.js';
 
 /**
  * Screen models: the one place where a service result becomes the object the page and the API both receive.
@@ -99,6 +108,10 @@ export function buildDashboardScreen({ summary, channelIds = null }) {
       cac: buildCacChart({ weeklySeries: summary.weeklySeries, channelIds }),
       romi: buildRomiChart({ weeklySeries: summary.weeklySeries, channelIds }),
       spendRevenue: buildSpendRevenueChart({ weeklySeries: summary.weeklySeries, channelIds }),
+      // The two per-channel charts read `health.rows` from the same summary, so the filter, the KPI and these cards
+      // cannot disagree and the dashboard adds no query.
+      channelSpend: buildChannelSpendChart({ channels: summary.channels, channelIds }),
+      cacLtv: buildCacLtvScatter({ channels: summary.channels, channelIds }),
     },
     labels: {
       period: periods,
@@ -147,5 +160,43 @@ export function buildPeriodControl({ query = {} } = {}) {
       selected: option === days,
     })),
     preserve,
+  };
+}
+
+/**
+ * Page-only control model for the dashboard channel filter. It is deliberately not part of the screen model: the
+ * API returns data, while a form action and a reset link are presentation of the same HTML frame.
+ *
+ * `resetHref` keeps the current period and drops only the channel selection, so "Сбросить" cannot silently send the
+ * reader back to the default 30-day window. The `days` hidden input keeps the period when the multi-select submits.
+ *
+ * @param {{
+ *   options?: Array<{ value: string, label: string, selected: boolean }>,
+ *   days?: number,
+ * }} [input] `options` come from the screen model's full `channelOptions`.
+ * @returns {{
+ *   action: string,
+ *   days: number | undefined,
+ *   size: number,
+ *   active: boolean,
+ *   selectedCount: number,
+ *   total: number,
+ *   options: Array<{ value: string, label: string, selected: boolean }>,
+ *   resetHref: string,
+ * }}
+ */
+export function buildChannelFilterControl({ options = [], days } = {}) {
+  const query = buildQueryString({ days }, { channelIds: null });
+
+  return {
+    action: '/app/dashboard',
+    days,
+    // A multi-select needs a visible box; cap it so eight channels do not push the charts below the fold.
+    size: Math.min(Math.max(options.length, 2), 6),
+    active: options.some((option) => option.selected),
+    selectedCount: options.filter((option) => option.selected).length,
+    total: options.length,
+    options,
+    resetHref: query === '' ? '/app/dashboard' : `/app/dashboard?${query}`,
   };
 }

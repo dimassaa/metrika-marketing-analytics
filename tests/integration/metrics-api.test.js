@@ -2,9 +2,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { seed } from '../../db/seed/seed.js';
 import { addDays } from '../../src/lib/dates.js';
+import { createReferenceRepository } from '../../src/repositories/reference.repo.js';
+import { createMetricsModule } from '../../src/services/metrics/index.js';
 import { METRICS_API_PERMISSIONS } from '../../src/routes/api.routes.js';
 import { closeTestPool, getTestPool, resetTestDatabase } from '../helpers/db.js';
 import { loginAs, makeApp } from '../helpers/app.js';
+import { wrapDb } from '../helpers/queryCounter.js';
 
 const VIEWER = 'viewer@metrika.by';
 
@@ -92,6 +95,7 @@ describe('GET /api/v1/dashboard', () => {
   it.each([
     ['days=45', 'days=45'],
     ['a days/from conflict', 'days=30&from=2026-10-01'],
+    ['a days/to conflict', 'days=30&to=2026-11-21'],
     ['a non-numeric channel id', 'channelIds=abc'],
     ['an empty channel id', 'channelIds='],
     ['a malformed date', 'from=01.10.2026'],
@@ -115,5 +119,32 @@ describe('GET /api/v1/dashboard', () => {
     expect(JSON.stringify(res.body)).not.toMatch(/NaN|Infinity/);
     expect(typeof res.body.kpis.spendCents).toBe('string');
     expect(res.body.charts.cac.hasData).toBe(true);
+  });
+
+  it('keeps the dashboard query budget flat on eight channels and on one', async () => {
+    const counter = wrapDb(pool);
+    const metrics = createMetricsModule({
+      db: counter.db,
+      referenceRepository: createReferenceRepository(counter.db),
+    });
+    const { rows: anchorRows } = await pool.query('SELECT max(stat_date)::text AS anchor FROM daily_stats');
+    const anchor = anchorRows[0].anchor;
+    const { rows: channelRows } = await pool.query('SELECT id::text AS id FROM channels ORDER BY code');
+
+    counter.reset();
+    await metrics.services.dashboard.getDashboardSummary({ anchor });
+    const allChannels = counter.count();
+
+    counter.reset();
+    await metrics.services.dashboard.getDashboardSummary({
+      anchor,
+      channelIds: [channelRows[0].id],
+    });
+    const oneChannel = counter.count();
+
+    expect(allChannels).toBeLessThanOrEqual(15);
+    expect(oneChannel).toBeLessThanOrEqual(15);
+    // The filter narrows rows in memory; it must not add a per-channel query.
+    expect(oneChannel).toBe(allChannels);
   });
 });

@@ -54,6 +54,8 @@ function hasBigInt(value) {
  */
 function serviceWith({
   blended = BLENDED,
+  rows = [],
+  availableChannels = [],
   weeklyRows = [
     { weekStart: LAST_WEEK, spendCents: 100000n, newCustomers: 10 },
     { weekStart: FIRST_WEEK, spendCents: 0n, newCustomers: 0 },
@@ -61,7 +63,9 @@ function serviceWith({
   attributedRows = [{ weekStart: LAST_WEEK, revenueCents: '150000' }],
 } = {}) {
   const healthService = {
-    getChannelHealthReport: vi.fn().mockResolvedValue({ period: { ...PERIOD }, rows: [], blended }),
+    getChannelHealthReport: vi
+      .fn()
+      .mockResolvedValue({ period: { ...PERIOD }, rows, blended, availableChannels }),
   };
   const metricsRepository = {
     listWeeklySeries: vi.fn().mockResolvedValue(weeklyRows),
@@ -312,6 +316,73 @@ describe('dashboard summary', () => {
     });
     expect(summary.channels).toEqual([]);
     expect(summary.availableChannels).toEqual([]);
+  });
+
+  it('returns the filtered health rows and the full channel dimension without a second health call', async () => {
+    const rows = [
+      {
+        channelId: '1',
+        code: 'instagram',
+        name: 'Instagram',
+        spendCents: '250000',
+        revenueCents: '500000',
+        newCustomers: 5,
+        cacCents: '50000',
+        ltv12Cents: '100000',
+      },
+    ];
+    const availableChannels = [
+      { channelId: '1', code: 'instagram', name: 'Instagram' },
+      { channelId: '2', code: 'google', name: 'Google Ads' },
+    ];
+    const blended = {
+      ...BLENDED,
+      spendCents: '250000',
+      revenueCents: '500000',
+      newCustomers: 5,
+      cacCents: '50000',
+      ltv12Cents: '100000',
+    };
+    const { service, healthService } = serviceWith({ blended, rows, availableChannels });
+
+    const summary = await service.getDashboardSummary({ anchor: ANCHOR, channelIds: ['1'] });
+
+    // KPI come from the filtered blended row, so the tiles and the per-channel cards cannot disagree.
+    expect(summary.kpis).toMatchObject({
+      spendCents: '250000',
+      newCustomers: 5,
+      cacCents: '50000',
+      romiPct: BLENDED.romiPct,
+    });
+    expect(summary.channels).toEqual(rows);
+    // The multi-select keeps every option after a filter hides some rows.
+    expect(summary.availableChannels).toEqual(availableChannels);
+    expect(healthService.getChannelHealthReport).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns honest zeros and no_data for a filter that matches no channel', async () => {
+    const emptyBlended = {
+      ...BLENDED,
+      spendCents: '0',
+      revenueCents: '0',
+      newCustomers: 0,
+      cacCents: null,
+      cacLabel: '—',
+      romiPct: null,
+      romiLabel: '—',
+      ltv12Cents: null,
+      ltvLabel: '—',
+      status: 'no_data',
+      statusLabel: 'Нет данных',
+    };
+    const { service } = serviceWith({ blended: emptyBlended });
+
+    const summary = await service.getDashboardSummary({ anchor: ANCHOR, channelIds: ['999'] });
+
+    expect(summary.channels).toEqual([]);
+    expect(summary.kpis).toMatchObject({ spendCents: '0', newCustomers: 0, cacCents: null, romiPct: null });
+    expect(summary.verdict.status).toBe('no_data');
+    expect(JSON.stringify(summary)).not.toMatch(/NaN|Infinity/);
   });
 
   it('rejects a non-positive or oversized week count before touching a dependency', async () => {
