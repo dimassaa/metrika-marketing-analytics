@@ -1,5 +1,5 @@
 import { METRICS_CONFIG } from '../../config/metrics.js';
-import { formatDateRu } from '../../lib/dates.js';
+import { addDays, formatDateRu } from '../../lib/dates.js';
 import {
   formatCentsToByn,
   formatDateTimeRu,
@@ -10,6 +10,8 @@ import {
 } from '../../lib/format.js';
 import { centsToApi, roundNumber } from '../../lib/metrics-math.js';
 import { buildQueryString } from '../../lib/query.js';
+import { resolveWeekRange } from '../metrics/weekly-series.js';
+import { buildScenarioCharts } from './scenario-charts.js';
 
 /**
  * Screen models for the decisions screens.
@@ -53,7 +55,7 @@ const SEVERITY_OPTIONS = Object.freeze([
  * Converts a NUMERIC(14,4) BYN decimal string to whole kopecks without a float round trip. * @param {string | null | undefined} value Decimal BYN amount as stored in `alerts.value`/`threshold`.
  * @returns {bigint | null} Kopecks, or null when the value is absent.
  */
-function bynDecimalToCents(value) {
+export function bynDecimalToCents(value) {
   if (value === null || value === undefined || value === '') return null;
   const text = String(value).trim();
   const match = /^(\d+)(?:\.(\d{1,4}))?$/.exec(text);
@@ -258,6 +260,54 @@ function centsToInput(cents) {
 }
 
 /**
+ * The 26 complete weeks a scenario fits, derived from the data anchor rather than the system clock.
+ * @param {string | null | undefined} anchor `YYYY-MM-DD` or null when the builder could not compute.
+ * @returns {{ weeks: number, label: string, from?: string, to?: string }}
+ */
+function scenarioHistory(anchor) {
+  const weeks = METRICS_CONFIG.saturation.historyWeeks;
+  if (typeof anchor !== 'string' || anchor === '') return { weeks, label: `${weeks} недель` };
+
+  const { firstWeekStart, lastWeekStart } = resolveWeekRange(anchor, weeks);
+  return { weeks, label: `${weeks} недель`, from: firstWeekStart, to: addDays(lastWeekStart, 6) };
+}
+
+/**
+ * Budget shortcuts for the builder. They are links, not JavaScript handlers, so the slider and the presets share one
+ * server-rendered GET contract.
+ *
+ * @param {{
+ *   baselineCents: bigint,
+ *   budgetCents: bigint,
+ *   capCents: bigint,
+ *   channelIds: string[],
+ *   curveChannelId: string | null,
+ * }} input
+ * @returns {Array<{ key: string, label: string, href: string, active: boolean }>}
+ */
+function budgetPresets({ baselineCents, budgetCents, capCents, channelIds, curveChannelId }) {
+  const candidates = [
+    { key: 'current', label: 'Как сейчас', cents: baselineCents },
+    { key: 'plus20', label: '+20 %', cents: (baselineCents * 120n + 50n) / 100n },
+    { key: 'double', label: '×2', cents: baselineCents * 2n },
+  ];
+
+  return candidates.map((candidate) => {
+    const cents = candidate.cents > capCents ? capCents : candidate.cents;
+    return {
+      key: candidate.key,
+      label: candidate.label,
+      href: `/app/scenarios?${buildQueryString({}, {
+        budgetByn: centsToInput(cents),
+        channelIds,
+        curveChannelId,
+      })}`,
+      active: cents === budgetCents,
+    };
+  });
+}
+
+/**
  * @param {object} side `{ spendCents, customers }` from a stored scenario side.
  * @returns {{ spendCents: string, spendLabel: string, customers: number, customersLabel: string }}
  */
@@ -378,12 +428,14 @@ export function buildScenariosScreen({
   query = {},
   anchor = null,
   channels = [],
+  history = null,
   mode = 'builder',
 }) {
   const baselineCents = BigInt(scenario.totals.current.spendCents);
   const budgetCents = BigInt(scenario.totals.planned.spendCents);
   const mappedChannels = scenario.channels.map(mapScenarioChannel);
   const selected = new Set(query.channelIds ?? scenario.channels.map((channel) => channel.channelId));
+  const historyWindow = history ?? scenarioHistory(anchor);
 
   const dimension = channels.length > 0
     ? channels
@@ -393,12 +445,22 @@ export function buildScenariosScreen({
         name: channel.channelName,
       }));
 
+  const requestedCurve = query.curveChannelId === null || query.curveChannelId === undefined
+    ? null
+    : String(query.curveChannelId);
+  const curveChannel =
+    scenario.channels.find((channel) => channel.channelId === requestedCurve) ??
+    scenario.channels.find((channel) => channel.model === 'saturation') ??
+    scenario.channels[0] ??
+    null;
+
   const controls = {
     budgetPeriod: 'week',
     budgetInput: centsToInput(budgetCents),
     budgetValue: centsToApi(budgetCents),
     budgetLabel: formatCentsToByn(budgetCents),
-    curveChannelId: query.curveChannelId ?? null,
+    curveChannelId: curveChannel?.channelId ?? null,
+    curveChannelName: curveChannel?.channelName ?? null,
     channels: dimension.map((channel) => ({
       value: channel.id,
       label: channel.name,
@@ -407,24 +469,30 @@ export function buildScenariosScreen({
     })),
   };
   controls.selectedChannels = controls.channels.filter((channel) => channel.selected);
+  controls.presets = budgetPresets({
+    baselineCents,
+    budgetCents,
+    capCents: baselineCents * BigInt(METRICS_CONFIG.scenarios.maxBudgetMultiplier),
+    channelIds: controls.selectedChannels.map((channel) => channel.value),
+    curveChannelId: controls.curveChannelId,
+  });
 
   return {
     page: 'scenarios',
     mode,
     budgetPeriod: 'week',
     anchor,
-    history: {
-      weeks: METRICS_CONFIG.saturation.historyWeeks,
-      label: `${METRICS_CONFIG.saturation.historyWeeks} недель`,
-    },
+    history: historyWindow,
     budget: buildBudget({ baselineCents, budgetCents }),
     controls,
     channels: mappedChannels,
     totals: mapTotals(scenario),
     warnings: scenario.warnings ?? [],
-    // The four charts (spend, customers, saturation, increment) land in Task 7; the tables above keep the screen
-    // usable and every number comes from the same snapshot.
-    charts: null,
+    charts: buildScenarioCharts({
+      channels: scenario.channels,
+      history: historyWindow,
+      curveChannelId: controls.curveChannelId,
+    }),
     list: {
       rows: mapScenarioList(list.rows),
       page: list.page,
@@ -433,6 +501,66 @@ export function buildScenariosScreen({
     },
     empty: list.total === 0,
     error: null,
+  };
+}
+
+/**
+ * Builder model for an empty stand: channels exist but no channel has 26 complete weeks with spend and customers,
+ * so the service cannot fit a curve. The page renders this state instead of a 400 because the person did not send a
+ * malformed request; there is simply nothing to plan yet.
+ *
+ * The saved-scenario list is still shown: old snapshots stay readable after the fact data changes.
+ *
+ * @param {{
+ *   anchor?: string | null,
+ *   list?: { rows: object[], page: number, total: number, hasMore: boolean },
+ *   channels?: object[],
+ *   error?: string | null,
+ * }} input
+ * @returns {object} Builder-shaped model with `unavailable: true`.
+ */
+export function buildScenariosUnavailableScreen({
+  anchor = null,
+  list = { rows: [], page: 1, total: 0, hasMore: false },
+  channels = [],
+  error = null,
+}) {
+  return {
+    page: 'scenarios',
+    mode: 'builder',
+    budgetPeriod: 'week',
+    anchor,
+    history: scenarioHistory(anchor),
+    budget: null,
+    controls: {
+      budgetPeriod: 'week',
+      budgetInput: '',
+      budgetValue: null,
+      budgetLabel: '—',
+      curveChannelId: null,
+      curveChannelName: null,
+      channels: channels.map((channel) => ({
+        value: channel.id,
+        label: channel.name,
+        code: channel.code,
+        selected: false,
+      })),
+      selectedChannels: [],
+      presets: [],
+    },
+    channels: [],
+    totals: null,
+    warnings: [],
+    charts: null,
+    list: {
+      rows: mapScenarioList(list.rows),
+      page: list.page,
+      total: list.total,
+      hasMore: list.hasMore,
+    },
+    empty: true,
+    unavailable: true,
+    error: error ?? 'Нет недель с расходом и новыми клиентами — распределять пока нечего.',
   };
 }
 
@@ -478,21 +606,28 @@ export function buildScenarioDetailScreen({ scenario }) {
   const baselineCents = BigInt(result.totals.current.spendCents);
   const budgetCents = BigInt(scenario.params.budgetCents);
   const budget = buildBudget({ baselineCents, budgetCents });
+  const history = {
+    weeks: scenario.params.history.weeks,
+    from: scenario.params.history.from,
+    to: scenario.params.history.to,
+    label: `${scenario.params.history.weeks} недель`,
+  };
 
   return {
     ...base,
-    history: {
-      weeks: scenario.params.history.weeks,
-      from: scenario.params.history.from,
-      to: scenario.params.history.to,
-      label: `${scenario.params.history.weeks} недель`,
-    },
+    history,
     budget,
     controls: null,
     channels: result.channels.map(mapScenarioChannel),
     totals: mapTotals(result),
     warnings: result.warnings ?? [],
-    charts: null,
+    charts: buildScenarioCharts({
+      channels: result.channels,
+      history,
+      // A saved snapshot may have been planned on a subset; the first fitted curve is the stable default for a page
+      // that has no query state and must not refit anything.
+      curveChannelId: null,
+    }),
     list: null,
     empty: false,
     repeatHref: `/app/scenarios?${buildQueryString({}, {

@@ -2,6 +2,10 @@ import { can } from '../config/permissions.js';
 import { METRICS_CONFIG } from '../config/metrics.js';
 import { buildQueryString } from '../lib/query.js';
 import { parseQuery } from '../lib/validation.js';
+import {
+  buildAlertChannelChart,
+  selectAlertChartChannel,
+} from '../services/decisions/alerts-charts.js';
 import { alertsPageQuerySchema, alertsQuerySchema, alertDismissSchema } from '../validators/alerts.schema.js';
 import { buildShellLocals } from './app.controller.js';
 
@@ -97,6 +101,19 @@ export function createAlertsController({
       page: query.page,
     });
     const channels = channelsRepository ? await channelsRepository.listChannels() : [];
+    const chartChannel = selectAlertChartChannel({
+      rows: list.rows,
+      channelId: query.channelId ?? null,
+      channelName: channels.find((channel) => channel.id === query.channelId)?.name ?? null,
+    });
+    const weeklySeries = await services.alerts.channelCacSeries({
+      anchor,
+      channelId: chartChannel?.channelId ?? null,
+    });
+    const chart = buildAlertChannelChart({
+      channelName: chartChannel?.channelName ?? null,
+      weeklySeries,
+    });
 
     return {
       query,
@@ -112,6 +129,7 @@ export function createAlertsController({
         },
         filters: { status: query.status, severity: query.severity, channelId: query.channelId },
         filterOptions: { channels },
+        chart,
       }),
     };
   }

@@ -211,3 +211,24 @@ describe('alerts screen', () => {
     expect(res.text).toContain('page=2');
   });
 });
+
+describe('alerts CAC chart', () => {
+  it('plots twelve weekly points for the problem channel and follows an explicit channel filter', async () => {
+    const agent = await signedIn(ANALYST);
+    const props = extractDataProps((await agent.get('/app/alerts')).text, 'alerts');
+
+    expect(props.chart.hasData).toBe(true);
+    expect(props.chart.series).toHaveLength(12);
+    expect(props.chart.unit).toBe('BYN');
+    expect(JSON.stringify(props.chart)).not.toMatch(/NaN|Infinity/);
+
+    const row = props.rows.find((entry) => entry.rule === 'cac_spike') ?? props.rows[0];
+    const filtered = extractDataProps(
+      (await agent.get(`/app/alerts?channelId=${row.channelId}`)).text,
+      'alerts',
+    );
+
+    expect(filtered.chart.title).toContain(row.channelName);
+    expect(filtered.chart.series).toHaveLength(12);
+  });
+});

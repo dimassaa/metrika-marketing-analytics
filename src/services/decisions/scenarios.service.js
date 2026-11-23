@@ -22,6 +22,12 @@ import { fitSaturationCurve, predictConversions, toWeeklyBuckets } from './satur
 /** The baseline is the same four complete weeks the alert screen compares, so "current" means the same period on both. */
 const CURRENT_WEEKS = METRICS_CONFIG.alerts.windowWeeks;
 
+/**
+ * The builder page treats "no channel has a usable curve" as an empty state, while the API keeps reporting it as a
+ * validation error. Both sides match this exported message instead of repeating the wording.
+ */
+export const NO_CURVE_CHANNELS_MESSAGE = 'Нет каналов с валидной кривой';
+
 /** Shown instead of a Zod path; the stored snapshot is internal data, not a form field a person can correct. */
 const INVALID_SNAPSHOT_REASON =
   'Снимок сценария сохранён другой версией схемы или повреждён. Пересчитайте сценарий.';
@@ -279,7 +285,7 @@ export function createScenariosService({
     }
 
     const optimizable = selected.filter((channel) => fits.get(channel.id).model === 'saturation');
-    if (optimizable.length === 0) throw new ValidationError('Нет каналов с валидной кривой');
+    if (optimizable.length === 0) throw new ValidationError(NO_CURVE_CHANNELS_MESSAGE);
 
     const currentByChannel = new Map(
       selected.map((channel) => [channel.id, currentWeek(buckets.get(channel.id) ?? [])]),

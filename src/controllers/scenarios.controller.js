@@ -1,6 +1,7 @@
-import { NotFoundError } from '../lib/errors.js';
+import { NotFoundError, ValidationError } from '../lib/errors.js';
 import { parseBigIntId } from '../lib/ids.js';
 import { parseQuery } from '../lib/validation.js';
+import { NO_CURVE_CHANNELS_MESSAGE } from '../services/decisions/scenarios.service.js';
 import { scenarioQuerySchema, scenarioSaveSchema } from '../validators/scenarios.schema.js';
 import { buildShellLocals } from './app.controller.js';
 import { notFoundPage } from './public.controller.js';
@@ -91,13 +92,33 @@ export function createScenariosController({
      * @type {import('express').RequestHandler}
      */
     async page(req, res) {
-      const { anchor, screen } = await loadBuilder(req);
+      let anchor;
+      let screen;
+      try {
+        ({ anchor, screen } = await loadBuilder(req));
+      } catch (error) {
+        // A fresh stand has channels but no 26 weeks of spend/customers. That is not a malformed request, so the
+        // page shows the designed empty builder instead of a bare 400; the API keeps the validation error.
+        if (!(error instanceof ValidationError) || error.message !== NO_CURVE_CHANNELS_MESSAGE) throw error;
+
+        anchor = await referenceRepository.getDataAnchor();
+        const [list, channels] = await Promise.all([
+          services.scenarios.listScenarios({ page: 1 }),
+          channelsRepository ? channelsRepository.listChannels() : Promise.resolve([]),
+        ]);
+        screen = screenModels.scenariosUnavailable({
+          anchor,
+          list,
+          channels,
+          error: 'Нет недель с расходом и новыми клиентами — распределять пока нечего.',
+        });
+      }
 
       res.set('Cache-Control', 'no-store');
       res.status(200).render('pages/scenarios', {
         ...buildShellLocals(req, { title: 'Сценарии', activeNav: 'scenarios', dataAnchor: anchor }),
         model: screen,
-        islandEntries: ['scenarios'],
+        islandEntries: screen.charts === null ? [] : ['scenarios'],
         currentPath: '/app/scenarios',
       });
     },

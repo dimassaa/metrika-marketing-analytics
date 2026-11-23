@@ -3,13 +3,17 @@ import { Card } from '../components/ui/Card.jsx';
 import { EmptyState } from '../components/ui/EmptyState.jsx';
 import { Kpi } from '../components/ui/Kpi.jsx';
 import { Skeleton } from '../components/ui/Skeleton.jsx';
+import { CacRomiLines } from '../components/charts/CacRomiLines.jsx';
+import { ChartErrorBoundary } from '../components/charts/ChartErrorBoundary.jsx';
+import { ChartFrame } from '../components/charts/ChartFrame.jsx';
 
 /**
- * Alerts island: the unfiltered summary, the last-check line and the table row count.
+ * Alerts island: the unfiltered summary, the last-check line and the weekly CAC line of the problem channel.
  *
  * The filterable table and its dismissal forms are server-rendered in `pages/alerts.ejs`; this island deliberately
  * does not duplicate them. Every number is a ready string from the screen model, which is the same object
- * `/api/v1/alerts` returns.
+ * `/api/v1/alerts` returns. The chart's series comes from `listWeeklySeries` for the selected channel, so it shows
+ * measured weeks rather than a line interpolated from alert values.
  *
  * @param {{
  *   page: 'alerts',
@@ -21,11 +25,12 @@ import { Skeleton } from '../components/ui/Skeleton.jsx';
  *     resolvedLabel: string, dismissedLabel: string,
  *     lastRecalculatedLabel: string, isStale: boolean,
  *   },
+ *   chart: object | null,
  *   pagination: { page: number, total: number, hasMore: boolean },
  *   empty: boolean,
  * }} props
  */
-export function AlertsIsland({ window, summary, rows, pagination, empty }) {
+export function AlertsIsland({ window, summary, rows, chart, pagination, empty }) {
   if (!summary) return <Skeleton lines={4} />;
 
   const kpis = [
@@ -75,6 +80,23 @@ export function AlertsIsland({ window, summary, rows, pagination, empty }) {
           ))}
         </div>
       </Card>
+
+      {chart && (
+        <ChartErrorBoundary island="alerts" title={chart.title} table={chart.table}>
+          <ChartFrame
+            title={chart.title}
+            caption={chart.caption}
+            unit={chart.unit}
+            ariaLabel={chart.ariaLabel}
+            empty={!chart.hasData}
+            emptyText="За 12 недель нет недель с новыми клиентами: CAC не из чего считать. Таблица ниже перечисляет все недели окна, а не только измеренные."
+            table={chart.table}
+            height="sm"
+          >
+            <CacRomiLines chart={chart} />
+          </ChartFrame>
+        </ChartErrorBoundary>
+      )}
 
       <Card
         title="Что показывает таблица"

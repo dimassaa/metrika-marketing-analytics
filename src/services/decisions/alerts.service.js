@@ -9,7 +9,7 @@ import { centsFromDb } from '../../lib/money.js';
 import { createAlertsRepository } from '../../repositories/alerts.repo.js';
 import { createAuditRepository } from '../../repositories/audit.repo.js';
 import { createAuditService } from '../audit.service.js';
-import { resolveWeekRange } from '../metrics/weekly-series.js';
+import { buildWeeklySeries, resolveWeekRange } from '../metrics/weekly-series.js';
 
 /**
  * Alert windows and exact rule evaluation (metrics spec §7).
@@ -398,6 +398,36 @@ export function createAlertsService({
      */
     resolveWindows(anchor) {
       return resolveAlertWindows(normalizeAnchor(anchor));
+    },
+
+    /**
+     * Twelve complete weeks of CAC for one channel, or twelve empty weeks when no problem channel exists.
+     *
+     * The alert screen draws the problem channel's CAC line, and that line has to be the real weekly aggregate rather
+     * than a reconstruction from alert values. The range starts from the data anchor, like every other period in the
+     * app, and one indexed query serves it. A missing channel skips the query entirely and still returns the same
+     * 12-bucket shape, so the chart and its table stay aligned with the requested window.
+     *
+     * @param {{
+     *   anchor: string,
+     *   channelId?: string | number | null,
+     *   weeks?: number,
+     * }} input
+     * @returns {Promise<object[]>} `buildWeeklySeries` view-model, one bucket per complete week.
+     * @throws {ValidationError} When the anchor or the channel id is invalid.
+     */
+    async channelCacSeries({ anchor, channelId = null, weeks = METRICS_CONFIG.dashboard.weeks }) {
+      const anchorDate = normalizeAnchor(anchor);
+      const { firstWeekStart, lastWeekStart } = resolveWeekRange(anchorDate, weeks);
+      const weeklyRows = channelId === null || channelId === undefined || channelId === ''
+        ? []
+        : await metricsRepository.listWeeklySeries({
+            from: firstWeekStart,
+            to: addDays(lastWeekStart, 6),
+            channelIds: [String(channelId)],
+          });
+
+      return buildWeeklySeries({ firstWeekStart, weeks, weeklyRows });
     },
 
     /**

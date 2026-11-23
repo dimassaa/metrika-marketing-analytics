@@ -11,7 +11,12 @@ import { createAttributionService } from '../metrics/attribution.service.js';
 import { createLtvService } from '../metrics/ltv.service.js';
 import { createAlertsService } from './alerts.service.js';
 import { createScenariosService } from './scenarios.service.js';
-import { buildAlertsScreen, buildScenarioDetailScreen, buildScenariosScreen } from './screen-models.js';
+import {
+  buildAlertsScreen,
+  buildScenarioDetailScreen,
+  buildScenariosScreen,
+  buildScenariosUnavailableScreen,
+} from './screen-models.js';
 
 /**
  * Composition root for the decisions module (alerts and scenarios).
@@ -83,6 +88,7 @@ export function createDecisionsModule({ db, referenceRepository, auditServiceFac
   const screenModels = {
     alerts: buildAlertsScreen,
     scenarios: buildScenariosScreen,
+    scenariosUnavailable: buildScenariosUnavailableScreen,
     scenarioDetail: buildScenarioDetailScreen,
   };
   const alertsController = createAlertsController({

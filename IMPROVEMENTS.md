@@ -817,3 +817,27 @@ Still open:
   service cannot fit a curve and raises «Нет каналов с валидной кривой»; the central handler returns the short 400
   text. Task 7 owns the designed empty/error state for the builder, so T6 keeps the honest service failure rather
   than inventing a chart with no data.
+
+## M5 Task 7 — decisions screens and charts
+
+- **The scenario increment uses horizontal bars per channel, not a waterfall.** A waterfall needs intermediate
+  cumulative values ("before/after" running totals) that the scenario snapshot does not contain: the service stores
+  one plan per channel and a forecast, not a sequence of steps with a cumulative sign. `IncrementBars` therefore
+  shows `forecast − current` per channel with the sign kept in the caption, tooltip and table. This is the deliberate
+  divergence recorded in design spec §8; adding a cumulative waterfall would require a second computed series and
+  would imply an ordering the data does not have.
+- **The alerts chart is a 12-week CAC line, not a sparkline.** A sparkline without labelled axes cannot state whether
+  the problem channel is improving, so the island reuses `ChartFrame` + `CacRomiLines`. The series comes from
+  `listWeeklySeries` for the selected channel (one extra query), never from alert rows; a line reconstructed from two
+  alerts would invent the weeks between them.
+- **The alerts table stays server-rendered.** T6's note expected T7 to move it into the island, but the screen's
+  filters, pagination and dismissal forms are plain GET/POST controls that must work before React executes. The
+  island owns the summary and the chart; the table remains in `alerts.ejs` and reads the same screen model, so there
+  is still one source of numbers.
+- **The empty scenarios stand now renders a designed empty builder.** T6 returned a 400 «Нет каналов с валидной
+  кривой»; the page controller recognises that one validation message and renders `scenarios.ejs` with an explanation
+  and an import link, while `/api/v1/scenarios` keeps the honest 400. The saved-scenario list stays visible in that
+  state.
+- **The scenario `curveChannelId` is a presentation choice, defaulting to the first fitted channel.** No channel is
+  labelled "problem" for scenarios; the alerts screen owns that heuristic. The curve selector only changes which
+  stored `K`/`S`/`observed` row is drawn; the plan and totals never depend on it.

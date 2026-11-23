@@ -1,4 +1,4 @@
-import { formatCentsToByn, formatRomi } from '../../../src/lib/format.js';
+import { formatCentsToByn, formatRatio, formatRomi } from '../../../src/lib/format.js';
 
 /**
  * Recharts tooltip as a white hairline card.
@@ -10,26 +10,41 @@ import { formatCentsToByn, formatRomi } from '../../../src/lib/format.js';
  * @param {{
  *   active?: boolean,
  *   payload?: Array<{ dataKey: string, name?: string, value: number }>,
- *   label?: string,
- *   unit: 'BYN' | '%',
+ *   label?: string | number,
+ *   unit: 'BYN' | '%' | 'чел.',
  *   names?: Record<string, string>,
+ *   signed?: boolean,
+ *   labelFormatter?: (label: string | number) => string,
  * }} props
  */
-export function ChartTooltip({ active, payload, label, unit, names = {} }) {
+export function ChartTooltip({
+  active,
+  payload,
+  label,
+  unit,
+  names = {},
+  signed = false,
+  labelFormatter = null,
+}) {
   if (!active || !payload || payload.length === 0) return null;
+
+  const present = payload.filter((entry) => entry.value !== null && entry.value !== undefined);
+  if (present.length === 0) return null;
 
   return (
     <div className="chart__tooltip">
-      <p className="chart__tooltip-label">{label}</p>
+      <p className="chart__tooltip-label">
+        {labelFormatter && label !== undefined && label !== null ? labelFormatter(label) : label}
+      </p>
       <ul className="chart__tooltip-list">
-        {payload.map((entry) => (
+        {present.map((entry) => (
           <li className="chart__tooltip-row" key={entry.dataKey}>
             <span
               className={`chart__tooltip-dot chart__tooltip-dot--${entry.dataKey}`}
               aria-hidden="true"
             />
             <span className="chart__tooltip-name">{names[entry.dataKey] ?? entry.name}</span>
-            <strong className="chart__tooltip-value">{formatValue(entry.value, unit)}</strong>
+            <strong className="chart__tooltip-value">{formatValue(entry.value, unit, signed)}</strong>
           </li>
         ))}
       </ul>
@@ -39,11 +54,12 @@ export function ChartTooltip({ active, payload, label, unit, names = {} }) {
 
 /**
  * @param {number | null | undefined} value Chart value.
- * @param {'BYN' | '%'} unit
- * @returns {import('react').ReactNode} `1 234,56 BYN` with the official glyph, `+12,4%`, or `—` for a missing
- *   point. The glyph goes through `.byn` like every other money label in the app.
+ * @param {'BYN' | '%' | 'чел.'} unit
+ * @param {boolean} signed
+ * @returns {import('react').ReactNode} `1 234,56 BYN` with the official glyph, `+12,4%`, `+12,3` клиента, or `—`.
+ *   The glyph goes through `.byn` like every other money label in the app.
  */
-function formatValue(value, unit) {
+function formatValue(value, unit, signed) {
   if (value === null || value === undefined) return '—';
   if (unit === 'BYN') {
     return (
@@ -51,6 +67,10 @@ function formatValue(value, unit) {
         {formatCentsToByn(Math.round(value))} <span className="byn">BYN</span>
       </>
     );
+  }
+  if (unit === 'чел.') {
+    const text = formatRatio(value, { decimals: 1 });
+    return signed && value > 0 ? `+${text}` : text;
   }
   return formatRomi(value);
 }

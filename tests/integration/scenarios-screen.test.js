@@ -163,6 +163,10 @@ describe('scenario detail', () => {
     expect(props.mode).toBe('detail');
     expect(props.id).toBe(id);
     expect(props.name).toBe('Проверка снимка');
+    expect(Object.keys(props.charts)).toEqual(['spend', 'customers', 'saturation', 'increment']);
+    expect(props.charts.saturation.hasData).toBe(true);
+    expect(props.charts.saturation.series.length).toBeGreaterThan(10);
+    expect(JSON.stringify(props.charts)).not.toMatch(/NaN|Infinity/);
     expect(props).toEqual(api.body);
   });
 
@@ -199,5 +203,30 @@ describe('scenario detail', () => {
     const detail = await agent.get(`/api/v1/scenarios/${res.body.id}`);
     expect(detail.status).toBe(200);
     expect(detail.body).toEqual(res.body);
+  });
+});
+
+describe('scenario builder on an empty stand', () => {
+  it('renders a designed empty builder instead of a 400, while the API stays a validation error', async () => {
+    const agent = await signedIn(VIEWER);
+    await pool.query('DELETE FROM daily_stats');
+
+    try {
+      const page = await agent.get('/app/scenarios');
+      const api = await agent.get('/api/v1/scenarios');
+
+      expect(page.status).toBe(200);
+      expect(page.text).toContain('Нет данных для расчёта сценария');
+      expect(page.text).toContain('Нет недель с расходом и новыми клиентами');
+      expect(countIslands(page.text, 'scenarios')).toBe(0);
+      expect(page.text).not.toMatch(/max="<%= /);
+
+      expect(api.status).toBe(400);
+      expect(api.body.error.code).toBe('VALIDATION_ERROR');
+      expect(api.body.error.message).toMatch(/кривой/i);
+    } finally {
+      // This test removes seeded facts, so it restores the whole deterministic stand for the files that follow.
+      await seedDecisions();
+    }
   });
 });

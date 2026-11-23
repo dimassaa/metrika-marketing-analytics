@@ -2236,6 +2236,29 @@ input[type='file'] {
   background-color: var(--color-soot);
 }
 
+/* Scenario series: plan/forecast, the fitted curve and the increment are the cyan accent; the "current" baseline,
+   observed points and a negative increment stay stone so the comparison is legible without a second colour. */
+.chart__tooltip-dot--compare,
+.chart__tooltip-dot--curve,
+.chart__tooltip-dot--delta {
+  background-color: var(--color-cyan-edge);
+}
+
+.chart__tooltip-dot--current {
+  background-color: var(--color-warm-gray);
+}
+
+.chart__tooltip-dot--observed {
+  background-color: var(--color-soot);
+}
+
+/* Native range input for the weekly budget. The accent token is the only chromatic element; the thumb keeps the
+   browser's focus ring, so keyboard navigation needs no extra script. */
+.range {
+  width: 100%;
+  accent-color: var(--color-cyan-edge);
+}
+
 .chart__tooltip-name {
   color: var(--color-warm-gray);
 }

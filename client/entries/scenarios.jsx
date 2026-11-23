@@ -3,13 +3,18 @@ import { Card } from '../components/ui/Card.jsx';
 import { EmptyState } from '../components/ui/EmptyState.jsx';
 import { Kpi } from '../components/ui/Kpi.jsx';
 import { Skeleton } from '../components/ui/Skeleton.jsx';
+import { ChartErrorBoundary } from '../components/charts/ChartErrorBoundary.jsx';
+import { ChartFrame } from '../components/charts/ChartFrame.jsx';
+import { ComparisonBars } from '../components/charts/ComparisonBars.jsx';
+import { IncrementBars } from '../components/charts/IncrementBars.jsx';
+import { SaturationCurve } from '../components/charts/SaturationCurve.jsx';
 
 /**
  * Scenarios island. One entry serves the builder and the saved detail because both render the same snapshot model:
  * the difference is `mode` and the absence of the relative budget block on a detail.
  *
- * The island shows the budget summary and the channel table. The GET form, the save form and the repeat link are
- * server-rendered in the EJS frames, so the screen works before React executes.
+ * The GET form, the save form and the repeat link are server-rendered in the EJS frames, so the screen works before
+ * React executes. Every chart reads the same channel rows as the table, and every number is a ready server string.
  *
  * @param {{
  *   page: 'scenarios',
@@ -22,10 +27,22 @@ import { Skeleton } from '../components/ui/Skeleton.jsx';
  *   channels: object[],
  *   totals: object | null,
  *   warnings: string[],
+ *   charts: { spend: object, customers: object, saturation: object, increment: object } | null,
  *   empty: boolean,
  * }} props
  */
-export function ScenariosIsland({ mode, name, invalid, invalidReason, budget, history, channels, totals, warnings }) {
+export function ScenariosIsland({
+  mode,
+  name,
+  invalid,
+  invalidReason,
+  budget,
+  history,
+  channels,
+  totals,
+  warnings,
+  charts,
+}) {
   if (invalid) {
     return (
       <EmptyState title="Снимок не читается">
@@ -33,7 +50,7 @@ export function ScenariosIsland({ mode, name, invalid, invalidReason, budget, hi
       </EmptyState>
     );
   }
-  if (!budget || !totals) return <Skeleton lines={4} />;
+  if (!budget || !totals || !charts) return <Skeleton lines={4} />;
 
   const kpis = [
     {
@@ -46,7 +63,7 @@ export function ScenariosIsland({ mode, name, invalid, invalidReason, budget, hi
     },
     {
       id: 'forecast',
-      label: 'За 12 месяцев',
+      label: 'За 12 месяцев ×52',
       value: budget.forecast12mLabel,
       unit: 'BYN',
       hint: 'Недельный бюджет × 52',
@@ -65,8 +82,46 @@ export function ScenariosIsland({ mode, name, invalid, invalidReason, budget, hi
       label: 'План: клиенты',
       value: totals.planned.customersLabel,
       unit: null,
-      hint: 'Прогноз на неделю',
+      hint: 'Прогноз на неделю при текущем LTV',
       tone: null,
+    },
+  ];
+
+  const beforeAfter = [
+    {
+      key: 'spend',
+      label: 'Расход за неделю',
+      before: totals.current.spendLabel,
+      after: totals.planned.spendLabel,
+      unit: 'BYN',
+    },
+    {
+      key: 'customers',
+      label: 'Новые клиенты за неделю',
+      before: totals.current.customersLabel,
+      after: totals.planned.customersLabel,
+      unit: null,
+    },
+    {
+      key: 'cac',
+      label: 'CAC',
+      before: '—',
+      after: totals.forecast.cacLabel,
+      unit: 'BYN',
+    },
+    {
+      key: 'revenue',
+      label: 'Выручка за 12 месяцев',
+      before: '—',
+      after: totals.forecast.revenue12Label,
+      unit: 'BYN',
+    },
+    {
+      key: 'romi',
+      label: 'ROMI за 12 месяцев',
+      before: '—',
+      after: totals.forecast.romiLabel,
+      unit: null,
     },
   ];
 
@@ -77,7 +132,7 @@ export function ScenariosIsland({ mode, name, invalid, invalidReason, budget, hi
         meta={
           budget.isAboveWarn
             ? 'Бюджет выше фактического более чем в 2 раза — прогноз за пределами наблюдённых расходов.'
-            : `Потолок бюджета: ${budget.capLabel} BYN · текущий расход ${budget.warnAboveLabel} BYN × 2`
+            : `Потолок бюджета: ${budget.capLabel} BYN · предупреждение выше ${budget.warnAboveLabel} BYN (2×)`
         }
       >
         <div className="grid grid--4">
@@ -86,6 +141,113 @@ export function ScenariosIsland({ mode, name, invalid, invalidReason, budget, hi
           ))}
         </div>
       </Card>
+
+      <Card
+        title="До и после"
+        meta="Прогноз на 12 месяцев при текущем LTV. CAC и ROMI появляются только там, где модель предсказывает клиентов."
+      >
+        <div className="table-wrap" role="region" aria-label="Сравнение до и после" tabIndex={0}>
+          <table className="table">
+            <caption className="u-visually-hidden">Сценарий: текущее состояние и план</caption>
+            <thead>
+              <tr>
+                <th scope="col">Показатель</th>
+                <th scope="col" className="u-right">Сейчас</th>
+                <th scope="col" className="u-right">План</th>
+              </tr>
+            </thead>
+            <tbody>
+              {beforeAfter.map((row) => (
+                <tr key={row.key}>
+                  <th scope="row">{row.label}</th>
+                  <td className="u-right u-numeric u-nowrap">
+                    {row.before}
+                    {row.before !== '—' && row.unit === 'BYN' && <span className="byn"> BYN</span>}
+                  </td>
+                  <td className="u-right u-numeric u-nowrap">
+                    {row.after}
+                    {row.after !== '—' && row.unit === 'BYN' && <span className="byn"> BYN</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      <div className="grid grid--2">
+        <ChartErrorBoundary island="scenarios" title={charts.spend.title} table={charts.spend.table}>
+          <ChartFrame
+            title={charts.spend.title}
+            caption={charts.spend.caption}
+            unit={charts.spend.unit}
+            ariaLabel={charts.spend.ariaLabel}
+            empty={!charts.spend.hasData}
+            emptyText="Нет измеренного расхода: текущее среднее и план — нули. Таблица ниже перечисляет каналы."
+            table={charts.spend.table}
+            height="md"
+          >
+            <ComparisonBars chart={charts.spend} />
+          </ChartFrame>
+        </ChartErrorBoundary>
+
+        <ChartErrorBoundary
+          island="scenarios"
+          title={charts.customers.title}
+          table={charts.customers.table}
+        >
+          <ChartFrame
+            title={charts.customers.title}
+            caption={charts.customers.caption}
+            unit={charts.customers.unit}
+            ariaLabel={charts.customers.ariaLabel}
+            empty={!charts.customers.hasData}
+            emptyText="Нет измеренных клиентов: прогноз не из чего строить. Таблица ниже перечисляет каналы."
+            table={charts.customers.table}
+            height="md"
+          >
+            <ComparisonBars chart={charts.customers} />
+          </ChartFrame>
+        </ChartErrorBoundary>
+
+        <ChartErrorBoundary
+          island="scenarios"
+          title={charts.saturation.title}
+          table={charts.saturation.table}
+        >
+          <ChartFrame
+            title={charts.saturation.title}
+            caption={charts.saturation.caption}
+            unit={charts.saturation.unit}
+            ariaLabel={charts.saturation.ariaLabel}
+            empty={!charts.saturation.hasData}
+            emptyText="Кривая не построена: у канала линейная модель или нет недель с клиентами. Примечание в таблице объясняет причину, наблюдения остаются в таблице."
+            table={charts.saturation.table}
+            height="md"
+          >
+            <SaturationCurve chart={charts.saturation} />
+          </ChartFrame>
+        </ChartErrorBoundary>
+
+        <ChartErrorBoundary
+          island="scenarios"
+          title={charts.increment.title}
+          table={charts.increment.table}
+        >
+          <ChartFrame
+            title={charts.increment.title}
+            caption={charts.increment.caption}
+            unit={charts.increment.unit}
+            ariaLabel={charts.increment.ariaLabel}
+            empty={!charts.increment.hasData}
+            emptyText="Нет каналов с планом: прирост считать не из чего."
+            table={charts.increment.table}
+            height="sm"
+          >
+            <IncrementBars chart={charts.increment} />
+          </ChartFrame>
+        </ChartErrorBoundary>
+      </div>
 
       <Card
         title="Каналы сценария"

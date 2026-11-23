@@ -17,6 +17,19 @@ import {
   buildFunnelSteps,
   buildRomiByChannelChart,
 } from '../../src/services/metrics/chart-series.js';
+import {
+  buildAlertsScreen,
+  buildScenarioDetailScreen,
+  buildScenariosScreen,
+  buildScenariosUnavailableScreen,
+} from '../../src/services/decisions/screen-models.js';
+import {
+  buildCustomersForecastChart,
+  buildIncrementChart,
+  buildSaturationCurveChart,
+  buildSpendAllocationChart,
+  signedCustomersLabel,
+} from '../../src/services/decisions/scenario-charts.js';
 import { heatBucket } from '../../src/lib/heat-scale.js';
 
 const LAST_WEEK = '2026-11-09';
@@ -1411,5 +1424,245 @@ describe('attribution screen model', () => {
 
     expect(() => JSON.stringify(screen)).not.toThrow();
     expect(JSON.stringify(screen)).not.toMatch(/NaN|Infinity/);
+  });
+});
+
+/**
+ * A two-channel scenario result in the exact shape `scenarios.service` stores: one fitted channel with a plan and one
+ * linear channel that stays visible but outside the allocation.
+ *
+ * @returns {{ scenario: object, list: object }}
+ */
+function scenarioFixture() {
+  const observed = [
+    { spendCents: '40000', customers: 3 },
+    { spendCents: '80000', customers: 5 },
+    { spendCents: '100000', customers: 5 },
+  ];
+
+  const scenario = {
+    channels: [
+      {
+        channelId: '1',
+        channelCode: 'instagram',
+        channelName: 'Instagram',
+        model: 'saturation',
+        K: 12.5,
+        S: 20,
+        r2: 0.7,
+        observed,
+        current: { spendCents: '100000', customers: 4 },
+        planned: { spendCents: '120000', customers: 6.5 },
+        forecast: {
+          customers: 6.5,
+          revenue12Cents: '250000',
+          cacCents: '18462',
+          romi12: 100.2,
+        },
+        note: null,
+      },
+      {
+        channelId: '2',
+        channelCode: 'email',
+        channelName: 'Email',
+        model: 'linear',
+        K: null,
+        S: null,
+        r2: null,
+        observed: [{ spendCents: '0', customers: 2 }],
+        current: { spendCents: '0', customers: 2 },
+        planned: null,
+        forecast: null,
+        note: 'Линейная кривая — без оптимума',
+      },
+    ],
+    totals: {
+      current: { spendCents: '100000', customers: 4 },
+      planned: { spendCents: '120000', customers: 6.5 },
+      forecast: {
+        customers: 6.5,
+        revenue12Cents: '250000',
+        cacCents: '18462',
+        romi12: 100.2,
+      },
+    },
+    warnings: ['Email: Линейная кривая — без оптимума'],
+  };
+
+  return {
+    scenario,
+    list: {
+      rows: [
+        {
+          id: '7',
+          name: 'Проверка снимка',
+          authorLabel: 'Аналитик',
+          createdAt: '2026-11-20T10:00:00Z',
+          anchor: '2026-11-20',
+          budgetCents: '120000',
+          channelCount: 2,
+          invalid: false,
+          invalidReason: null,
+        },
+      ],
+      page: 1,
+      total: 1,
+      hasMore: false,
+    },
+  };
+}
+
+describe('scenario screen model and charts', () => {
+  it('builds the weekly budget, the 12-month ×52 forecast and the 3× cap from config', () => {
+    const { scenario, list } = scenarioFixture();
+    const screen = buildScenariosScreen({ scenario, list, query: {}, anchor: '2026-11-20' });
+
+    expect(screen.page).toBe('scenarios');
+    expect(screen.mode).toBe('builder');
+    expect(screen.budgetPeriod).toBe('week');
+    expect(screen.budget.weeklyCents).toBe('120000');
+    expect(screen.budget.forecast12mCents).toBe(String(120000n * 52n));
+    expect(screen.budget.capCents).toBe('300000');
+    expect(screen.budget.warnAboveCents).toBe('200000');
+    expect(screen.budget.isAboveWarn).toBe(false);
+    expect(screen.controls.presets.map((preset) => preset.label)).toEqual(['Как сейчас', '+20 %', '×2']);
+    expect(screen.controls.presets[0].href).toContain('budgetByn=1000.00');
+    expect(screen.controls.curveChannelId).toBe('1');
+  });
+
+  it('builds four charts from the same channel snapshot and names the conclusion', () => {
+    const { scenario, list } = scenarioFixture();
+    const screen = buildScenariosScreen({ scenario, list, query: {}, anchor: '2026-11-20' });
+
+    expect(Object.keys(screen.charts)).toEqual(['spend', 'customers', 'saturation', 'increment']);
+    expect(screen.charts.spend.title).toContain('план');
+    expect(screen.charts.spend.title).toContain('+20,0%');
+    expect(screen.charts.spend.caption).toContain('26 недель');
+    expect(screen.charts.spend.unit).toBe('BYN');
+    expect(screen.charts.customers.unit).toBe('чел.');
+    expect(screen.charts.saturation.title).toContain('Instagram');
+    expect(screen.charts.saturation.series.length).toBeGreaterThan(10);
+    expect(screen.charts.increment.series).toHaveLength(1);
+    expect(screen.charts.increment.series[0].delta).toBe(2.5);
+    expect(screen.charts.increment.table.rows[0].cells.delta).toBe('+2,5');
+  });
+
+  it('keeps a linear channel out of the plan while showing its note and a dashed planned cell', () => {
+    const { scenario, list } = scenarioFixture();
+    const screen = buildScenariosScreen({ scenario, list, query: {}, anchor: '2026-11-20' });
+    const linear = screen.channels.find((channel) => channel.channelId === '2');
+
+    expect(linear.note).toBe('Линейная кривая — без оптимума');
+    expect(linear.planned).toBeNull();
+    expect(screen.totals.planned.spendCents).toBe('120000');
+    expect(screen.charts.spend.table.rows.find((row) => row.key === '2').cells.planned).toBe('—');
+  });
+
+  it('turns an empty input into an empty chart with a non-empty dash table', () => {
+    const spend = buildSpendAllocationChart({ channels: [] });
+    const customers = buildCustomersForecastChart({ channels: [] });
+    const saturation = buildSaturationCurveChart({ channel: { channelName: 'Email', model: 'linear' }, observed: [] });
+    const increment = buildIncrementChart({ channels: [] });
+
+    for (const chart of [spend, customers, saturation, increment]) {
+      expect(chart.hasData).toBe(false);
+      expect(chart.table.rows.length).toBeGreaterThan(0);
+      expect(chart.table.rows[0].cells).toBeTruthy();
+      expect(JSON.stringify(chart)).not.toMatch(/NaN|Infinity/);
+    }
+    expect(saturation.table.rows[0].cells.curve).toBe('—');
+    expect(increment.table.rows[0].cells.delta).toBe('—');
+  });
+
+  it('keeps the sign on a negative increment', () => {
+    const chart = buildIncrementChart({
+      channels: [
+        {
+          channelId: '1',
+          channelName: 'Instagram',
+          model: 'saturation',
+          current: { customers: 9 },
+          forecast: { customers: 4.25 },
+        },
+      ],
+    });
+
+    expect(chart.series[0].delta).toBe(-4.75);
+    expect(chart.table.rows[0].cells.delta).toBe('\u22124,8');
+    expect(signedCustomersLabel(0)).toBe('0,0');
+    expect(chart.title).toContain('\u22124,8');
+  });
+
+  it('renders the stored snapshot in detail mode without refitting the curve', () => {
+    const { scenario } = scenarioFixture();
+    // A deliberately implausible stored K: the model must echo it, because the detail page never refits.
+    scenario.channels[0].K = 999;
+    const screen = buildScenarioDetailScreen({
+      scenario: {
+        id: '7',
+        name: 'Снимок',
+        authorLabel: 'Аналитик',
+        createdAt: '2026-11-20T10:00:00Z',
+        savedAnchor: '2026-11-15',
+        invalid: false,
+        invalidReason: null,
+        params: {
+          budgetCents: '120000',
+          history: { weeks: 26, from: '2026-05-18', to: '2026-11-15' },
+        },
+        result: scenario,
+      },
+    });
+
+    expect(screen.mode).toBe('detail');
+    expect(screen.savedAnchor).toBe('2026-11-15');
+    expect(screen.savedAnchorLabel).toBe('15.11.2026');
+    expect(screen.charts.saturation.title).toContain('999,0');
+    expect(screen.charts.spend.caption).toContain('18.05–15.11.2026');
+    expect(screen.repeatHref).toContain('budgetByn=1200.00');
+  });
+
+  it('renders the designed empty builder instead of a 400 when no curve can be fitted', () => {
+    const screen = buildScenariosUnavailableScreen({
+      anchor: '2026-11-20',
+      list: { rows: [], page: 1, total: 0, hasMore: false },
+      channels: [{ id: '1', code: 'instagram', name: 'Instagram' }],
+      error: 'Нет недель с расходом',
+    });
+
+    expect(screen.unavailable).toBe(true);
+    expect(screen.empty).toBe(true);
+    expect(screen.budget).toBeNull();
+    expect(screen.charts).toBeNull();
+    expect(screen.error).toBe('Нет недель с расходом');
+    expect(screen.controls.channels[0].selected).toBe(false);
+    expect(screen.list.total).toBe(0);
+  });
+
+  it('serialises the builder and detail models without a bigint, NaN or Infinity', () => {
+    const { scenario, list } = scenarioFixture();
+    const builder = buildScenariosScreen({ scenario, list, query: {}, anchor: '2026-11-20' });
+
+    expect(() => JSON.stringify(builder)).not.toThrow();
+    expect(JSON.stringify(builder)).not.toMatch(/NaN|Infinity/);
+    expect(JSON.stringify(builder.charts)).not.toMatch(/NaN|Infinity/);
+  });
+});
+
+describe('alerts screen model chart slot', () => {
+  it('carries the chart object through untouched and keeps the absolute check label', () => {
+    const chart = { title: 'CAC: Instagram', caption: '12 недель', table: { columns: [], rows: [] } };
+    const screen = buildAlertsScreen({
+      window: { anchor: '2026-11-20', weeks: 4, now: { from: '2026-10-26', to: '2026-11-22' } },
+      rows: [],
+      summary: { active: 0, critical: 0, warning: 0, resolved: 0, dismissed: 0, lastDetectedAt: null },
+      filters: { status: 'active', severity: 'all', channelId: null },
+      chart,
+      pagination: { page: 1, total: 0, hasMore: false },
+    });
+
+    expect(screen.page).toBe('alerts');
+    expect(screen.chart).toBe(chart);
+    expect(screen.summary.lastRecalculatedLabel).toBe('Ещё не проверяли');
   });
 });

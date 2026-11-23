@@ -14,6 +14,28 @@
       </p>
     </div>
 
+    <% if (model.unavailable) { %>
+    <div class="card card--flat">
+      <div class="card__header">
+        <div>
+          <h3 class="card__title">Пока нечего распределять</h3>
+          <p class="card__meta">Пустые недели не дают кривой: модель не выдумывает насыщение из нулей.</p>
+        </div>
+      </div>
+      <div class="empty-state">
+        <p class="empty-state__title">Нет данных для расчёта сценария</p>
+        <p class="empty-state__text"><%= model.error %></p>
+        <p class="empty-state__text">
+          Нужны минимум 8 недель с расходом и новыми клиентами по каналу. Загрузите статистику и новые заказы —
+          после этого появятся кривые, план и прогноз.
+        </p>
+        <% if (can('import:run')) { %>
+        <a class="btn btn--primary btn--sm" href="/app/import">Перейти к импорту</a>
+        <% } %>
+      </div>
+    </div>
+    <% } else { %>
+
     <div class="card card--flat">
       <div class="card__header">
         <div>
@@ -26,21 +48,34 @@
       </div>
 
       <form class="inline-form" method="get" action="/app/scenarios" aria-label="Параметры сценария">
-        <label class="field">
+        <div class="field">
           <span class="field__label">Недельный бюджет</span>
           <input
-            class="input"
-            type="number"
+            class="range"
+            type="range"
             name="budgetByn"
             value="<%= model.controls.budgetInput %>"
             min="0.01"
             max="<%= model.budget.capInput %>"
             step="0.01"
-            inputmode="decimal"
+            aria-describedby="budget-hint"
             required
           >
-          <span class="field__hint">Максимум <%= model.budget.capLabel %> <span class="byn">BYN</span> — 3× текущего бюджета</span>
-        </label>
+          <span class="field__hint" id="budget-hint">
+            <strong class="u-numeric"><%= model.budget.weeklyLabel %> <span class="byn">BYN</span></strong>
+            · за 12 месяцев ×52: <strong class="u-numeric"><%= model.budget.forecast12mLabel %> <span class="byn">BYN</span></strong>
+            · максимум <%= model.budget.capLabel %> <span class="byn">BYN</span> — 3× текущего бюджета
+          </span>
+          <div class="cluster" aria-label="Пресеты недельного бюджета">
+            <% for (const preset of model.controls.presets) { %>
+            <a
+              class="btn btn--ghost btn--sm"
+              href="<%= preset.href %>"
+              <%= preset.active ? 'aria-current="true"' : '' %>
+            ><%= preset.label %></a>
+            <% } %>
+          </div>
+        </div>
 
         <fieldset class="field">
           <legend class="field__label">Каналы</legend>
@@ -55,11 +90,11 @@
         <label class="field">
           <span class="field__label">Канал кривой</span>
           <select class="select" name="curveChannelId">
-            <option value="">Проблемный канал</option>
             <% for (const channel of model.controls.channels) { %>
             <option value="<%= channel.value %>"<%= channel.value === model.controls.curveChannelId ? ' selected' : '' %>><%= channel.label %></option>
             <% } %>
           </select>
+          <span class="field__hint">«Проблемный» выбирается автоматически — первый канал с кривой насыщения.</span>
         </label>
 
         <div class="cluster">
@@ -102,6 +137,7 @@
         <button class="btn btn--ghost" type="submit">Сохранить сценарий</button>
       </form>
     </div>
+    <% } %>
     <% } %>
 
     <div class="card card--flat">
