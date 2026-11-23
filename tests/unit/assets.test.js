@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   AssetManifestError,
+  KNOWN_ENTRIES,
   absoluteAssetPath,
   createAssetManifest,
 } from '../../src/lib/assets.js';
@@ -97,6 +98,24 @@ describe('asset manifest', () => {
 
     expect(() => assets.assets(['dashbaord'])).toThrow(AssetManifestError);
     expect(() => assets.assets(['dashbaord'])).toThrow(/dashbaord/);
+  });
+
+  it('accepts every Vite entry before the first build, so a fresh clone cannot 500', () => {
+    // Parse the input map instead of importing Vite config: this test only needs the declared keys, and a source
+    // assertion fails in the same commit that adds an entry without teaching the optional-manifest guard about it.
+    const source = readFileSync('vite.config.js', 'utf8');
+    const input = /input:\s*\{([\s\S]*?)\n\s*\},/.exec(source)?.[1];
+    expect(input).toBeTruthy();
+    const entries = [...input.matchAll(/^\s*([a-z][a-z0-9]*):\s*fileURLToPath/gm)].map((match) => match[1]);
+
+    expect(entries.length).toBeGreaterThanOrEqual(5);
+    expect([...KNOWN_ENTRIES].sort()).toEqual([...entries].sort());
+
+    const path = join(tmpdir(), `metrika-missing-${Date.now()}-fresh.json`);
+    const assets = createAssetManifest({ manifestPath: path, required: false, warn: () => {} });
+    for (const entry of entries) {
+      expect(assets.assets([entry]), entry).toEqual({ scripts: [], preloads: [] });
+    }
   });
 
   it('re-reads a development manifest when its mtime changes', () => {

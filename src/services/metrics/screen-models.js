@@ -1,9 +1,8 @@
 import { METRICS_CONFIG } from '../../config/metrics.js';
 import { formatDateRu } from '../../lib/dates.js';
-import { formatCentsToByn, formatInteger, formatPercent, formatRomi } from '../../lib/format.js';
+import { formatCentsToByn, formatInteger, formatPercent, formatRomi, formatSignedPercent } from '../../lib/format.js';
 import { heatBucket } from '../../lib/heat-scale.js';
 import { ATTRIBUTION_MODEL_LABELS, CHANNEL_KIND_LABELS } from '../../lib/metrics-labels.js';
-import { roundNumber } from '../../lib/metrics-math.js';
 import { inclusiveDays } from '../../lib/periods.js';
 import { buildQueryString } from '../../lib/query.js';
 import { CHANNEL_SORT_FIELDS } from '../../lib/sort-rows.js';
@@ -1027,8 +1026,9 @@ function buildAttributionTable({ comparison }) {
         // A bigint takes the signed branch of `formatCentsToByn`, unlike a negative kopeck string, which the money
         // parser rejects because stored money is never negative.
         delta: formatCentsToByn(BigInt(row.deltaLinearVsLastCents)),
-        // One decimal keeps the column aligned; `formatPercent` would otherwise print 2,4 next to 0,38.
-        deltaPct: formatPercent(roundNumber(row.deltaLinearVsLastPct, 1), { signed: true }),
+        // One decimal keeps the column aligned; the signed formatter preserves a tiny negative as `−<0,1%` instead
+        // of collapsing `−0,04%` into a positive-looking `0,0%`.
+        deltaPct: formatSignedPercent(row.deltaLinearVsLastPct),
       },
     })),
   };

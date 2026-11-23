@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatCompactCents, formatMonths, formatRatio, formatRomi } from '../../src/lib/format.js';
+import { formatCompactCents, formatMonths, formatRatio, formatRomi, formatSignedPercent } from '../../src/lib/format.js';
 
 describe('formatMonths', () => {
   it('drops trailing zeros instead of showing a fake precision', () => {
@@ -54,6 +54,23 @@ describe('formatRomi', () => {
     expect(formatRomi(undefined)).toBe('—');
     expect(() => formatRomi('abc')).toThrow(TypeError);
     expect(() => formatRomi(Number.NaN)).toThrow(TypeError);
+  });
+});
+
+describe('formatSignedPercent', () => {
+  it('renders a signed one-decimal percentage and keeps a tiny negative visible', () => {
+    expect(formatSignedPercent(12.44)).toBe('+12,4%');
+    expect(formatSignedPercent(-8.11)).toBe('\u22128,1%');
+    expect(formatSignedPercent(0)).toBe('0,0%');
+    // The delta column case: −0,04% must not become 0,0%.
+    expect(formatSignedPercent(-0.04)).toBe('\u2212<0,1%');
+    expect(formatSignedPercent(0.04)).toBe('+0,0%');
+  });
+
+  it('keeps a missing value honest and rejects non-numeric input', () => {
+    expect(formatSignedPercent(null)).toBe('—');
+    expect(formatSignedPercent(undefined)).toBe('—');
+    expect(() => formatSignedPercent('abc')).toThrow(TypeError);
   });
 });
 

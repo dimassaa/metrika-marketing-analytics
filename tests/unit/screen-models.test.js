@@ -1356,6 +1356,14 @@ describe('attribution screen model', () => {
     }
   });
 
+  it('keeps a tiny negative delta signed instead of rounding it to zero', () => {
+    const report = reportWith();
+    report.comparison[0].deltaLinearVsLastPct = -0.04;
+    const screen = buildAttributionScreen({ report, model: 'last_touch' });
+
+    expect(screen.table.rows[0].cells.deltaPct).toBe('\u2212<0,1%');
+  });
+
   it('builds three model links that preserve days and marks the active one', () => {
     const screen = screenWith({ model: 'first_touch', query: { days: '90', model: 'first_touch' } });
 

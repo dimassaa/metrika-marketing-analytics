@@ -118,6 +118,35 @@ export function formatPercent(value, { signed = false } = {}) {
 }
 
 /**
+ * Renders a signed percentage with one decimal, preserving the direction of a tiny negative value.
+ *
+ * Ordinary `formatPercent` trims to at most two decimals, but a delta rounded to one decimal can collapse `−0,04%`
+ * into `0,0%` and hide that the channel lost share. This formatter keeps the sign: a negative that rounds to zero is
+ * `−<0,1%`, exactly the rule ROMI uses; an exact zero stays `0,0%`.
+ *
+ * @param {string | number | null | undefined} value Percent value.
+ * @returns {string} `+12,4%`, `−<0,1%`, `0,0%`, or `—` for NULL.
+ * @throws {TypeError} When the value is not finite.
+ */
+export function formatSignedPercent(value) {
+  if (value === null || value === undefined || value === '') return EM_DASH;
+
+  const numeric = typeof value === 'string' ? Number(value.trim().replace(',', '.')) : Number(value);
+  if (!Number.isFinite(numeric)) {
+    throw new TypeError(`formatSignedPercent expected a finite number, got ${JSON.stringify(value)}`);
+  }
+
+  const rounded = roundNumber(numeric, 1);
+  if (rounded === 0) {
+    if (numeric === 0) return '0,0%';
+    return numeric < 0 ? `${MINUS}<0,1%` : '+0,0%';
+  }
+
+  const sign = rounded < 0 ? MINUS : '+';
+  return `${sign}${Math.abs(rounded).toFixed(1).replace('.', ',')}%`;
+}
+
+/**
  * Renders ROMI with the UI contract of metrics spec §3.2: signed and one decimal (`+713,1%`, `−0,1%`).
  *
  * A negative value that rounds to zero at one decimal must never read as `0,0%` or as a positive zero: it becomes
@@ -129,22 +158,7 @@ export function formatPercent(value, { signed = false } = {}) {
  * @throws {TypeError} When the value is not a finite number.
  */
 export function formatRomi(value) {
-  if (value === null || value === undefined || value === '') return EM_DASH;
-
-  const numeric = typeof value === 'string' ? Number(value.trim().replace(',', '.')) : Number(value);
-  if (!Number.isFinite(numeric)) {
-    throw new TypeError(`formatRomi expected a finite number, got ${JSON.stringify(value)}`);
-  }
-
-  const rounded = roundNumber(numeric, 1);
-  if (rounded === 0) {
-    // Exact zero is a measured zero. A tiny negative is not zero and must keep its direction.
-    if (numeric === 0) return '0,0%';
-    return numeric < 0 ? `${MINUS}<0,1%` : '+0,0%';
-  }
-
-  const sign = rounded < 0 ? MINUS : '+';
-  return `${sign}${Math.abs(rounded).toFixed(1).replace('.', ',')}%`;
+  return formatSignedPercent(value);
 }
 
 /**

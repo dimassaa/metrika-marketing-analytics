@@ -48,8 +48,11 @@ export function absoluteAssetPath(src) {
  * Entry names the server may ask for. This list mirrors `build.rollupOptions.input` in `vite.config.js`; it is the
  * only way to reject a typo when the optional manifest is absent, because an absent manifest cannot name its entries.
  * When a manifest exists, the manifest itself is authoritative and this list is not consulted.
+ *
+ * `tests/unit/assets.test.js` parses the Vite input block and fails when an entry is missing here, so a fresh clone
+ * (where no manifest exists yet) cannot 500 on a page whose island the server does not recognise.
  */
-const KNOWN_ENTRIES = new Set(['dashboard', 'channels', 'channel', 'cohorts']);
+export const KNOWN_ENTRIES = Object.freeze(['dashboard', 'channels', 'channel', 'cohorts', 'attribution']);
 
 /**
  * @param {string} entryName Short entry name from the controller (`dashboard`).
@@ -187,9 +190,9 @@ export function createAssetManifest({
         // Without a manifest the only check left is the declared entry list; a typo must still fail loudly instead
         // of rendering a page with a silently missing island.
         for (const name of names) {
-          if (!KNOWN_ENTRIES.has(name)) {
+          if (!KNOWN_ENTRIES.includes(name)) {
             throw new AssetManifestError(
-              `Unknown island entry "${name}". Known entries: ${[...KNOWN_ENTRIES].join(', ')}.`,
+              `Unknown island entry "${name}". Known entries: ${KNOWN_ENTRIES.join(', ')}.`,
             );
           }
         }
