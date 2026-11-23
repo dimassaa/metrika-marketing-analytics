@@ -57,9 +57,12 @@ describe.skipIf(!hasBuild)('vite build output', () => {
     expect(manifest['client/entries/dashboard.jsx']?.isEntry).toBe(true);
   });
 
-  it('keeps the dashboard entry and the whole page under their gzip budgets', () => {
+  /**
+   * @param {string} entryKey Manifest key of one page entry.
+   * @returns {{ entryGzip: number, pageGzip: number }}
+   */
+  function measureEntry(entryKey) {
     const manifest = JSON.parse(readFileSync(MANIFEST, 'utf8'));
-    const entryKey = 'client/entries/dashboard.jsx';
     const entry = manifest[entryKey];
     const chunkKeys = new Set([
       entryKey,
@@ -73,15 +76,26 @@ describe.skipIf(!hasBuild)('vite build output', () => {
     /** @param {string} file */
     const gzipSize = (file) => gzipSync(readFileSync(join(ASSETS, file)), { level: 9 }).length;
 
-    const entryGzip = gzipSize(entry.file);
-    const pageGzip = [...pageFiles].reduce((sum, file) => sum + gzipSize(file), 0);
+    return {
+      entryGzip: gzipSize(entry.file),
+      pageGzip: [...pageFiles].reduce((sum, file) => sum + gzipSize(file), 0),
+    };
+  }
 
-    expect(entryGzip, `entry gzip is ${entryGzip} B, budget ${ENTRY_GZIP_BUDGET} B`).toBeLessThanOrEqual(
-      ENTRY_GZIP_BUDGET,
-    );
-    expect(pageGzip, `page gzip is ${pageGzip} B, budget ${PAGE_GZIP_BUDGET} B`).toBeLessThanOrEqual(
-      PAGE_GZIP_BUDGET,
-    );
+  it.each([
+    ['dashboard', 'client/entries/dashboard.jsx'],
+    ['channel passport', 'client/entries/channel.jsx'],
+  ])('keeps the %s entry and whole page under their gzip budgets', (label, entryKey) => {
+    const { entryGzip, pageGzip } = measureEntry(entryKey);
+
+    expect(
+      entryGzip,
+      `${label} entry gzip is ${entryGzip} B, budget ${ENTRY_GZIP_BUDGET} B`,
+    ).toBeLessThanOrEqual(ENTRY_GZIP_BUDGET);
+    expect(
+      pageGzip,
+      `${label} page gzip is ${pageGzip} B, budget ${PAGE_GZIP_BUDGET} B`,
+    ).toBeLessThanOrEqual(PAGE_GZIP_BUDGET);
   });
 
   it('emits the dashboard entry and every file the manifest names', () => {

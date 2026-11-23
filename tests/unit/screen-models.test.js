@@ -756,17 +756,21 @@ describe('passport screen model', () => {
     expect(screen.retention.cohorts[0].isPartial).toBe(false);
     expect(screen.retention.cohorts[1].isPartial).toBe(true);
     expect(screen.retention.incompleteCount).toBe(1);
-    expect(screen.retention.cohorts[0].cells[1]).toMatchObject({
-      retentionPct: 50,
+    expect(screen.retention.cohorts[0].cells[1]).toEqual({
+      monthOffset: 1,
       retentionLabel: '50,0%',
       heatClass: heatBucket(50),
       cumLtvLabel: '100,00',
     });
-    expect(screen.retention.cohorts[1].cells[1]).toMatchObject({
-      retentionPct: null,
+    expect(screen.retention.cohorts[1].cells[1]).toEqual({
+      monthOffset: 1,
       retentionLabel: '—',
       heatClass: 'is-empty',
+      cumLtvLabel: '—',
     });
+    // Raw matrix columns are not sent when the grid cannot read them; the cohorts screen keeps its richer model.
+    expect(screen.retention.cohorts[0]).not.toHaveProperty('ltvCents');
+    expect(screen.retention.cohorts[0]).not.toHaveProperty('monthsObserved');
     expect(screen.retention.hasData).toBe(true);
   });
 
@@ -776,6 +780,14 @@ describe('passport screen model', () => {
     expect(screen.campaigns).toEqual([
       expect.objectContaining({ id: '41', spendCents: '60000', cacCents: '10000', newCustomers: 6 }),
     ]);
+    expect(screen.campaignsTruncated).toBe(false);
+  });
+
+  it('passes the campaign truncation flag through to the table notice', () => {
+    const passport = { ...passportWith(), campaignsTruncated: true };
+    const screen = buildPassportScreen({ passport, matrix: matrixWith() });
+
+    expect(screen.campaignsTruncated).toBe(true);
   });
 
   it('compares ready fact and target values for CAC and ROMI', () => {
@@ -786,9 +798,17 @@ describe('passport screen model', () => {
       targetLabel: '45,00',
       factLabel: '43,52',
       unit: 'BYN',
+      targetSet: true,
+      factSet: true,
       tone: 'good',
     });
-    expect(targets.romi).toMatchObject({ targetLabel: '120,0%', factLabel: '+635,5%', tone: 'good' });
+    expect(targets.romi).toMatchObject({
+      targetLabel: '120,0%',
+      factLabel: '+635,5%',
+      targetSet: true,
+      factSet: true,
+      tone: 'good',
+    });
 
     const overTarget = passportWith({
       health: { ...passportWith().health, cacCents: '5000', cacLabel: '50,00', romiPct: 90, romiLabel: '+90,0%' },
@@ -798,16 +818,8 @@ describe('passport screen model', () => {
     expect(worse.targets.find((target) => target.metric === 'romi').tone).toBe('bad');
   });
 
-  it('leaves the target tone unset when a target or a fact is missing', () => {
-    const passport = passportWith({
-      channel: {
-        id: '4',
-        code: 'instagram',
-        name: 'Instagram',
-        kind: 'paid',
-        targetCacCents: null,
-        targetRomiPct: null,
-      },
+  it('distinguishes a missing target from a missing fact', () => {
+    const missingFact = passportWith({
       health: {
         ...passportWith().health,
         cacCents: null,
@@ -818,9 +830,32 @@ describe('passport screen model', () => {
         statusLabel: 'Мало данных',
       },
     });
-    const screen = buildPassportScreen({ passport, matrix: { horizonMonths: 2, anchor: '2026-11-21', cohorts: [] } });
+    const withTargets = buildPassportScreen({
+      passport: missingFact,
+      matrix: { horizonMonths: 2, anchor: '2026-11-21', cohorts: [] },
+    });
+    expect(withTargets.targets.map((target) => target.targetSet)).toEqual([true, true]);
+    expect(withTargets.targets.map((target) => target.factSet)).toEqual([false, false]);
+    expect(withTargets.targets.map((target) => target.tone)).toEqual([null, null]);
+    expect(withTargets.targets.map((target) => target.targetLabel)).toEqual(['45,00', '120,0%']);
 
-    expect(screen.targets.map((target) => target.tone)).toEqual([null, null]);
+    const noTarget = passportWith({
+      channel: {
+        id: '4',
+        code: 'instagram',
+        name: 'Instagram',
+        kind: 'paid',
+        targetCacCents: null,
+        targetRomiPct: null,
+      },
+      health: missingFact.health,
+    });
+    const screen = buildPassportScreen({
+      passport: noTarget,
+      matrix: { horizonMonths: 2, anchor: '2026-11-21', cohorts: [] },
+    });
+
+    expect(screen.targets.map((target) => target.targetSet)).toEqual([false, false]);
     expect(screen.targets.map((target) => target.targetLabel)).toEqual(['—', '—']);
     expect(screen.retention.hasData).toBe(false);
   });
@@ -832,7 +867,8 @@ describe('passport screen model', () => {
     });
     const screen = buildPassportScreen({ passport: zero, matrix: matrixWith() });
 
-    expect(screen.channel).toMatchObject({ isActive: false, statusLabel: 'В архиве' });
+    expect(screen.channel).toMatchObject({ isActive: false, activityLabel: 'В архиве' });
+    expect(screen.health.statusLabel).toBe('В норме');
     expect(screen.funnel.hasData).toBe(false);
     expect(screen.funnel.meterMax).toBe(1);
     expect(screen.funnel.stages.every((stage) => stage.meterMax >= 1)).toBe(true);

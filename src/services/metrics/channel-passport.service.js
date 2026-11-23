@@ -87,8 +87,10 @@ export function createChannelPassportService({
      *     id: string, code: string, name: string, status: string,
      *     spendCents: string, newCustomers: number, cacCents: string | null,
      *   }>,
+     *   campaignsTruncated: boolean,
      * }>} JSON-safe view-model; money as kopeck strings, percentages as numbers. At most
      *   `CAMPAIGN_LIST_LIMIT` campaigns are returned, without the repository's truncation sentinel.
+     *   `campaignsTruncated` is true when the repository's sentinel row proves that more campaigns exist.
      * @throws {ValidationError} When the anchor, period or channel id is malformed.
      * @throws {NotFoundError} When the channel does not exist.
      * @throws {TypeError} When a dependency returns a row outside its contract.
@@ -137,6 +139,7 @@ export function createChannelPassportService({
 
       // `listCampaigns` reads `LIMIT + 1` so the list screen can tell "200 campaigns" from "more than 200". The
       // extra row is a truncation sentinel, not a campaign: render at most the real limit instead of a 201st row.
+      const campaignsTruncated = campaignRows.length > CAMPAIGN_LIST_LIMIT;
       const visibleCampaigns = campaignRows.slice(0, CAMPAIGN_LIST_LIMIT);
       const cacInputByCampaign = new Map(campaignCacRows.map((row) => [row.campaignId, row]));
       const campaigns = visibleCampaigns.map((campaign) => {
@@ -175,6 +178,7 @@ export function createChannelPassportService({
         series: buildWeeklySeries({ firstWeekStart, weeks: METRICS_CONFIG.dashboard.weeks, weeklyRows, attributedRows }),
         funnel,
         campaigns,
+        campaignsTruncated,
       };
     },
   };

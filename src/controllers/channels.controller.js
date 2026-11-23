@@ -241,8 +241,10 @@ export function createChannelsController({ channelsService, campaignsService, me
       model: screen,
       islandEntries: ['channel'],
       // The topbar period form changes `days` without dropping any other query key; this page has no other filter.
+      // A rejected update or archive POST renders this same page, so the action must be the canonical passport URL,
+      // never the POST path (`/app/channels/:id/archive` would 404 on a GET).
       periodControl: buildPeriodControl({ query, period: screen.period }),
-      currentPath: `${req.baseUrl}${req.path}`,
+      currentPath: `/app/channels/${id}`,
       formValues: values ?? detail.form,
       formError: error,
       channelCampaigns,

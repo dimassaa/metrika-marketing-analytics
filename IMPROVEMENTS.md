@@ -631,3 +631,20 @@ Still open:
   (`ReportChartSize` dispatches in an effect), so `react-dom/server` renders the fixed `recharts-wrapper` only. The
   unit test pins the wrapper geometry and the dash state; the real SVG (8 of them) is verified in `agent-browser`.
   An automated DOM environment would need a new dev dependency, which this milestone does not justify.
+
+## M4 Task 4 — channel passport follow-ups
+
+- **The passport shows two campaign tables.** The M2 management table (status, dates, budget, lifetime spend, edit
+  links) is preserved as required, while the React table gives period CAC and customer counts. They answer different
+  questions, but the page is long; merging them or moving the management table behind an edit mode is an M5 decision.
+- **The spend/revenue chart is an extra third chart.** The T4 interface named `charts: { cac, romi }`; the grouped
+  weekly spend/attributed-revenue bars reuse the existing series and add no query. The campaign-dimension stacked area
+  stays deferred because `listWeeklySeries` has no campaign dimension.
+- **Budget wording:** the 26-query passport budget is service-level (M2 detail, campaign list, M3 passport, cohort
+  matrix). A real page request adds the single `getDataAnchor()` read, and the session store query is outside the
+  count, matching the other M4 budgets.
+- **The passport retention payload is intentionally narrower than the M3 matrix.** The grid reads ready labels, heat
+  classes and the partial flag; raw `ltvCents`, `cumLtvCents`, `isComplete` and `monthsObserved` are not sent in
+  `data-props`. The cohorts screen keeps the richer model and its own aggregation.
+- **A capped campaign list states the cap.** The passport returns at most `CAMPAIGN_LIST_LIMIT` campaigns and exposes
+  `campaignsTruncated`; the island prints “Показаны первые N кампаний” and points to the campaign screen for filters.

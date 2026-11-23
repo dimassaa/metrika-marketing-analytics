@@ -22,17 +22,28 @@ import { formatCentsToByn } from '../../src/lib/format.js';
  *
  * @param {{
  *   page: 'channel',
- *   channel: { id: string, name: string, kindLabel: string, isActive: boolean, statusLabel: string },
+ *   channel: { id: string, name: string, kindLabel: string, isActive: boolean, activityLabel: string },
  *   period: { from: string, to: string, days: number, label: string },
  *   health: object,
  *   charts: { cac: object, romi: object, spendRevenue: object },
  *   retention: object,
  *   funnel: object,
  *   campaigns: object[],
+ *   campaignsTruncated: boolean,
  *   targets: Array<object>,
  * }} props Screen model.
  */
-export function ChannelIsland({ channel, period, health, charts, retention, funnel, campaigns, targets }) {
+export function ChannelIsland({
+  channel,
+  period,
+  health,
+  charts,
+  retention,
+  funnel,
+  campaigns,
+  campaignsTruncated,
+  targets,
+}) {
   if (!health) return <Skeleton lines={4} />;
 
   const metrics = [
@@ -100,7 +111,6 @@ export function ChannelIsland({ channel, period, health, charts, retention, funn
         <div className="stack">
           <div className="cluster">
             <HealthBadge status={health.status} label={health.statusLabel} />
-            {!channel.isActive && <span className="badge badge--neutral">В архиве</span>}
             <p className="u-muted">
               {channel.isActive
                 ? 'Канал активен: метрики считаются за выбранный период.'
@@ -119,7 +129,7 @@ export function ChannelIsland({ channel, period, health, charts, retention, funn
       <Card
         title="Цели канала"
         meta={
-          targets.every((target) => target.tone === null)
+          targets.every((target) => !target.targetSet)
             ? 'Цель не задана — сравнение появится после настройки канала.'
             : 'Факт за период против цели; цвет — только у статуса, не у суммы.'
         }
@@ -149,7 +159,7 @@ export function ChannelIsland({ channel, period, health, charts, retention, funn
                     <Amount value={target.factLabel} unit={target.unit} />
                   </td>
                   <td>
-                    <TargetStatus tone={target.tone} />
+                    <TargetStatus target={target} />
                   </td>
                 </tr>
               ))}
@@ -221,11 +231,17 @@ export function ChannelIsland({ channel, period, health, charts, retention, funn
                     min="0"
                     max={stage.meterMax}
                     value={stage.value}
-                    aria-label={`${stage.label}: ${stage.valueLabel}, ${stage.shareLabel} от показов`}
+                    aria-label={
+                      stage.sharePct === null
+                        ? `${stage.label}: ${stage.valueLabel}; доля не определена — показов нет`
+                        : `${stage.label}: ${stage.valueLabel}, ${stage.shareLabel} от показов`
+                    }
                   >
                     {stage.valueLabel}
                   </meter>
-                  <span className="funnel__share">{stage.shareLabel} от показов</span>
+                  <span className="funnel__share">
+                    {stage.sharePct === null ? 'показов нет' : `${stage.shareLabel} от показов`}
+                  </span>
                 </div>
               </li>
             ))}
@@ -251,7 +267,7 @@ export function ChannelIsland({ channel, period, health, charts, retention, funn
       <Card title="Кампании: CAC за период" meta="CAC считается по расходу и клиентам выбранного периода, а не за всё время.">
         {campaigns.length === 0 ? (
           <EmptyState title="Кампаний нет">
-            У канала ещё нет кампаний. Добавьте её в форме ниже — и расход начнёт раскладываться по периодам.
+            У канала ещё нет кампаний. Когда они появятся, расход начнёт раскладываться по периодам.
           </EmptyState>
         ) : (
           <div className="table-wrap">
@@ -290,9 +306,28 @@ export function ChannelIsland({ channel, period, health, charts, retention, funn
             </table>
           </div>
         )}
+        {campaignsTruncated && (
+          <p className="matrix__note">
+            Показаны первые {campaignsCountLabel(campaigns.length)}. Полный список с фильтрами — на странице
+            кампаний.
+          </p>
+        )}
       </Card>
     </div>
   );
+}
+
+/**
+ * @param {number} count
+ * @returns {string} Russian noun form for the campaign count.
+ */
+function campaignsCountLabel(count) {
+  const tail = count % 100;
+  const last = count % 10;
+  if (tail >= 11 && tail <= 14) return `${count} кампаний`;
+  if (last === 1) return `${count} кампания`;
+  if (last >= 2 && last <= 4) return `${count} кампании`;
+  return `${count} кампаний`;
 }
 
 /**
@@ -315,18 +350,22 @@ function Amount({ value, unit }) {
 }
 
 /**
- * @param {{ tone: 'good' | 'bad' | null }} props
+ * Three distinct states, not one: no configured target, a target without a fact, and a real comparison.
+ * @param {{ target: { targetSet: boolean, factSet: boolean, tone: 'good' | 'bad' | null } }} props
  */
-function TargetStatus({ tone }) {
-  if (tone === null) return <span className="target__status target__status--none">Нет цели</span>;
+function TargetStatus({ target }) {
+  if (!target.targetSet) return <span className="target__status target__status--none">Цель не задана</span>;
+  if (!target.factSet) {
+    return <span className="target__status target__status--unknown">Нет данных для сравнения</span>;
+  }
   return (
-    <span className={`target__status target__status--${tone}`}>
-      {tone === 'good' ? 'В цели' : 'Вне цели'}
+    <span className={`target__status target__status--${target.tone}`}>
+      {target.tone === 'good' ? 'В цели' : 'Вне цели'}
     </span>
   );
 }
 
-// The entry is imported by the SSR structure test, where there is no DOM to mount into.
+// The entry is also imported by `tests/unit/channel-island.test.js`, where there is no DOM to mount into.
 if (typeof document !== 'undefined') {
   mountIsland(ChannelIsland, 'channel', 'Карточка канала');
 }

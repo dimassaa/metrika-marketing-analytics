@@ -294,10 +294,11 @@ describe('channel passport', () => {
     }));
     const { service } = serviceWith({ campaignRows, campaignCacRows: [] });
 
-    const { campaigns } = await service.getChannelPassport({ anchor: ANCHOR, channelId: '4' });
+    const { campaigns, campaignsTruncated } = await service.getChannelPassport({ anchor: ANCHOR, channelId: '4' });
 
     expect(campaigns).toHaveLength(CAMPAIGN_LIST_LIMIT);
     expect(campaigns.at(-1).id).toBe(String(1000 + CAMPAIGN_LIST_LIMIT - 1));
+    expect(campaignsTruncated).toBe(true);
     // The sentinel row is not joined to a CAC input and would have rendered as `cacCents: null`.
     expect(campaigns.some((campaign) => campaign.id === String(1000 + CAMPAIGN_LIST_LIMIT))).toBe(false);
   });

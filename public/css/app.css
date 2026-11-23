@@ -2465,6 +2465,10 @@ input[type='file'] {
   color: var(--color-ash-gray);
 }
 
+.target__status--unknown {
+  color: var(--color-warm-gray);
+}
+
 .funnel {
   display: flex;
   flex-direction: column;

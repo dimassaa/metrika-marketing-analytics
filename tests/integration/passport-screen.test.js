@@ -172,6 +172,10 @@ describe('channel passport screen', () => {
     expect(props.funnel.meterMax).toBe(1);
     expect(props.charts.cac.hasData).toBe(false);
     expect(props.retention.hasData).toBe(false);
+    // The inserted channel has both targets but no statistics: the plan must stay visible and the status must say
+    // "no data to compare", not "no target".
+    expect(props.targets.map((target) => target.targetSet)).toEqual([true, true]);
+    expect(props.targets.map((target) => target.factSet)).toEqual([false, false]);
     expect(JSON.stringify(props)).not.toMatch(/NaN|Infinity/);
   });
 
@@ -183,12 +187,12 @@ describe('channel passport screen', () => {
     const props = extractDataProps(res.text, 'channel');
 
     expect(res.status).toBe(200);
-    expect(props.channel).toMatchObject({ isActive: false, statusLabel: 'В архиве' });
+    expect(props.channel).toMatchObject({ isActive: false, activityLabel: 'В архиве' });
     // The archive badge is in the server frame as well, so it is visible before the island mounts.
     expect(res.text).toContain('В архиве');
   });
 
-  it('keeps the whole passport within the 26-query budget, independent of campaign count', async () => {
+  it('keeps the passport services within the 26-query budget, independent of campaign count', async () => {
     const counter = wrapDb(pool);
     const referenceRepository = createReferenceRepository(counter.db);
     const metrics = createMetricsModule({ db: counter.db, referenceRepository });
@@ -200,6 +204,8 @@ describe('channel passport screen', () => {
     const anchor = await referenceRepository.getDataAnchor();
     const id = await channelId('instagram');
 
+    // Service-level budget, as in the plan: the M2 detail, its campaign list, the M3 passport and the matrix. A real
+    // page request adds the one `getDataAnchor()` read on top (and the session store is outside this count).
     counter.reset();
     await channelsService.getChannelDetail(id);
     await campaignsService.listCampaignsForChannel(id);
@@ -207,6 +213,6 @@ describe('channel passport screen', () => {
     await metrics.services.ltv.getCohortMatrix({ anchor, channelId: id });
     const queries = counter.count();
 
-    expect(queries, `passport used ${queries} queries`).toBeLessThanOrEqual(26);
+    expect(queries, `passport services used ${queries} queries`).toBeLessThanOrEqual(26);
   });
 });

@@ -140,7 +140,9 @@ export function buildDashboardScreen({ summary, channelIds = null }) {
  * @returns {'good' | 'bad' | null}
  */
 function compareCacTarget(factCents, targetCents) {
-  if (factCents === null || targetCents === null) return null;
+  if (factCents === null || factCents === undefined || targetCents === null || targetCents === undefined) {
+    return null;
+  }
   return BigInt(factCents) <= BigInt(targetCents) ? 'good' : 'bad';
 }
 
@@ -150,7 +152,7 @@ function compareCacTarget(factCents, targetCents) {
  * @returns {'good' | 'bad' | null}
  */
 function compareRomiTarget(factPct, targetPct) {
-  if (factPct === null || targetPct === null) return null;
+  if (factPct === null || factPct === undefined || targetPct === null || targetPct === undefined) return null;
   return factPct >= targetPct ? 'good' : 'bad';
 }
 
@@ -165,10 +167,15 @@ function compareRomiTarget(factPct, targetPct) {
  *   targetLabel: string,
  *   factLabel: string,
  *   unit: 'BYN' | null,
+ *   targetSet: boolean,
+ *   factSet: boolean,
  *   tone: 'good' | 'bad' | null,
  * }>}
  */
 function buildPassportTargets({ channel, health }) {
+  const targetCacSet = channel.targetCacCents !== null && channel.targetCacCents !== undefined;
+  const targetRomiSet = channel.targetRomiPct !== null && channel.targetRomiPct !== undefined;
+
   return [
     {
       metric: 'cac',
@@ -176,6 +183,10 @@ function buildPassportTargets({ channel, health }) {
       targetLabel: formatCentsToByn(channel.targetCacCents),
       factLabel: health.cacLabel ?? formatCentsToByn(health.cacCents),
       unit: 'BYN',
+      // Presence is separate from the comparison: a configured target with no fact is "no data to compare", not
+      // "no target at all". The client must not collapse both states into the same sentence.
+      targetSet: targetCacSet,
+      factSet: health.cacCents !== null && health.cacCents !== undefined,
       tone: compareCacTarget(health.cacCents, channel.targetCacCents),
     },
     {
@@ -184,6 +195,8 @@ function buildPassportTargets({ channel, health }) {
       targetLabel: formatPercent(channel.targetRomiPct),
       factLabel: health.romiLabel ?? formatPercent(health.romiPct),
       unit: null,
+      targetSet: targetRomiSet,
+      factSet: health.romiPct !== null && health.romiPct !== undefined,
       tone: compareRomiTarget(health.romiPct, channel.targetRomiPct),
     },
   ];
@@ -208,21 +221,19 @@ function buildPassportTargets({ channel, health }) {
  * @returns {object}
  */
 function buildPassportRetention(matrix) {
+  // Only what the grid renders stays in props: `cohortMonth` is the React key, `isPartial` is the visual flag and
+  // the two labels are ready strings. Raw `ltvCents`/`cumLtvCents`/`monthsObserved` would double the matrix payload
+  // without a reader; the cohorts screen has its own richer model.
   const cohorts = matrix.cohorts.map((cohort) => ({
     cohortMonth: cohort.cohortMonth,
     cohortLabel: cohort.cohortLabel,
     cohortSize: cohort.cohortSize,
-    ltvCents: cohort.ltvCents,
     ltvLabel: cohort.ltvLabel,
-    isComplete: cohort.isComplete,
     isPartial: !cohort.isComplete,
-    monthsObserved: cohort.monthsObserved,
     cells: cohort.cells.map((cell) => ({
       monthOffset: cell.monthOffset,
-      retentionPct: cell.retentionPct,
       retentionLabel: formatPercent(cell.retentionPct),
       heatClass: heatBucket(cell.retentionPct),
-      cumLtvCents: cell.cumLtvCents,
       cumLtvLabel: formatCentsToByn(cell.cumLtvCents),
     })),
   }));
@@ -253,6 +264,7 @@ function buildPassportRetention(matrix) {
  *     series: object[],
  *     funnel: object,
  *     campaigns: object[],
+ *     campaignsTruncated?: boolean,
  *   },
  *   matrix: object,
  *   funnelSteps?: object,
@@ -267,6 +279,7 @@ function buildPassportRetention(matrix) {
  *   retention: object,
  *   funnel: object,
  *   campaigns: object[],
+ *   campaignsTruncated: boolean,
  *   targets: object[],
  *   labels: { period: string, weeks: string },
  * }}
@@ -280,7 +293,9 @@ export function buildPassportScreen({ passport, matrix, funnelSteps = buildFunne
     kind: passport.channel.kind,
     kindLabel: CHANNEL_KIND_LABELS[passport.channel.kind] ?? passport.channel.kind,
     isActive: passport.isActive !== false,
-    statusLabel: passport.isActive === false ? 'В архиве' : 'Активен',
+    // Deliberately not `statusLabel`: `health.statusLabel` is the metric verdict (`В норме`/`Мало данных`), while
+    // this one is the channel lifecycle. Two different meanings with one key in neighbouring objects invites bugs.
+    activityLabel: passport.isActive === false ? 'В архиве' : 'Активен',
     targetCacCents: passport.channel.targetCacCents,
     targetRomiPct: passport.channel.targetRomiPct,
   };
@@ -298,6 +313,7 @@ export function buildPassportScreen({ passport, matrix, funnelSteps = buildFunne
     retention: buildPassportRetention(matrix),
     funnel: funnelSteps,
     campaigns: passport.campaigns,
+    campaignsTruncated: passport.campaignsTruncated === true,
     targets: buildPassportTargets({ channel: passport.channel, health: passport.health }),
     labels: { period: periodLabel, weeks: weeksLabel(passport.series.length) },
   };

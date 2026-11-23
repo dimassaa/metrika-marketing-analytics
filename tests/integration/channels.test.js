@@ -340,6 +340,10 @@ describe('channel mutations', () => {
 
     expect(res.status).toBe(400);
     expect(res.text).toContain('активными кампаниями');
+    // The error is rendered on the passport, not on the POST URL: the period form must return to the channel page.
+    expect(res.text).toContain(
+      `<form class="app-topbar__period" method="get" action="/app/channels/${instagram.id}">`,
+    );
     expect((await channelRow('instagram')).is_active).toBe(true);
     expect(await auditActions(instagram.id)).not.toContain(AUDIT_ACTIONS.CHANNEL_ARCHIVE);
   });

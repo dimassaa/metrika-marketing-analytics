@@ -363,6 +363,10 @@ describe('campaign mutations', () => {
     // The quick form keeps the submitted values instead of sending the person to the campaign list.
     expect(res.text).toContain('value="Неверный код"');
     expect(res.text).toContain(`href="/app/campaigns?channelId=${channelIdValue}"`);
+    // The POST URL is `/app/campaigns`; the period form belongs to the passport it re-renders.
+    expect(res.text).toContain(
+      `<form class="app-topbar__period" method="get" action="/app/channels/${channelIdValue}">`,
+    );
   });
 
   it('refuses to delete a seeded campaign with statistics and orders', async () => {

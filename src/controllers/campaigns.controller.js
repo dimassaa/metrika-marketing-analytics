@@ -163,7 +163,8 @@ export function createCampaignsController({ campaignsService, channelsService, r
       model: screen,
       islandEntries: ['channel'],
       periodControl: buildPeriodControl({ query, period: screen.period }),
-      currentPath: `${req.baseUrl}${req.path}`,
+      // The POST lives under `/app/campaigns`; the period form belongs to the passport it re-renders.
+      currentPath: `/app/channels/${channelId}`,
       formValues: detail.form,
       formError: null,
       channelCampaigns,
