@@ -42,6 +42,7 @@ import { createAuthRouter } from './routes/auth.routes.js';
 import { createAppRouter } from './routes/app.routes.js';
 import { createApiRouter } from './routes/api.routes.js';
 import { createMetricsModule } from './services/metrics/index.js';
+import { createDecisionsModule } from './services/decisions/index.js';
 import { ASSETS_DIR, createAssetManifest } from './lib/assets.js';
 import { dataProps } from './lib/serialize-props.js';
 
@@ -100,6 +101,8 @@ export function createApp({ db, sessionStore, trustProxy = env.trustProxy, asset
   const store = sessionStore ?? createPgSessionStore(db);
   // One composition root for the metrics engine; routers and controllers receive ready services from here.
   const metrics = createMetricsModule({ db, referenceRepository });
+  // Decisions build after metrics and reuse its repositories/services; the audit writers stay transaction-scoped.
+  const decisions = createDecisionsModule({ db, referenceRepository, metrics });
   // The manifest is read lazily in development/test so a fresh clone can boot before the first `npm run build`.
   const assetManifest = assets ?? createAssetManifest();
 
@@ -185,7 +188,7 @@ export function createApp({ db, sessionStore, trustProxy = env.trustProxy, asset
   app.use(createAuthRouter({ authController }));
   // Mounted after `csrfProtection`: every mutating API call carries `X-CSRF-Token`, including multipart uploads,
   // whose body cannot be parsed by the global CSRF middleware.
-  app.use('/api/v1', createApiRouter({ importController, mediaController, metrics }));
+  app.use('/api/v1', createApiRouter({ importController, mediaController, metrics, decisions }));
   app.use('/app', createAppRouter({
     requireAuth,
     referenceRepository,
@@ -198,6 +201,7 @@ export function createApp({ db, sessionStore, trustProxy = env.trustProxy, asset
     exportService,
     mediaRepository,
     metrics,
+    decisions,
   }));
 
   app.get('/health', async (req, res) => {

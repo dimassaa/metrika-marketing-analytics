@@ -60,33 +60,3 @@ export function buildShellLocals(req, { title, activeNav, dataAnchor }) {
     roleLabel: roleLabel(user.role),
   };
 }
-
-/**
- * @param {{ referenceRepository: ReturnType<typeof import('../repositories/reference.repo.js').createReferenceRepository> }} deps
- */
-export function createAppController({ referenceRepository }) {
-  /**
-   * Renders one screen inside the app shell.
-   * @param {import('express').Request} req
-   * @param {import('express').Response} res
-   * @param {{ view: string, title: string, activeNav: string }} page
-   * @returns {Promise<void>}
-   */
-  async function renderPage(req, res, { view, title, activeNav }) {
-    const dataAnchor = await referenceRepository.getDataAnchor();
-    res.render(view, buildShellLocals(req, { title, activeNav, dataAnchor }));
-  }
-
-  return {
-    /**
-     * Honest placeholder for a section that exists in the navigation but ships in a later milestone.
-     * @param {{ title: string, activeNav: string }} section
-     * @returns {import('express').RequestHandler}
-     */
-    comingSoon({ title, activeNav }) {
-      return async (req, res) => {
-        await renderPage(req, res, { view: 'pages/coming-soon', title, activeNav });
-      };
-    },
-  };
-}

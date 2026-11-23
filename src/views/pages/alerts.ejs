@@ -1,0 +1,154 @@
+<%#
+  Alerts frame. The GET filters, the manual recalculation form and the dismissal forms are plain server-rendered
+  controls, so the screen works before the island executes. The summary and chart are rendered by
+  `client/entries/alerts.jsx` from `model` — the same object `/api/v1/alerts` returns.
+%>
+<section class="app-section">
+  <div class="stack stack--lg">
+    <div class="stack stack--sm">
+      <h2>Алерты по каналам</h2>
+      <p class="u-muted">
+        Правила сравнивают четыре полные недели с четырьмя предыдущими. Порог и измеренное значение хранятся с
+        четырьмя знаками, а в таблице показываются с точностью, достаточной для решения. «Последняя проверка» — это
+        время последнего пересчёта в базе, а не время открытия страницы.
+      </p>
+    </div>
+
+    <div class="toolbar">
+      <form class="filter-bar" method="get" action="/app/alerts" aria-label="Фильтры алертов">
+        <label class="field">
+          <span class="field__label">Статус</span>
+          <select class="select" name="status">
+            <% for (const option of model.filterOptions.status) { %>
+            <option value="<%= option.value %>"<%= option.selected ? ' selected' : '' %>><%= option.label %></option>
+            <% } %>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Важность</span>
+          <select class="select" name="severity">
+            <% for (const option of model.filterOptions.severity) { %>
+            <option value="<%= option.value %>"<%= option.selected ? ' selected' : '' %>><%= option.label %></option>
+            <% } %>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="field__label">Канал</span>
+          <select class="select" name="channelId">
+            <option value="">Все каналы</option>
+            <% for (const option of model.filterOptions.channels) { %>
+            <option value="<%= option.value %>"<%= option.selected ? ' selected' : '' %>><%= option.label %></option>
+            <% } %>
+          </select>
+        </label>
+
+        <button class="btn btn--ghost btn--sm" type="submit">Показать</button>
+        <% if (model.filters.active) { %>
+        <a class="btn btn--ghost btn--sm" href="<%= model.filters.resetHref %>">Сбросить фильтры</a>
+        <% } %>
+      </form>
+
+      <% if (can('alerts:manage')) { %>
+      <form method="post" action="/app/alerts/recalculate" aria-label="Пересчитать алерты">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <input type="hidden" name="status" value="<%= model.filters.status %>">
+        <input type="hidden" name="severity" value="<%= model.filters.severity %>">
+        <input type="hidden" name="channelId" value="<%= model.filters.channelId ?? '' %>">
+        <input type="hidden" name="page" value="<%= model.pagination.page %>">
+        <button class="btn btn--primary btn--sm" type="submit">Пересчитать</button>
+      </form>
+      <% } %>
+    </div>
+
+    <%- include('../partials/island', { name: 'alerts', model }) %>
+
+    <div class="card card--flat">
+      <div class="card__header">
+        <div>
+          <h3 class="card__title">Сработавшие правила</h3>
+          <p class="card__meta">Окно <%= model.window.label %> · Найдено <%= model.pagination.total %></p>
+        </div>
+      </div>
+
+      <% if (model.empty) { %>
+      <div class="empty-state">
+        <p class="empty-state__title">Алертов пока нет</p>
+        <p class="empty-state__text">
+          Правила молчат, когда в обоих окнах есть расход и новые клиенты, а пороги не превышены. Откройте другой
+          фильтр или пересчитайте алерты.
+        </p>
+      </div>
+      <% } else { %>
+      <div class="table-wrap" role="region" aria-label="Алерты" tabIndex="0">
+        <table class="table">
+          <caption class="u-visually-hidden">Алерты по каналам за <%= model.window.label %></caption>
+          <thead>
+            <tr>
+              <th scope="col">Канал</th>
+              <th scope="col">Правило</th>
+              <th scope="col">Важность</th>
+              <th scope="col" class="u-right">Значение</th>
+              <th scope="col" class="u-right">Порог</th>
+              <th scope="col">Период</th>
+              <th scope="col">Проверено</th>
+              <th scope="col">Статус</th>
+              <% if (can('alerts:manage')) { %>
+              <th scope="col">Действие</th>
+              <% } %>
+            </tr>
+          </thead>
+          <tbody>
+            <% for (const row of model.rows) { %>
+            <tr>
+              <th scope="row"><%= row.channelName %></th>
+              <td><%= row.ruleLabel %></td>
+              <td><%= row.severityLabel %></td>
+              <td class="u-right u-numeric u-nowrap">
+                <%= row.valueLabel %><% if (row.valueUnit === 'BYN') { %> <span class="byn">BYN</span><% } else if (row.valueUnit) { %> <%= row.valueUnit %><% } %>
+              </td>
+              <td class="u-right u-numeric u-nowrap">
+                <%= row.thresholdLabel %><% if (row.thresholdUnit === 'BYN') { %> <span class="byn">BYN</span><% } else if (row.thresholdUnit) { %> <%= row.thresholdUnit %><% } %>
+              </td>
+              <td class="u-nowrap"><%= row.periodLabel %></td>
+              <td class="u-nowrap"><%= row.detectedAtLabel %></td>
+              <td><%= row.statusLabel %></td>
+              <% if (can('alerts:manage')) { %>
+              <td>
+                <% if (row.status === 'active') { %>
+                <form class="inline-form" method="post" action="<%= row.dismissHref %>" aria-label="Скрыть алерт <%= row.ruleLabel %>">
+                  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                  <input type="hidden" name="status" value="<%= model.filters.status %>">
+                  <input type="hidden" name="severity" value="<%= model.filters.severity %>">
+                  <input type="hidden" name="channelId" value="<%= model.filters.channelId ?? '' %>">
+                  <input type="hidden" name="page" value="<%= model.pagination.page %>">
+                  <input class="input" type="text" name="reason" maxlength="200" placeholder="Причина">
+                  <button class="btn btn--ghost btn--sm" type="submit">Скрыть</button>
+                </form>
+                <% } else { %>
+                <span class="u-muted">—</span>
+                <% } %>
+              </td>
+              <% } %>
+            </tr>
+            <% } %>
+          </tbody>
+        </table>
+      </div>
+      <% } %>
+
+      <% if (model.pagination.prevHref || model.pagination.nextHref) { %>
+      <nav class="cluster" aria-label="Страницы алертов">
+        <% if (model.pagination.prevHref) { %>
+        <a class="btn btn--ghost btn--sm" href="<%= model.pagination.prevHref %>">Назад</a>
+        <% } %>
+        <span class="u-muted">Страница <%= model.pagination.page %> из <%= model.pagination.totalPages %></span>
+        <% if (model.pagination.nextHref) { %>
+        <a class="btn btn--ghost btn--sm" href="<%= model.pagination.nextHref %>">Дальше</a>
+        <% } %>
+      </nav>
+      <% } %>
+    </div>
+  </div>
+</section>

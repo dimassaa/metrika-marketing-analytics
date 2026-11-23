@@ -293,12 +293,12 @@ export function createScenariosService({
 
     let budgetCents = parseOptionalBudget(budgetByn);
     if (budgetCents === null) budgetCents = baselineCents;
-    if (budgetCents <= 0n) throw new ValidationError('Бюджет должен быть больше нуля');
+    if (budgetCents <= 0n) throw new ValidationError('Бюджет в BYN должен быть больше нуля');
 
     const capCents = baselineCents * BigInt(METRICS_CONFIG.scenarios.maxBudgetMultiplier);
     if (budgetCents > capCents) {
       throw new ValidationError(
-        `Бюджет больше ${METRICS_CONFIG.scenarios.maxBudgetMultiplier}× текущего недельного бюджета`,
+        `Бюджет больше ${METRICS_CONFIG.scenarios.maxBudgetMultiplier}× текущего недельного бюджета в BYN`,
       );
     }
 

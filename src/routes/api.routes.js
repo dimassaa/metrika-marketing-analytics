@@ -18,6 +18,19 @@ export const METRICS_API_PERMISSIONS = Object.freeze({
 });
 
 /**
+ * Route → permission table for the decisions API. Read routes share their screen permission; the two mutations need
+ * `alerts:manage` and the scenario create needs `scenarios:manage`, which is enforced on the route itself because
+ * the same path serves a GET and a POST with different permissions.
+ */
+export const DECISIONS_API_PERMISSIONS = Object.freeze({
+  '/alerts': 'alerts:view',
+  '/alerts/recalculate': 'alerts:manage',
+  '/alerts/:id/dismiss': 'alerts:manage',
+  '/scenarios': 'scenarios:view',
+  '/scenarios/:id': 'scenarios:view',
+});
+
+/**
  * Versioned JSON API. Mounted after the session, CSRF and locals middleware so the guards can read the session and
  * every response goes through the shared JSON error handler.
  *
@@ -28,18 +41,22 @@ export const METRICS_API_PERMISSIONS = Object.freeze({
  *   importController: ReturnType<typeof import('../controllers/import.controller.js').createImportController>,
  *   mediaController: ReturnType<typeof import('../controllers/media.controller.js').createMediaController>,
  *   metrics: ReturnType<typeof import('../services/metrics/index.js').createMetricsModule>,
+ *   decisions: ReturnType<typeof import('../services/decisions/index.js').createDecisionsModule>,
  * }} deps
  * @returns {import('express').Router}
  */
-export function createApiRouter({ importController, mediaController, metrics }) {
+export function createApiRouter({ importController, mediaController, metrics, decisions }) {
   const router = Router();
   const importLimiter = createImportRateLimiter();
 
   // Metrics GETs depend on the data anchor, which moves when an import commits; a cached JSON body would outlive it.
-  router.use(['/dashboard', '/channels', '/cohorts', '/attribution', '/ranking'], (req, res, next) => {
-    res.set('Cache-Control', 'no-store');
-    next();
-  });
+  router.use(
+    ['/dashboard', '/channels', '/cohorts', '/attribution', '/ranking', '/alerts', '/scenarios'],
+    (req, res, next) => {
+      res.set('Cache-Control', 'no-store');
+      next();
+    },
+  );
   router.get(
     '/dashboard',
     requireAuth,
@@ -75,6 +92,47 @@ export function createApiRouter({ importController, mediaController, metrics }) 
     requireAuth,
     requirePermission(METRICS_API_PERMISSIONS['/ranking']),
     metrics.controllers.api.ranking,
+  );
+
+  // Decisions API. The alert reads never recalculate here; the page owns the throttled write, and an API client that
+  // wants a fresh check calls the explicit POST.
+  router.get(
+    '/alerts',
+    requireAuth,
+    requirePermission(DECISIONS_API_PERMISSIONS['/alerts']),
+    decisions.controllers.api.alerts,
+  );
+  router.post(
+    '/alerts/recalculate',
+    requireAuth,
+    requirePermission(DECISIONS_API_PERMISSIONS['/alerts/recalculate']),
+    decisions.controllers.api.recalculate,
+  );
+  router.post(
+    '/alerts/:id/dismiss',
+    requireAuth,
+    requirePermission(DECISIONS_API_PERMISSIONS['/alerts/:id/dismiss']),
+    decisions.controllers.api.dismiss,
+  );
+
+  router.get(
+    '/scenarios',
+    requireAuth,
+    requirePermission(DECISIONS_API_PERMISSIONS['/scenarios']),
+    decisions.controllers.api.scenarios,
+  );
+  router.get(
+    '/scenarios/:id',
+    requireAuth,
+    requirePermission(DECISIONS_API_PERMISSIONS['/scenarios/:id']),
+    decisions.controllers.api.scenario,
+  );
+  // The same path has a different write permission; it cannot live in the read map without inventing a method key.
+  router.post(
+    '/scenarios',
+    requireAuth,
+    requirePermission('scenarios:manage'),
+    decisions.controllers.api.save,
   );
 
   // The limiter runs before multer: a client that burned its quota must not make the server parse a 2 MB body.

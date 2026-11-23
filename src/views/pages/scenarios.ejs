@@ -1,0 +1,157 @@
+<%#
+  Scenarios builder frame. The GET form recalculates from the URL, the save form posts the selected inputs with CSRF,
+  and the island renders the resulting model — the same object `/api/v1/scenarios` returns. Saved snapshots are listed
+  below with links to their detail pages.
+%>
+<section class="app-section">
+  <div class="stack stack--lg">
+    <div class="stack stack--sm">
+      <h2>Сценарии бюджета</h2>
+      <p class="u-muted">
+        Сценарий распределяет недельный бюджет между платными каналами по кривым насыщения. Расчёт опирается на
+        26 полных недель, а сохранённый снимок не меняется задним числом. Суммы — в BYN, за 12 месяцев бюджет
+        умножается на 52.
+      </p>
+    </div>
+
+    <div class="card card--flat">
+      <div class="card__header">
+        <div>
+          <h3 class="card__title">Параметры расчёта</h3>
+          <p class="card__meta">
+            Недельный бюджет: <strong class="u-numeric"><%= model.budget.weeklyLabel %> <span class="byn">BYN</span></strong>
+            · за 12 месяцев: <strong class="u-numeric"><%= model.budget.forecast12mLabel %> <span class="byn">BYN</span></strong>
+          </p>
+        </div>
+      </div>
+
+      <form class="inline-form" method="get" action="/app/scenarios" aria-label="Параметры сценария">
+        <label class="field">
+          <span class="field__label">Недельный бюджет</span>
+          <input
+            class="input"
+            type="number"
+            name="budgetByn"
+            value="<%= model.controls.budgetInput %>"
+            min="0.01"
+            max="<%= model.budget.capInput %>"
+            step="0.01"
+            inputmode="decimal"
+            required
+          >
+          <span class="field__hint">Максимум <%= model.budget.capLabel %> <span class="byn">BYN</span> — 3× текущего бюджета</span>
+        </label>
+
+        <fieldset class="field">
+          <legend class="field__label">Каналы</legend>
+          <% for (const channel of model.controls.channels) { %>
+          <label class="cluster">
+            <input type="checkbox" name="channelIds" value="<%= channel.value %>"<%= channel.selected ? ' checked' : '' %>>
+            <span><%= channel.label %></span>
+          </label>
+          <% } %>
+        </fieldset>
+
+        <label class="field">
+          <span class="field__label">Канал кривой</span>
+          <select class="select" name="curveChannelId">
+            <option value="">Проблемный канал</option>
+            <% for (const channel of model.controls.channels) { %>
+            <option value="<%= channel.value %>"<%= channel.value === model.controls.curveChannelId ? ' selected' : '' %>><%= channel.label %></option>
+            <% } %>
+          </select>
+        </label>
+
+        <div class="cluster">
+          <button class="btn btn--primary" type="submit">Рассчитать</button>
+          <a class="btn btn--ghost" href="/app/scenarios">Сбросить</a>
+        </div>
+      </form>
+
+      <% if (model.budget.isAboveWarn) { %>
+      <p class="alert alert--warning" role="status">
+        Бюджет больше фактического более чем в 2 раза — прогноз за пределами наблюдённых расходов.
+      </p>
+      <% } %>
+    </div>
+
+    <%- include('../partials/island', { name: 'scenarios', model }) %>
+
+    <% if (can('scenarios:manage')) { %>
+    <div class="card card--flat">
+      <div class="card__header">
+        <div>
+          <h3 class="card__title">Сохранить сценарий</h3>
+          <p class="card__meta">Сервер пересчитает снимок из текущих параметров и запишет его в журнал действий.</p>
+        </div>
+      </div>
+
+      <form class="inline-form" method="post" action="/app/scenarios">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <input type="hidden" name="budgetByn" value="<%= model.controls.budgetInput %>">
+        <% for (const channel of model.controls.selectedChannels) { %>
+        <input type="hidden" name="channelIds" value="<%= channel.value %>">
+        <% } %>
+
+        <label class="field">
+          <span class="field__label">Название</span>
+          <input class="input" type="text" name="name" minlength="3" maxlength="120" required placeholder="Рост на 20 %">
+          <span class="field__hint">От 3 до 120 символов</span>
+        </label>
+
+        <button class="btn btn--ghost" type="submit">Сохранить сценарий</button>
+      </form>
+    </div>
+    <% } %>
+
+    <div class="card card--flat">
+      <div class="card__header">
+        <div>
+          <h3 class="card__title">Сохранённые сценарии</h3>
+          <p class="card__meta">Всего: <%= model.list.total %></p>
+        </div>
+      </div>
+
+      <% if (model.list.rows.length === 0) { %>
+      <div class="empty-state">
+        <p class="empty-state__title">Сценариев пока нет</p>
+        <p class="empty-state__text">Рассчитайте бюджет и сохраните снимок — он останется неизменным для сравнения.</p>
+      </div>
+      <% } else { %>
+      <div class="table-wrap" role="region" aria-label="Сохранённые сценарии" tabIndex="0">
+        <table class="table">
+          <caption class="u-visually-hidden">Сохранённые сценарии</caption>
+          <thead>
+            <tr>
+              <th scope="col">Название</th>
+              <th scope="col">Автор</th>
+              <th scope="col">Создан</th>
+              <th scope="col">Отчётная дата</th>
+              <th scope="col" class="u-right">Бюджет</th>
+              <th scope="col" class="u-right">Каналов</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% for (const row of model.list.rows) { %>
+            <tr>
+              <th scope="row"><a href="<%= row.href %>"><%= row.name %></a></th>
+              <td><%= row.authorLabel %></td>
+              <td class="u-nowrap"><%= row.createdAtLabel %></td>
+              <td class="u-nowrap"><%= row.anchorLabel ?? '—' %></td>
+              <td class="u-right u-numeric u-nowrap">
+                <% if (row.invalid) { %>—<% } else { %><%= row.budgetLabel %> <span class="byn">BYN</span><% } %>
+              </td>
+              <td class="u-right u-numeric"><%= row.channelCountLabel %></td>
+            </tr>
+            <% } %>
+          </tbody>
+        </table>
+      </div>
+      <% } %>
+
+      <% if (model.list.hasMore) { %>
+      <p class="u-muted">Показаны последние 50 сценариев. Более ранние доступны по прямой ссылке.</p>
+      <% } %>
+    </div>
+  </div>
+</section>

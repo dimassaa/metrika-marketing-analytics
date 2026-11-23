@@ -4,7 +4,7 @@ import { seed } from '../../db/seed/seed.js';
 import { addDays } from '../../src/lib/dates.js';
 import { createReferenceRepository } from '../../src/repositories/reference.repo.js';
 import { createMetricsModule } from '../../src/services/metrics/index.js';
-import { METRICS_API_PERMISSIONS } from '../../src/routes/api.routes.js';
+import { METRICS_API_PERMISSIONS, DECISIONS_API_PERMISSIONS } from '../../src/routes/api.routes.js';
 import { closeTestPool, getTestPool, resetTestDatabase } from '../helpers/db.js';
 import { loginAs, makeApp } from '../helpers/app.js';
 import { wrapDb } from '../helpers/queryCounter.js';
@@ -397,8 +397,62 @@ describe('GET /api/v1/attribution', () => {
   });
 });
 
-describe('channel API query budgets', () => {
-  it('keeps the channels list within 14 reads and the ranking within 12', async () => {
+describe('decisions API surface', () => {
+  it('maps every alert and scenario route to its permission in the shared table', () => {
+    expect(DECISIONS_API_PERMISSIONS).toMatchObject({
+      '/alerts': 'alerts:view',
+      '/alerts/recalculate': 'alerts:manage',
+      '/alerts/:id/dismiss': 'alerts:manage',
+      '/scenarios': 'scenarios:view',
+      '/scenarios/:id': 'scenarios:view',
+    });
+  });
+
+  it('serves the alerts model read-only and refuses an unknown filter', async () => {
+    const anonymous = await request(app).get('/api/v1/alerts');
+    expect(anonymous.status).toBe(401);
+    expect(anonymous.body.error.code).toBe('UNAUTHORIZED');
+
+    const agent = await signedIn();
+    const res = await agent.get('/api/v1/alerts');
+
+    expect(res.status).toBe(200);
+    expect(res.type).toMatch(/application\/json/);
+    expect(res.headers['cache-control']).toBe('no-store');
+    expect(res.body.page).toBe('alerts');
+
+    const bogus = await agent.get('/api/v1/alerts?status=bogus');
+    expect(bogus.status).toBe(400);
+    expect(bogus.body.error.code).toBe('VALIDATION_ERROR');
+    expect(bogus.body.error.message).toMatch(/[А-Яа-яЁё]/);
+  });
+
+  it('serves the scenarios builder model and rejects an unusable budget', async () => {
+    expect(DECISIONS_API_PERMISSIONS['/scenarios']).toBe('scenarios:view');
+
+    const agent = await signedIn();
+    const res = await agent.get('/api/v1/scenarios');
+
+    expect(res.status).toBe(200);
+    expect(res.type).toMatch(/application\/json/);
+    expect(res.headers['cache-control']).toBe('no-store');
+    expect(res.body.page).toBe('scenarios');
+    expect(res.body.mode).toBe('builder');
+
+    for (const budget of ['abc', '-1', '0']) {
+      const invalid = await agent.get(`/api/v1/scenarios?budgetByn=${budget}`);
+      expect(invalid.status, budget).toBe(400);
+      expect(invalid.body.error.code, budget).toBe('VALIDATION_ERROR');
+      expect(invalid.body.error.message, budget).toMatch(/BYN/i);
+    }
+
+    const missing = await agent.get('/api/v1/scenarios/999999');
+    expect(missing.status).toBe(404);
+    expect(missing.body.error.code).toBe('NOT_FOUND');
+  });
+});
+
+describe('channel API query budgets', () => {  it('keeps the channels list within 14 reads and the ranking within 12', async () => {
     const counter = wrapDb(pool);
     const metrics = createMetricsModule({
       db: counter.db,

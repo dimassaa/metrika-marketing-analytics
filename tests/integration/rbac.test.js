@@ -3,6 +3,7 @@ import request from 'supertest';
 import { seed } from '../../db/seed/seed.js';
 import { closeTestPool, getTestPool, resetTestDatabase } from '../helpers/db.js';
 import { loginAs, makeApp } from '../helpers/app.js';
+import { getAppCsrf } from '../helpers/csrf.js';
 import { extractDataProps } from '../helpers/dataProps.js';
 import { formatDateRu, minskToday } from '../../src/lib/dates.js';
 
@@ -178,5 +179,149 @@ describe('app shell RBAC', () => {
     expect(res.status).toBe(404);
     expect(res.headers['content-type']).toMatch(/text\/html/);
     expect(res.text).toContain('Страница не найдена');
+  });
+});
+
+describe('decisions RBAC, CSRF and audit', () => {
+  beforeEach(async () => {
+    // The empty-stand test above truncates the fact tables; decisions need the seeded history for their windows.
+    await resetTestDatabase();
+    await seed();
+    await pool.query('TRUNCATE alerts, scenarios, audit_log RESTART IDENTITY');
+    app = makeApp({ assets: { assets: () => ({ scripts: [], preloads: [] }) } });
+  });
+
+  it('opens the alerts and scenarios screens for a viewer without management controls', async () => {
+    const agent = await signedIn(VIEWER);
+
+    const alerts = await agent.get('/app/alerts');
+    const scenarios = await agent.get('/app/scenarios');
+
+    expect(alerts.status).toBe(200);
+    expect(alerts.text).toContain('Алерты');
+    expect(alerts.text).not.toContain('action="/app/alerts/recalculate"');
+    expect(alerts.text).not.toContain('/dismiss');
+
+    expect(scenarios.status).toBe(200);
+    expect(scenarios.text).toContain('Сценарии');
+    expect(scenarios.text).not.toContain('method="post" action="/app/scenarios"');
+    expect(scenarios.text).not.toContain('Сохранить сценарий');
+  });
+
+  it('rejects every viewer mutation with the styled 403 page, even without visible buttons', async () => {
+    const agent = await signedIn(VIEWER);
+    const csrf = await getAppCsrf(agent, '/app/dashboard');
+
+    const recalculate = await agent
+      .post('/app/alerts/recalculate')
+      .type('form')
+      .send({ _csrf: csrf });
+    expect(recalculate.status).toBe(403);
+    expect(recalculate.headers['content-type']).toMatch(/text\/html/);
+    expect(recalculate.text).toContain('Недостаточно прав');
+
+    const dismiss = await agent
+      .post('/app/alerts/1/dismiss')
+      .type('form')
+      .send({ _csrf: csrf, reason: 'Не моё' });
+    expect(dismiss.status).toBe(403);
+    expect(dismiss.text).toContain('Недостаточно прав');
+
+    const save = await agent
+      .post('/app/scenarios')
+      .type('form')
+      .send({ _csrf: csrf, name: 'Чужой сценарий' });
+    expect(save.status).toBe(403);
+    expect(save.text).toContain('Недостаточно прав');
+
+    // Nothing reached the database. The login itself writes `auth.login`; no decision entity may be touched.
+    const scenarios = await pool.query('SELECT count(*)::int AS total FROM scenarios');
+    expect(scenarios.rows[0].total).toBe(0);
+    const audit = await pool.query(
+      "SELECT count(*)::int AS total FROM audit_log WHERE entity IN ('alert', 'scenario')",
+    );
+    expect(audit.rows[0].total).toBe(0);
+  });
+
+  it('rejects an analyst mutation without a CSRF token', async () => {
+    const agent = await signedIn(ANALYST);
+
+    const recalculate = await agent.post('/app/alerts/recalculate').type('form').send({});
+    expect(recalculate.status).toBe(403);
+
+    const save = await agent.post('/app/scenarios').type('form').send({ name: 'Без токена' });
+    expect(save.status).toBe(403);
+
+    const api = await agent.post('/api/v1/scenarios').send({ name: 'Без токена' });
+    expect(api.status).toBe(403);
+    expect(api.body.error.code).toBe('FORBIDDEN');
+  });
+
+  it('accepts an analyst mutation with the session token on both paths', async () => {
+    const agent = await signedIn(ANALYST);
+    const csrf = await getAppCsrf(agent, '/app/alerts');
+
+    const recalculate = await agent
+      .post('/app/alerts/recalculate')
+      .type('form')
+      .send({ _csrf: csrf });
+    expect(recalculate.status).toBe(302);
+    expect(recalculate.headers.location).toContain('/app/alerts');
+
+    const apiRecalculate = await agent
+      .post('/api/v1/alerts/recalculate')
+      .set('X-CSRF-Token', csrf);
+    expect(apiRecalculate.status).toBe(200);
+    expect(apiRecalculate.type).toMatch(/application\/json/);
+
+    const save = await agent
+      .post('/app/scenarios')
+      .type('form')
+      .send({ _csrf: csrf, name: 'Сценарий аналитика' });
+    expect(save.status).toBe(302);
+    expect(save.headers.location).toMatch(/^\/app\/scenarios\/\d+$/);
+
+    const apiSave = await agent
+      .post('/api/v1/scenarios')
+      .set('X-CSRF-Token', csrf)
+      .send({ name: 'Сценарий через API' });
+    expect(apiSave.status).toBe(201);
+  });
+
+  it('writes exactly one audit row for a dismissal and rejects the duplicate with 400', async () => {
+    const agent = await signedIn(ANALYST);
+    await agent.get('/app/alerts');
+    const csrf = await getAppCsrf(agent, '/app/alerts');
+    const { rows } = await pool.query("SELECT id::text AS id FROM alerts WHERE status = 'active' ORDER BY id LIMIT 1");
+    const id = rows[0].id;
+
+    const first = await agent
+      .post(`/app/alerts/${id}/dismiss`)
+      .type('form')
+      .send({ _csrf: csrf, reason: 'Подорожало' });
+    expect(first.status).toBe(302);
+
+    const audit = await pool.query(
+      'SELECT action, entity, entity_id, payload FROM audit_log WHERE entity = $1 AND entity_id = $2',
+      ['alert', id],
+    );
+    expect(audit.rows).toHaveLength(1);
+    expect(audit.rows[0].action).toBe('alert.dismiss');
+    expect(audit.rows[0].payload.reason).toBe('Подорожало');
+
+    const status = await pool.query('SELECT status FROM alerts WHERE id = $1::bigint', [id]);
+    expect(status.rows[0].status).toBe('dismissed');
+
+    const second = await agent
+      .post(`/app/alerts/${id}/dismiss`)
+      .type('form')
+      .send({ _csrf: csrf, reason: 'Ещё раз' });
+    expect(second.status).toBe(400);
+
+    const auditAfter = await pool.query(
+      'SELECT count(*)::int AS total FROM audit_log WHERE entity = $1 AND entity_id = $2',
+      ['alert', id],
+    );
+    expect(auditAfter.rows[0].total).toBe(1);
   });
 });

@@ -1,7 +1,9 @@
 import { z } from 'zod';
 import { METRICS_CONFIG } from '../config/metrics.js';
 import { toDateOnly } from '../lib/dates.js';
+import { ValidationError } from '../lib/errors.js';
 import { parseBigIntId } from '../lib/ids.js';
+import { parseBynToCents } from '../lib/money.js';
 
 /**
  * Zod contracts for saved scenarios.
@@ -130,7 +132,8 @@ export const storedScenarioResultSchema = z
 
 /**
  * Normalises the multi-select input. A plain HTML form sends a single string, a repeated field arrives as an array,
- * and "all channels" is represented by an empty value or no field at all.
+ * a hand-written URL may use a comma-separated list, and "all channels" is represented by an empty value or no field
+ * at all.
  * @param {unknown} value
  * @param {{ addIssue: (issue: { code: 'custom', message: string }) => void }} ctx
  * @returns {string[] | null | typeof z.NEVER}
@@ -138,7 +141,10 @@ export const storedScenarioResultSchema = z
 function toChannelIdList(value, ctx) {
   if (value === null || value === undefined) return null;
   const raw = Array.isArray(value) ? value : [value];
-  const compact = raw.map((item) => String(item).trim()).filter((item) => item !== '');
+  const compact = raw
+    .flatMap((item) => String(item).split(','))
+    .map((item) => item.trim())
+    .filter((item) => item !== '');
   if (compact.length === 0) return null;
 
   const ids = [];
@@ -184,6 +190,34 @@ const optionalIdField = z
 const pageField = z.coerce.number().int().min(1, 'Страница должна быть положительным числом').default(1);
 
 /**
+ * Validates an optional BYN budget at the request boundary.
+ *
+ * The service parses the amount again because it is also called directly by tests; validating here turns a malformed
+ * browser value into a 400 with a field-level message instead of a service exception that only the central handler
+ * can label. The prefix names the currency so the person knows which input is wrong; `0` and the cap are checked by
+ * the service, which needs the current weekly baseline.
+ *
+ * @param {unknown} value
+ * @param {{ addIssue: (issue: { code: 'custom', message: string }) => void }} ctx
+ * @returns {void}
+ */
+function checkBudget(value, ctx) {
+  if (value === null || value === undefined) return;
+  if (typeof value === 'string' && value.trim() === '') return;
+  try {
+    parseBynToCents(/** @type {string | number} */ (value));
+  } catch (error) {
+    if (!(error instanceof ValidationError)) throw error;
+    ctx.addIssue({ code: 'custom', message: `Бюджет в BYN: ${error.message}` });
+  }
+}
+
+const budgetField = z
+  .union([z.string(), z.number(), z.null()])
+  .optional()
+  .superRefine(checkBudget);
+
+/**
  * `POST /app/scenarios` body. The server recomputes the result, so `result` is not part of the schema.
  *
  * Request schemas are not `strict()`: a form always carries `_csrf` and may carry an unrelated field, and rejecting
@@ -197,14 +231,14 @@ export const scenarioSaveSchema = z.object({
     .min(3, 'Название сценария: минимум 3 символа')
     .max(120, 'Название сценария не длиннее 120 символов'),
   // An empty budget means "the current weekly budget"; the service resolves it from the snapshot baseline.
-  budgetByn: z.union([z.string(), z.number(), z.null()]).optional(),
+  budgetByn: budgetField,
   channelIds: channelIdListField,
   anchor: dateField.optional(),
 });
 
 /** `GET /app/scenarios` query: budget, channel selection, curve channel and the list page. */
 export const scenarioQuerySchema = z.object({
-  budgetByn: z.union([z.string(), z.number(), z.null()]).optional(),
+  budgetByn: budgetField,
   channelIds: channelIdListField,
   curveChannelId: optionalIdField,
   page: pageField,

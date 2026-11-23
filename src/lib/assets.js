@@ -52,7 +52,15 @@ export function absoluteAssetPath(src) {
  * `tests/unit/assets.test.js` parses the Vite input block and fails when an entry is missing here, so a fresh clone
  * (where no manifest exists yet) cannot 500 on a page whose island the server does not recognise.
  */
-export const KNOWN_ENTRIES = Object.freeze(['dashboard', 'channels', 'channel', 'cohorts', 'attribution']);
+export const KNOWN_ENTRIES = Object.freeze([
+  'dashboard',
+  'channels',
+  'channel',
+  'cohorts',
+  'attribution',
+  'alerts',
+  'scenarios',
+]);
 
 /**
  * @param {string} entryName Short entry name from the controller (`dashboard`).

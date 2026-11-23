@@ -1,21 +1,10 @@
 import { Router } from 'express';
 import { requirePermission } from '../middleware/auth.js';
-import { createAppController } from '../controllers/app.controller.js';
 import { createAdminController } from '../controllers/admin.controller.js';
 import { createChannelsController } from '../controllers/channels.controller.js';
 import { createCampaignsController } from '../controllers/campaigns.controller.js';
 import { createGoalsController } from '../controllers/goals.controller.js';
 import { createExportController } from '../controllers/export.controller.js';
-
-/**
- * Sections that exist in the sidebar but render the honest «Раздел появится на следующем этапе» placeholder until
- * their milestone. Profile, audit and users left this list when their real routes landed; keeping them here would
- * shadow them.
- */
-const PLACEHOLDER_SECTIONS = [
-  { slug: 'scenarios', title: 'Сценарии' },
-  { slug: 'alerts', title: 'Алерты' },
-];
 
 /**
  * Authenticated application routes. Every handler sits behind `requireAuth`; anything beyond "any signed-in user"
@@ -32,6 +21,7 @@ const PLACEHOLDER_SECTIONS = [
  *   exportService: ReturnType<typeof import('../services/export.service.js').createExportService>,
  *   mediaRepository: ReturnType<typeof import('../repositories/media.repo.js').createMediaRepository>,
  *   metrics: ReturnType<typeof import('../services/metrics/index.js').createMetricsModule>,
+ *   decisions: ReturnType<typeof import('../services/decisions/index.js').createDecisionsModule>,
  * }} deps
  * @returns {import('express').Router}
  */
@@ -47,8 +37,8 @@ export function createAppRouter({
   exportService,
   mediaRepository,
   metrics,
+  decisions,
 }) {
-  const appController = createAppController({ referenceRepository });
   const adminController = createAdminController({ usersService, auditService, referenceRepository, mediaRepository });
   const channelsController = createChannelsController({
     channelsService,
@@ -113,9 +103,36 @@ export function createAppRouter({
   router.post('/goals/:id/delete', requireAuth, requirePermission('goals:manage'), goalsController.delete);
   router.post('/goals/:id', requireAuth, requirePermission('goals:manage'), goalsController.update);
 
-  for (const { slug, title } of PLACEHOLDER_SECTIONS) {
-    router.get(`/${slug}`, requireAuth, appController.comingSoon({ title, activeNav: slug }));
-  }
+  // Alerts: every role can read, analysts and admins can recalculate and dismiss. The page controller owns the
+  // session throttle; the API controller is a second instance of the same loader with JSON responses.
+  router.get('/alerts', requireAuth, requirePermission('alerts:view'), decisions.controllers.alerts.page);
+  router.post(
+    '/alerts/recalculate',
+    requireAuth,
+    requirePermission('alerts:manage'),
+    decisions.controllers.alerts.recalculate,
+  );
+  router.post(
+    '/alerts/:id/dismiss',
+    requireAuth,
+    requirePermission('alerts:manage'),
+    decisions.controllers.alerts.dismiss,
+  );
+
+  // Scenarios: reading the builder and saved snapshots is open to viewers; saving is an analyst/admin action.
+  router.get('/scenarios', requireAuth, requirePermission('scenarios:view'), decisions.controllers.scenarios.page);
+  router.get(
+    '/scenarios/:id',
+    requireAuth,
+    requirePermission('scenarios:view'),
+    decisions.controllers.scenarios.detail,
+  );
+  router.post(
+    '/scenarios',
+    requireAuth,
+    requirePermission('scenarios:manage'),
+    decisions.controllers.scenarios.save,
+  );
 
   // Import writes history and audit exposes the whole team's actions, so both need a permission, not just a login.
   router.get('/import', requireAuth, requirePermission('import:run'), importController.list);

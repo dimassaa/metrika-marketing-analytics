@@ -46,6 +46,8 @@ export default defineConfig(({ mode }) => {
           channel: fileURLToPath(new URL('./client/entries/channel.jsx', import.meta.url)),
           cohorts: fileURLToPath(new URL('./client/entries/cohorts.jsx', import.meta.url)),
           attribution: fileURLToPath(new URL('./client/entries/attribution.jsx', import.meta.url)),
+          alerts: fileURLToPath(new URL('./client/entries/alerts.jsx', import.meta.url)),
+          scenarios: fileURLToPath(new URL('./client/entries/scenarios.jsx', import.meta.url)),
         },
         output: {
           entryFileNames: '[name]-[hash].js',

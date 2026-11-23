@@ -1,0 +1,33 @@
+<%#
+  Saved scenario detail. The page owns the heading, the author line and the repeat link; the snapshot totals, the
+  channel table and the warnings are rendered by the same `scenarios` island with `mode: 'detail'`. No curve is
+  refitted here: every number comes from the stored `result` JSONB.
+%>
+<section class="app-section">
+  <div class="stack stack--lg">
+    <div class="stack stack--sm">
+      <p class="eyebrow">Сохранённый сценарий</p>
+      <h2><%= model.name %></h2>
+      <p class="u-muted">
+        Автор: <%= model.authorLabel %> · сохранён <%= model.createdAtLabel %>
+        <% if (model.savedAnchorLabel) { %>· отчётная дата <%= model.savedAnchorLabel %><% } %>
+      </p>
+    </div>
+
+    <% if (model.invalid) { %>
+    <div class="alert alert--error" role="alert">
+      <p class="alert__title">Снимок не читается</p>
+      <p><%= model.invalidReason %></p>
+    </div>
+    <% } else { %>
+    <%- include('../partials/island', { name: 'scenarios', model }) %>
+    <% } %>
+
+    <div class="cluster">
+      <a class="btn btn--ghost" href="/app/scenarios">К списку сценариев</a>
+      <% if (!model.invalid && model.repeatHref) { %>
+      <a class="btn btn--primary" href="<%= model.repeatHref %>">Повторить с этими параметрами</a>
+      <% } %>
+    </div>
+  </div>
+</section>
