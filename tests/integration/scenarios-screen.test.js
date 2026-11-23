@@ -272,7 +272,8 @@ describe('scenario builder on an empty stand', () => {
 
       expect(page.status).toBe(200);
       expect(page.text).toContain('Нет данных для расчёта сценария');
-      expect(page.text).toContain('Нет недель с расходом и новыми клиентами');
+      expect(page.text).toContain('Кривая насыщения не построена');
+      expect(page.text).not.toContain('Нет недель с расходом');
       expect(countIslands(page.text, 'scenarios')).toBe(0);
       expect(page.text).not.toMatch(/max="<%= /);
 
@@ -283,5 +284,35 @@ describe('scenario builder on an empty stand', () => {
       // This test removes seeded facts, so it restores the whole deterministic stand for the files that follow.
       await seedDecisions();
     }
+  });
+});
+
+describe('stale curve selector', () => {
+  it('never turns an out-of-selection curve channel into a 400', async () => {
+    const agent = await signedIn(VIEWER);
+
+    // The exact reported case: channel 6 has no curve at all, so the page falls back to the empty builder, not a 400.
+    const noCurve = await agent.get('/app/scenarios?channelIds=6&curveChannelId=8');
+    expect(noCurve.status).toBe(200);
+    expect(noCurve.text).not.toContain('Некорректный канал кривой');
+    expect(noCurve.text).toContain('Нет данных для расчёта сценария');
+
+    // With a selected channel that has a curve, the stale selector falls back to that channel and says so.
+    const fallback = await agent.get('/app/scenarios?channelIds=1&curveChannelId=8');
+    expect(fallback.status).toBe(200);
+    expect(fallback.text).not.toContain('Некорректный канал кривой');
+
+    const props = extractDataProps(fallback.text, 'scenarios');
+    expect(props.controls.curveChannelId).toBe('1');
+    expect(props.controls.curveNote).toMatch(/не входит в набор/);
+    expect(props.charts.saturation.title).toContain(props.channels[0].channelName);
+
+    const block = /name="curveChannelId"[\s\S]*?<\/select>/.exec(fallback.text)?.[0] ?? '';
+    const values = [...block.matchAll(/<option value="(\d+)"/g)].map((match) => match[1]);
+    expect(values).toEqual(['1']);
+
+    const api = await agent.get('/api/v1/scenarios?channelIds=1&curveChannelId=8');
+    expect(api.status).toBe(200);
+    expect(api.body.controls.curveNote).toMatch(/не входит в набор/);
   });
 });

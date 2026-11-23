@@ -43,21 +43,35 @@ export function createScenariosController({
     const query = preparedQuery ?? parseQuery(scenarioQuerySchema, req.query);
     const anchor = preparedAnchor ?? (await referenceRepository.getDataAnchor());
 
-    const [scenario, list, channels] = await Promise.all([
+    // The curve channel is a presentation choice. A stale select value must not turn a valid channel set into a 400:
+    // when the requested curve is not part of the selected channels (or no longer exists), drop it and let the model
+    // fall back to the first fitted channel. The service stays strict for direct callers.
+    const channels = channelsRepository ? await channelsRepository.listChannels() : [];
+    const requestedCurve = query.curveChannelId === null || query.curveChannelId === undefined
+      ? null
+      : String(query.curveChannelId);
+    const selectableIds = (query.channelIds ?? channels.map((channel) => channel.id)).map(String);
+    const canValidateCurve =
+      (query.channelIds !== null && query.channelIds !== undefined) || channels.length > 0;
+    const curveFallback = requestedCurve !== null &&
+      canValidateCurve &&
+      !selectableIds.includes(requestedCurve);
+    const curveChannelId = curveFallback ? null : requestedCurve;
+
+    const [scenario, list] = await Promise.all([
       services.scenarios.buildScenario({
         anchor,
         budgetByn: query.budgetByn ?? null,
         channelIds: query.channelIds ?? null,
-        curveChannelId: query.curveChannelId ?? null,
+        curveChannelId,
       }),
       services.scenarios.listScenarios({ page: query.page }),
-      channelsRepository ? channelsRepository.listChannels() : Promise.resolve([]),
     ]);
 
     return {
       query,
       anchor,
-      screen: screenModels.scenarios({ scenario, list, query, anchor, channels }),
+      screen: screenModels.scenarios({ scenario, list, query, anchor, channels, curveFallback }),
     };
   }
 
@@ -135,7 +149,9 @@ export function createScenariosController({
           anchor,
           list,
           channels,
-          error: 'Нет недель с расходом и новыми клиентами — распределять пока нечего.',
+          error:
+            'Кривая насыщения не построена: ни один выбранный канал не набрал восьми недель одновременно с расходом ' +
+            'и новыми клиентами.',
         });
       }
 

@@ -101,11 +101,16 @@ export function createAlertsController({
       page: query.page,
     });
     const channels = channelsRepository ? await channelsRepository.listChannels() : [];
-    const chartChannel = selectAlertChartChannel({
-      rows: list.rows,
-      channelId: query.channelId ?? null,
-      channelName: channels.find((channel) => channel.id === query.channelId)?.name ?? null,
-    });
+    // The chart answers "which channel is the problem in the current window", so it must not follow the table's
+    // filter or pagination. A channel filter still wins: the person explicitly asked for that channel's line.
+    const chartChannel = query.channelId
+      ? {
+          channelId: String(query.channelId),
+          channelName: channels.find((channel) => channel.id === String(query.channelId))?.name ?? null,
+        }
+      : selectAlertChartChannel({
+          rows: await services.alerts.listActiveForPeriod({ periodStart: windows.now.periodStart }),
+        });
     const weeklySeries = await services.alerts.channelCacSeries({
       anchor,
       channelId: chartChannel?.channelId ?? null,

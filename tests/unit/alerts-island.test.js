@@ -247,3 +247,22 @@ describe('alerts frame and entry', () => {
     expect(entry).toContain("mountIsland(AlertsIsland, 'alerts'");
   });
 });
+
+describe('alert chart review fixes', () => {
+  it('states the period and units instead of implementation details', () => {
+    const chart = buildAlertChannelChart({ channelName: 'Instagram', weeklySeries: weeklySeries() });
+
+    expect(chart.caption).toContain('24.08–15.11.2026');
+    expect(chart.caption).toContain('недельный CAC в BYN');
+    expect(chart.caption).not.toContain('строк алертов');
+    expect(chart.caption).not.toContain('агрегатов');
+  });
+
+  it('counts only measured weeks in the trend label', () => {
+    const cacs = weeklySeries().map((bucket, index) => (index < 2 ? null : bucket.cacCents));
+    const chart = buildAlertChannelChart({ channelName: 'Instagram', weeklySeries: weeklySeries(cacs) });
+
+    expect(chart.title).toContain('за 10 измеренных недель');
+    expect(chart.title).not.toContain('за 12 недель');
+  });
+});

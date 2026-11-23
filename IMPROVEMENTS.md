@@ -837,3 +837,8 @@ Still open:
 - **The scenario `curveChannelId` is a presentation choice, defaulting to the first fitted channel.** No channel is
   labelled "problem" for scenarios; the alerts screen owns that heuristic. The curve selector only changes which
   stored `K`/`S`/`observed` row is drawn; the plan and totals never depend on it.
+- **The native range input announces a raw float value to assistive technology.** `type="range"` with
+  `min="0.01"` and a multi-thousand-BYN `max` stores `2705.7099609375` internally; Chrome submits `2705.71`, but
+  `aria-valuenow` exposes the unrounded float. Fixing that without stale announcements needs a paired number input or
+  a small island that mirrors the slider into a formatted `aria-valuetext`. Deferred to M6; the visible label, the
+  hint and the submitted value are exact kopecks today.

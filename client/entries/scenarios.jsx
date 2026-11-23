@@ -105,7 +105,7 @@ export function ScenariosIsland({
     {
       key: 'cac',
       label: 'CAC',
-      before: '—',
+      before: totals.current.cacLabel,
       after: totals.forecast.cacLabel,
       unit: 'BYN',
     },
@@ -221,7 +221,7 @@ export function ScenariosIsland({
             unit={charts.saturation.unit}
             ariaLabel={charts.saturation.ariaLabel}
             empty={!charts.saturation.hasData}
-            emptyText="Кривая не построена: у канала линейная модель или нет недель с клиентами. Примечание в таблице объясняет причину, наблюдения остаются в таблице."
+            emptyText="Кривая не построена: у канала линейная модель или нет недель с клиентами. Наблюдения остаются в таблице, а причина — в предупреждениях расчёта."
             table={charts.saturation.table}
             height="md"
           >

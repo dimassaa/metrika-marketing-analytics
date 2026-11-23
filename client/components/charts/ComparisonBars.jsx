@@ -21,7 +21,6 @@ import { ChartTooltip } from './ChartTooltip.jsx';
  *
  * @param {{ chart: {
  *   unit: 'BYN' | 'чел.',
- *   compareKey: 'planned' | 'forecast',
  *   compareLabel: string,
  *   series: Array<{
  *     channelId: string, name: string, current: number, compare: number, plannedMissing: boolean,
@@ -48,7 +47,7 @@ export function ComparisonBars({ chart }) {
           tickLine={false}
           axisLine={{ stroke: chartTheme.border }}
           tickFormatter={(value) =>
-            isMoney ? formatCompactCents(Math.round(value)) : formatRatio(value, { decimals: 0 })
+            isMoney ? formatCompactCents(Math.round(value)) : formatRatio(value, { decimals: 1 })
           }
         />
         <YAxis

@@ -150,7 +150,6 @@ export function buildSpendAllocationChart({ channels, history = null }) {
       `Расход по каналам сценария: текущий ${formatCentsToByn(totalCurrent)} BYN, ` +
       `план ${formatCentsToByn(totalPlanned)} BYN, ${change}`,
     unit: 'BYN',
-    compareKey: 'planned',
     compareLabel: 'План',
     hasData,
     series,
@@ -202,7 +201,7 @@ export function buildCustomersForecastChart({ channels, history = null }) {
   const hasData = totalCurrent > 0 || totalForecast > 0;
   const change = changeLabel(comparableCurrent, comparableForecast);
   const conclusion = hasData
-    ? `прогноз ${customersLabel(totalForecast)} клиентов за неделю (${change})`
+    ? `прогноз ${customersLabel(totalForecast)} клиента за неделю (${change})`
     : 'нет измеренных клиентов';
 
   return {
@@ -215,7 +214,6 @@ export function buildCustomersForecastChart({ channels, history = null }) {
       `Новые клиенты по каналам сценария: сейчас ${customersLabel(totalCurrent)}, ` +
       `прогноз ${customersLabel(totalForecast)}, ${change}`,
     unit: 'чел.',
-    compareKey: 'forecast',
     compareLabel: 'Прогноз',
     hasData,
     series,
@@ -318,7 +316,7 @@ export function buildSaturationCurveChart({ channel, fit = null, observed = null
     ? 'R² не определён'
     : `R² ${formatRatio(curveFit.r2, { decimals: 2 })}`;
   const conclusion = hasData
-    ? `потолок ${customersLabel(curveFit.K)} клиентов, ${r2Label}`
+    ? `потолок ${customersLabel(curveFit.K)} клиента, ${r2Label}`
     : curveFit?.model === 'linear'
       ? 'линейная кривая — без оптимума'
       : 'нет данных для кривой';
@@ -385,7 +383,7 @@ export function buildIncrementChart({ channels, history = null }) {
   const totalCurrent = series.reduce((sum, row) => sum + row.current, 0);
   const hasData = series.length > 0;
   const conclusion = hasData
-    ? `${signedCustomersLabel(totalDelta)} клиентов за неделю`
+    ? `${signedCustomersLabel(totalDelta)} клиента за неделю`
     : 'нет каналов с планом';
 
   return {

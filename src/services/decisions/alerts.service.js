@@ -432,6 +432,21 @@ export function createAlertsService({
     },
 
     /**
+     * Active alerts of the current reporting period, for the problem-channel ranking.
+     *
+     * The chart must not depend on the paginated/filtered table: a dismissed-only filter or page 2 would otherwise
+     * change which channel is "the problem". This reads the current `period_start` set directly from the same
+     * repository the recalculation uses, in one query.
+     *
+     * @param {{ periodStart: string }} input Monday of the current four-week window.
+     * @returns {Promise<object[]>} Active alert rows of that period.
+     * @throws {ValidationError} When `periodStart` is not a calendar date.
+     */
+    async listActiveForPeriod({ periodStart }) {
+      return alertsRepository.listCurrentPeriodActive(toDateOnly(periodStart));
+    },
+
+    /**
      * Recalculates the current four-week window and maintains the alert lifecycle.
      *
      * Order matters: older active rows are resolved first, the candidates are upserted second, and only then is the

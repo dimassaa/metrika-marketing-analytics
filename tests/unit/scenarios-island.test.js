@@ -211,3 +211,46 @@ describe('scenarios frame contract', () => {
     expect(css).toContain('accent-color: var(--color-cyan-edge)');
   });
 });
+
+describe('scenario review fixes', () => {
+  it('gives the range input an accessible name and keeps the description', () => {
+    const view = readFileSync('src/views/pages/scenarios.ejs', 'utf8');
+
+    expect(view).toContain('<label class="field__label" for="budgetByn">Недельный бюджет</label>');
+    expect(view).toContain('id="budgetByn"');
+    expect(view).toContain('aria-describedby="budget-hint"');
+    expect(view).not.toContain('«Проблемный»');
+  });
+
+  it('renders the current CAC in the before/after table', () => {
+    const screen = builderModel();
+    const html = renderToStaticMarkup(createElement(ScenariosIsland, screen));
+
+    expect(screen.totals.current.cacLabel).toBe('250,00');
+    expect(html).toContain('250,00');
+  });
+
+  it('does not claim a note column explains an empty curve', () => {
+    const screen = builderModel();
+    screen.charts = {
+      ...screen.charts,
+      saturation: { ...screen.charts.saturation, hasData: false },
+    };
+    const html = renderToStaticMarkup(createElement(ScenariosIsland, screen));
+
+    expect(html).toContain('причина — в предупреждениях расчёта');
+    expect(html).not.toContain('Примечание в таблице');
+  });
+
+  it('formats customer axis ticks with the same precision as the values', () => {
+    for (const file of [
+      'client/components/charts/ComparisonBars.jsx',
+      'client/components/charts/SaturationCurve.jsx',
+      'client/components/charts/IncrementBars.jsx',
+    ]) {
+      const source = readFileSync(file, 'utf8');
+      expect(source, file).toContain('formatRatio(value, { decimals: 1 })');
+      expect(source, file).not.toContain('formatRatio(value, { decimals: 0 })');
+    }
+  });
+});

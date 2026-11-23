@@ -46,7 +46,7 @@ export function IncrementBars({ chart }) {
           tick={{ fontSize: chartTheme.fontSize, fill: chartTheme.axisText }}
           tickLine={false}
           axisLine={{ stroke: chartTheme.border }}
-          tickFormatter={(value) => formatRatio(value, { decimals: 0 })}
+          tickFormatter={(value) => formatRatio(value, { decimals: 1 })}
         />
         <YAxis
           type="category"

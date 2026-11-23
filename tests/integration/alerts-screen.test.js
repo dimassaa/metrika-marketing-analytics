@@ -264,3 +264,16 @@ describe('alerts CAC chart', () => {
     expect(filtered.chart.series).toHaveLength(12);
   });
 });
+
+describe('alerts CAC chart selection', () => {
+  it('keeps the problem channel of the current window regardless of the table filter', async () => {
+    const agent = await signedIn(ANALYST);
+
+    const active = extractDataProps((await agent.get('/app/alerts')).text, 'alerts');
+    const dismissed = extractDataProps((await agent.get('/app/alerts?status=dismissed')).text, 'alerts');
+
+    expect(active.chart.title).toContain('CAC:');
+    expect(dismissed.chart.title).toBe(active.chart.title);
+    expect(dismissed.chart.series).toEqual(active.chart.series);
+  });
+});

@@ -150,37 +150,36 @@ function trendOf(values) {
  * @param {{
  *   channelName?: string | null,
  *   weeklySeries?: object[],
- *   periodRange?: string,
  * }} input
  * @returns {object} Chart contract consumed by `ChartFrame` + `CacRomiLines`.
  */
 export function buildAlertChannelChart({
   channelName = null,
   weeklySeries = [],
-  periodRange = '',
 }) {
   const values = toCacPoints(weeklySeries);
   const hasData = hasPlottableData(values);
   const weeks = weeklySeries.length;
   const windowWeeks = weeks === 0 ? METRICS_CONFIG.dashboard.weeks : weeks;
+  const measuredWeeks = values.filter((value) => value !== null).length;
   const last = values.at(-1) ?? null;
   const lastLabel = last === null ? '—' : `${formatCentsToByn(last)} BYN`;
   const trend = trendOf(values);
   const trendLabel = trend !== null
-    ? `, ${formatSignedPercent(trend)} за ${windowWeeks} недель`
+    ? `, ${formatSignedPercent(trend)} за ${measuredWeeks} измеренных недель`
     : last === null
       ? ''
       : `, последняя ${lastLabel}`;
   const subject = channelName ? `CAC: ${channelName}` : 'CAC проблемного канала';
   const conclusion = hasData ? `${subject}${trendLabel}` : `${subject} — нет данных за ${windowWeeks} недель`;
-  const range = weeklyRangeLabel(weeklySeries) || periodRange;
+  const range = weeklyRangeLabel(weeklySeries);
 
   return {
     id: 'alert-channel-cac',
     title: conclusion,
     caption:
       `${range === '' ? `${windowWeeks} недель` : `${range} · ${windowWeeks} недель`} · ` +
-      `последняя ${lastLabel} · линия из недельных агрегатов, а не из строк алертов`,
+      (last === null ? 'нет измеренных значений CAC' : `недельный CAC в BYN, последняя ${lastLabel}`),
     ariaLabel: `${conclusion}. Последняя неделя ${lastLabel}.`,
     unit: 'BYN',
     hasData,

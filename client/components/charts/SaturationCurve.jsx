@@ -49,7 +49,7 @@ export function SaturationCurve({ chart }) {
           tickLine={false}
           axisLine={false}
           width={56}
-          tickFormatter={(value) => formatRatio(value, { decimals: 0 })}
+          tickFormatter={(value) => formatRatio(value, { decimals: 1 })}
         />
         <Tooltip
           content={

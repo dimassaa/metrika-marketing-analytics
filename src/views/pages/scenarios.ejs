@@ -19,7 +19,7 @@
       <div class="card__header">
         <div>
           <h3 class="card__title">Пока нечего распределять</h3>
-          <p class="card__meta">Пустые недели не дают кривой: модель не выдумывает насыщение из нулей.</p>
+          <p class="card__meta">Для кривой нужно достаточно недель с расходом и новыми клиентами.</p>
         </div>
       </div>
       <div class="empty-state">
@@ -49,9 +49,10 @@
 
       <form class="inline-form" method="get" action="/app/scenarios" aria-label="Параметры сценария">
         <div class="field">
-          <span class="field__label">Недельный бюджет</span>
+          <label class="field__label" for="budgetByn">Недельный бюджет</label>
           <input
             class="range"
+            id="budgetByn"
             type="range"
             name="budgetByn"
             value="<%= model.controls.budgetInput %>"
@@ -94,7 +95,10 @@
             <option value="<%= channel.value %>"<%= channel.value === model.controls.curveChannelId ? ' selected' : '' %>><%= channel.label %></option>
             <% } %>
           </select>
-          <span class="field__hint">«Проблемный» выбирается автоматически — первый канал с кривой насыщения.</span>
+          <span class="field__hint">По умолчанию — первая доступная кривая насыщения.</span>
+          <% if (model.controls.curveNote) { %>
+          <span class="field__hint" role="status"><%= model.controls.curveNote %></span>
+          <% } %>
         </label>
 
         <div class="cluster">

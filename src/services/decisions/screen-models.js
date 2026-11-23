@@ -9,7 +9,7 @@ import {
   formatPercent,
   formatRatio,
 } from '../../lib/format.js';
-import { centsToApi, roundNumber } from '../../lib/metrics-math.js';
+import { centsToApi, roundHalfUp, roundNumber } from '../../lib/metrics-math.js';
 import { buildQueryString } from '../../lib/query.js';
 import { resolveWeekRange } from '../metrics/weekly-series.js';
 import { buildScenarioCharts } from './scenario-charts.js';
@@ -424,8 +424,19 @@ function mapScenarioList(rows) {
  * @returns {object} Totals block with labels.
  */
 function mapTotals(result) {
+  const current = mapSide(result.totals.current);
+  // The current CAC is derivable from the same four-week average the table shows; leaving it as a dash next to a
+  // nonzero spend and customer count would imply "not measured" when the numbers are right there.
+  const currentCacCents = result.totals.current.customers > 0
+    ? roundHalfUp(Number(result.totals.current.spendCents) / result.totals.current.customers)
+    : null;
+
   return {
-    current: mapSide(result.totals.current),
+    current: {
+      ...current,
+      cacCents: centsToApi(currentCacCents),
+      cacLabel: currentCacCents === null ? '—' : formatCentsToByn(currentCacCents),
+    },
     planned: mapSide(result.totals.planned),
     forecast: mapForecast(result.totals.forecast),
   };
@@ -440,8 +451,10 @@ function mapTotals(result) {
  *   query: { budgetByn?: unknown, channelIds?: string[] | null, curveChannelId?: string | null, page?: number },
  *   anchor: string,
  *   channels?: object[],
+ *   history?: object | null,
+ *   curveFallback?: boolean,
  *   mode?: 'builder',
- * }} input
+ * }} input `curveFallback` marks that a stale curve selector was ignored; it only changes an explanatory note.
  * @returns {object} Screen model shared by the page and `/api/v1/scenarios`.
  */
 export function buildScenariosScreen({
@@ -451,6 +464,7 @@ export function buildScenariosScreen({
   anchor = null,
   channels = [],
   history = null,
+  curveFallback = false,
   mode = 'builder',
 }) {
   const baselineCents = BigInt(scenario.totals.current.spendCents);
@@ -483,6 +497,9 @@ export function buildScenariosScreen({
     budgetLabel: formatCentsToByn(budgetCents),
     curveChannelId: curveChannel?.channelId ?? null,
     curveChannelName: curveChannel?.channelName ?? null,
+    curveNote: curveFallback
+      ? 'Выбранный канал кривой не входит в набор — показываем первую доступную кривую.'
+      : null,
     channels: dimension.map((channel) => ({
       value: channel.id,
       label: channel.name,
@@ -567,6 +584,7 @@ export function buildScenariosUnavailableScreen({
       budgetLabel: '—',
       curveChannelId: null,
       curveChannelName: null,
+      curveNote: null,
       channels: channels.map((channel) => ({
         value: channel.id,
         label: channel.name,
@@ -590,7 +608,10 @@ export function buildScenariosUnavailableScreen({
     },
     empty: true,
     unavailable: true,
-    error: error ?? 'Нет недель с расходом и новыми клиентами — распределять пока нечего.',
+    error:
+      error ??
+      'Кривая насыщения не построена: ни один выбранный канал не набрал восьми недель одновременно с расходом и ' +
+        'новыми клиентами.',
   };
 }
 

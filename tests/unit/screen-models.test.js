@@ -1632,14 +1632,14 @@ describe('scenario screen model and charts', () => {
       anchor: '2026-11-20',
       list: { rows: [], page: 1, total: 0, hasMore: false },
       channels: [{ id: '1', code: 'instagram', name: 'Instagram' }],
-      error: 'Нет недель с расходом',
+      error: 'Кривая насыщения не построена',
     });
 
     expect(screen.unavailable).toBe(true);
     expect(screen.empty).toBe(true);
     expect(screen.budget).toBeNull();
     expect(screen.charts).toBeNull();
-    expect(screen.error).toBe('Нет недель с расходом');
+    expect(screen.error).toBe('Кривая насыщения не построена');
     expect(screen.controls.channels[0].selected).toBe(false);
     expect(screen.list.total).toBe(0);
   });
@@ -1683,5 +1683,47 @@ describe('alerts screen model chart slot', () => {
 
     expect(screen.empty).toBe(true);
     expect(screen.emptyState.title).toBe('По фильтру ничего не найдено');
+  });
+});
+
+describe('scenario review fixes', () => {
+  it('shows the current CAC when the four-week spend and customers are present', () => {
+    const { scenario, list } = scenarioFixture();
+    const screen = buildScenariosScreen({ scenario, list, query: {}, anchor: '2026-11-20' });
+
+    expect(screen.totals.current.cacLabel).toBe('250,00');
+    expect(screen.totals.current.cacCents).toBe('25000');
+  });
+
+  it('uses the singular genitive for fractional customer titles', () => {
+    const { scenario, list } = scenarioFixture();
+    const screen = buildScenariosScreen({ scenario, list, query: {}, anchor: '2026-11-20' });
+
+    expect(screen.charts.customers.title).toContain('6,5 клиента');
+    expect(screen.charts.customers.title).not.toContain('клиентов');
+    expect(screen.charts.saturation.title).toContain('12,5 клиента');
+    expect(screen.charts.increment.title).toContain('+2,5 клиента');
+  });
+
+  it('explains a stale curve selector instead of silently dropping it', () => {
+    const { scenario, list } = scenarioFixture();
+    const screen = buildScenariosScreen({
+      scenario,
+      list,
+      query: { curveChannelId: '8' },
+      anchor: '2026-11-20',
+      curveFallback: true,
+    });
+
+    expect(screen.controls.curveChannelId).toBe('1');
+    expect(screen.controls.curveNote).toMatch(/не входит в набор/);
+  });
+
+  it('keeps the empty builder copy neutral for linear and customer-less channels', () => {
+    const screen = buildScenariosUnavailableScreen({ anchor: '2026-11-20' });
+
+    expect(screen.error).toContain('Кривая насыщения не построена');
+    expect(screen.error).not.toContain('Нет недель');
+    expect(screen.error).toContain('восьми недель');
   });
 });
