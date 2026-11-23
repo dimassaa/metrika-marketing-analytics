@@ -131,6 +131,31 @@ describe('scenarios builder screen', () => {
     }
   });
 
+  it('round-trips comma and grouped amounts without clamping or sanitising them', async () => {
+    const agent = await signedIn(VIEWER);
+    const base = extractDataProps((await agent.get('/app/scenarios')).text, 'scenarios');
+    const overCap = bynFromCents(BigInt(base.budget.capCents) + 1n);
+    const comma = overCap.replace('.', ',');
+
+    const rejected = await agent.get(`/app/scenarios?budgetByn=${encodeURIComponent(comma)}`);
+    expect(rejected.status).toBe(400);
+    expect(rejected.text).toContain('type="number"');
+    expect(rejected.text).toContain(`value="${overCap}"`);
+    expect(rejected.text).not.toContain(`value="${comma}"`);
+    expect(rejected.text).toContain(`max="${overCap}"`);
+    expect(rejected.text).toContain(base.budget.capLabel);
+    expect(rejected.text).not.toContain('выберите пресет ниже');
+
+    const grouped = await agent.get(
+      `/app/scenarios?budgetByn=${encodeURIComponent(base.budget.weeklyLabel)}`,
+    );
+    const groupedProps = extractDataProps(grouped.text, 'scenarios');
+
+    expect(grouped.status).toBe(200);
+    expect(groupedProps.budget.weeklyCents).toBe(base.budget.weeklyCents);
+    expect(groupedProps.controls.budgetInput).toBe(base.budget.weeklyInput);
+  });
+
   it('accepts the feasible minimum and renders the builder instead of a Home-position 400', async () => {
     const agent = await signedIn(VIEWER);
     const base = extractDataProps((await agent.get('/app/scenarios')).text, 'scenarios');

@@ -1637,6 +1637,37 @@ describe('scenario screen model and charts', () => {
     expect(screen.controls.budgetMaxInput).toBe('3000.00');
   });
 
+  it('normalises comma and grouped amounts for a number input', () => {
+    const baselineScenario = {
+      channels: [
+        { model: 'saturation', current: { spendCents: '100000' } },
+        { model: 'saturation', current: { spendCents: '100000' } },
+      ],
+    };
+    const comma = buildScenariosErrorScreen({
+      anchor: '2026-11-20',
+      query: { budgetByn: '8082,01' },
+      baselineScenario,
+      error: 'Бюджет больше 3× базы оптимизации в BYN',
+    });
+    const grouped = buildScenariosErrorScreen({
+      anchor: '2026-11-20',
+      query: { budgetByn: '1 234,56' },
+      baselineScenario,
+      error: 'Проверка',
+    });
+
+    expect(comma.controls.budgetInputType).toBe('number');
+    expect(comma.controls.budgetEntry).toBe('8082,01');
+    expect(comma.controls.budgetInput).toBe('8082.01');
+    expect(comma.controls.budgetMaxInput).toBe('8082.01');
+    expect(comma.controls.budgetCapLabel).toBe('6 000,00');
+    expect(grouped.controls.budgetInputType).toBe('number');
+    expect(grouped.controls.budgetEntry).toBe('1 234,56');
+    expect(grouped.controls.budgetInput).toBe('1234.56');
+    expect(grouped.controls.budgetMaxInput).toBe('6000.00');
+  });
+
   it('renders a rejected calculation as a builder error that preserves the entered values', () => {
     const screen = buildScenariosErrorScreen({
       anchor: '2026-11-20',

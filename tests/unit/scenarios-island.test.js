@@ -206,8 +206,12 @@ describe('scenarios frame contract', () => {
     expect(view).toContain('Расчёт не выполнен');
     expect(view).toContain('model.controls.budgetEntry');
     expect(view).toContain('type="<%= model.controls.budgetInputType %>"');
-    expect(view).toContain('value="<%= model.controls.budgetEntry %>"');
+    expect(view).toContain(
+      "model.controls.budgetInputType === 'number' ? model.controls.budgetInput : model.controls.budgetEntry",
+    );
     expect(view).toContain('max="<%= model.controls.budgetMaxInput %>"');
+    expect(view).toContain('model.controls.budgetCapLabel');
+    expect(view).not.toContain('выберите пресет ниже');
     expect(view).toContain('Параметры расчёта');
   });
 

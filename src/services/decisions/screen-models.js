@@ -730,7 +730,9 @@ export function buildScenariosErrorScreen({
     (largest, value) => (value > largest ? value : largest),
     0n,
   );
-  const numericEntry = /^\d+(?:[.,]\d+)?$/.test(rawBudget);
+  // `parseBynToCents` is the single BYN grammar: comma decimals and space grouping are valid and are normalised to
+  // the dot-decimal value a number input requires. Only a value it rejects stays as raw text.
+  const numericEntry = enteredCents !== null;
 
   return {
     page: 'scenarios',
@@ -742,13 +744,15 @@ export function buildScenariosErrorScreen({
     budget: null,
     controls: {
       budgetPeriod: 'week',
-      budgetInput: numericEntry ? rawBudget.replace(',', '.') : '',
+      budgetInput: numericEntry ? centsToInput(enteredCents) : '',
       budgetEntry: rawBudget,
       budgetInputType: numericEntry ? 'number' : 'text',
       budgetMinInput: centsToInput(minCents),
       budgetMinLabel: formatCentsToByn(minCents),
       budgetMaxInput: centsToInput(maxCents),
       budgetMaxLabel: formatCentsToByn(maxCents),
+      budgetCapInput: baselineScenario ? centsToInput(capCents) : '',
+      budgetCapLabel: baselineScenario ? formatCentsToByn(capCents) : '—',
       budgetValue: null,
       budgetLabel: '—',
       curveChannelId: requestedCurve,

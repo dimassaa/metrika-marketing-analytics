@@ -73,7 +73,7 @@
             type="<%= model.controls.budgetInputType %>"
             inputmode="decimal"
             name="budgetByn"
-            value="<%= model.controls.budgetEntry %>"
+            value="<%= model.controls.budgetInputType === 'number' ? model.controls.budgetInput : model.controls.budgetEntry %>"
             min="<%= model.controls.budgetMinInput %>"
             max="<%= model.controls.budgetMaxInput %>"
             step="0.01"
@@ -81,10 +81,15 @@
             required
           >
           <span class="field__hint" id="budget-hint">
+            <% if (model.controls.budgetCapInput) { %>
             Допустимый недельный бюджет: от <span class="u-numeric"><%= model.controls.budgetMinLabel %></span>
-            <span class="byn">BYN</span> до <span class="u-numeric"><%= model.controls.budgetMaxLabel %></span>
-            <span class="byn">BYN</span>. Введённое значение не подменяется — исправьте его или выберите пресет
-            ниже.
+            <span class="byn">BYN</span> до <span class="u-numeric"><%= model.controls.budgetCapLabel %></span>
+            <span class="byn">BYN</span>. Поле не подменяет введённое значение — исправьте сумму и нажмите
+            «Рассчитать».
+            <% } else { %>
+            Введите сумму не меньше <span class="u-numeric"><%= model.controls.budgetMinLabel %></span>
+            <span class="byn">BYN</span>; введённое значение остаётся в поле без подмены.
+            <% } %>
           </span>
           <% } else { %>
           <input
