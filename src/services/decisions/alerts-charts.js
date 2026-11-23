@@ -167,7 +167,8 @@ export function buildAlertChannelChart({
   // The last bucket may be an unmeasured week (no customers), so "last" means the last measured value, not
   // `values.at(-1)`: a trailing gap must not turn a chart with data into a "no values" caption.
   const last = measured.at(-1) ?? null;
-  const lastLabel = last === null ? '—' : `${formatCentsToByn(last)} BYN`;
+  const lastAmount = last === null ? '—' : formatCentsToByn(last);
+  const lastLabel = last === null ? '—' : `${lastAmount} BYN`;
   const trend = trendOf(values);
   const trendLabel = trend !== null
     ? `, ${formatSignedPercent(trend)} за ${measuredWeeks} измеренных недель`
@@ -185,7 +186,7 @@ export function buildAlertChannelChart({
       `${range === '' ? `${windowWeeks} недель` : `${range} · ${windowWeeks} недель`} · ` +
       (measuredWeeks === 0
         ? 'нет измеренных значений CAC'
-        : `недельный CAC в BYN, последняя ${lastLabel}`),
+        : `недельный CAC в BYN; последняя ${lastAmount}`),
     ariaLabel: measuredWeeks === 0
       ? `${conclusion}. Измеренных недель нет.`
       : `${conclusion}. Последняя измеренная неделя ${lastLabel}.`,

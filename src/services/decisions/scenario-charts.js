@@ -110,8 +110,8 @@ function changeLabel(current, compare) {
 /**
  * Grouped spend bars: the four-week average next to the planned weekly allocation.
  *
- * Channels without a fitted curve keep a row with a zero planned bar and a dash in the table: the picture must show
- * that they exist but are outside the plan, not hide them and let the sum look complete.
+ * Channels without a fitted curve keep a row and a dash in the table, but their `compare` value is `null` rather than
+ * `0`: a zero-length plan bar would read as "allocated nothing" when the channel was never part of the allocation.
  *
  * @param {{ channels: object[], history?: object }} input Scenario channel rows from the service result.
  * @returns {object} Chart contract consumed by `ChartFrame` + `ComparisonBars`.
@@ -122,14 +122,14 @@ export function buildSpendAllocationChart({ channels, history = null }) {
     name: channel.channelName,
     model: channel.model,
     current: chartCents(channel.current?.spendCents, 'current spendCents') ?? 0,
-    compare: channel.planned ? chartCents(channel.planned.spendCents, 'planned spendCents') ?? 0 : 0,
+    compare: channel.planned ? chartCents(channel.planned.spendCents, 'planned spendCents') ?? 0 : null,
     plannedMissing: !channel.planned,
   }));
 
   const totalCurrent = series.reduce((sum, row) => sum + row.current, 0);
-  const totalPlanned = series.reduce((sum, row) => sum + row.compare, 0);
+  const totalPlanned = series.reduce((sum, row) => sum + (row.compare ?? 0), 0);
   // The percent change compares like with like: a channel outside the plan has no plan value, so its current spend
-  // is not part of the baseline the plan is measured against.
+  // is not part of the baseline the plan is measured against. This is the same "base for the cap" the budget uses.
   const comparableCurrent = series
     .filter((row) => !row.plannedMissing)
     .reduce((sum, row) => sum + row.current, 0);
@@ -137,17 +137,18 @@ export function buildSpendAllocationChart({ channels, history = null }) {
   const hasData = totalCurrent > 0 || totalPlanned > 0;
   const change = changeLabel(comparableCurrent, totalPlanned);
   const conclusion = hasData
-    ? `план ${formatCentsToByn(totalPlanned)} BYN (${change} к текущему)`
+    ? `план ${formatCentsToByn(totalPlanned)} BYN (${change} к базе оптимизации)`
     : 'нет измеренного расхода';
 
   return {
     id: 'scenario-spend',
     title: hasData ? `Расход по каналам: ${conclusion}` : 'Расход по каналам: нет данных',
     caption:
-      `${historyCaption(history)} · текущее — среднее за 4 полные недели · ` +
-      `${channelsLabel(series.length)}, без кривой — ${excluded}`,
+      `${historyCaption(history)} · текущее — среднее за 4 полные недели по всем каналам · ` +
+      `база оптимизации — каналы с кривой · ${channelsLabel(series.length)}, без кривой — ${excluded}`,
     ariaLabel:
-      `Расход по каналам сценария: текущий ${formatCentsToByn(totalCurrent)} BYN, ` +
+      `Расход по каналам сценария: сейчас ${formatCentsToByn(totalCurrent)} BYN по всем каналам, ` +
+      `база оптимизации ${formatCentsToByn(comparableCurrent)} BYN, ` +
       `план ${formatCentsToByn(totalPlanned)} BYN, ${change}`,
     unit: 'BYN',
     compareLabel: 'План',
@@ -184,12 +185,12 @@ export function buildCustomersForecastChart({ channels, history = null }) {
     channelId: channel.channelId,
     name: channel.channelName,
     current: channel.current?.customers ?? 0,
-    compare: channel.forecast?.customers ?? 0,
+    compare: channel.forecast ? channel.forecast.customers ?? 0 : null,
     plannedMissing: !channel.forecast,
   }));
 
   const totalCurrent = series.reduce((sum, row) => sum + row.current, 0);
-  const totalForecast = series.reduce((sum, row) => sum + row.compare, 0);
+  const totalForecast = series.reduce((sum, row) => sum + (row.compare ?? 0), 0);
   // No curve means no forecast, so an excluded channel's current customers cannot be compared with a plan it does
   // not have. The change uses the optimizable subset; the table still shows every channel.
   const comparableCurrent = series
@@ -197,7 +198,7 @@ export function buildCustomersForecastChart({ channels, history = null }) {
     .reduce((sum, row) => sum + row.current, 0);
   const comparableForecast = series
     .filter((row) => !row.plannedMissing)
-    .reduce((sum, row) => sum + row.compare, 0);
+    .reduce((sum, row) => sum + (row.compare ?? 0), 0);
   const hasData = totalCurrent > 0 || totalForecast > 0;
   const change = changeLabel(comparableCurrent, comparableForecast);
   const conclusion = hasData
@@ -211,7 +212,8 @@ export function buildCustomersForecastChart({ channels, history = null }) {
       `${historyCaption(history)} · прогноз на неделю при текущем LTV; ` +
       'каналы без кривой не входят в план',
     ariaLabel:
-      `Новые клиенты по каналам сценария: сейчас ${customersLabel(totalCurrent)}, ` +
+      `Новые клиенты по каналам сценария: сейчас ${customersLabel(totalCurrent)} по всем каналам, ` +
+      `база оптимизации ${customersLabel(comparableCurrent)}, ` +
       `прогноз ${customersLabel(totalForecast)}, ${change}`,
     unit: 'чел.',
     compareLabel: 'Прогноз',

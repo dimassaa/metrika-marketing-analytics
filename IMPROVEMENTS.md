@@ -838,27 +838,24 @@ Still open:
   labelled "problem" for scenarios; the alerts screen owns that heuristic. The curve selector only changes which
   stored `K`/`S`/`observed` row is drawn; the plan and totals never depend on it.
 - **The native range input announces a raw float value to assistive technology.** `type="range"` with
-  `min="0.01"` and a multi-thousand-BYN `max` stores `2705.7099609375` internally; Chrome submits `2705.71`, but
-  `aria-valuenow` exposes the unrounded float. Fixing that without stale announcements needs a paired number input or
-  a small island that mirrors the slider into a formatted `aria-valuetext`. Deferred to M6; the visible label, the
-  hint and the submitted value are exact kopecks today.
+  `min="0.01"` and a multi-thousand-BYN `max` stored `2705.7099609375` internally; Chrome submitted `2705.71`, but
+  `aria-valuenow` exposed the unrounded float. **Resolved in the final M5 fix wave:** the input now carries
+  `aria-valuetext` with the formatted weekly amount, and the minimum is the feasible one (see the Task 8 note below).
 
 ## M5 Task 8 — final E2E and evidence follow-ups
 
-- **The slider's HTML `min="0.01"` is below the server's feasible minimum.** The optimizer rejects a budget smaller
-  than one kopeck per optimizable curve; the demo has six curves, so `0.01` returns 400 «Бюджета не хватает даже на
-  1 копейку каждому каналу», while `0.06` is the first accepted value. A keyboard user pressing `Home` therefore
-  lands on a value the form itself cannot submit. Compute the slider minimum from the number of optimizable channels
-  (or let the server allocate one kopeck to only some channels) instead of hard-coding `0.01`; the E2E run recorded
-  both the `Home → 0.01 → 400` path and `0.06 → 200`.
-- **The raw-float `aria-valuenow` is confirmed in a real browser, not just inferred.** On `/app/scenarios` the
-  accessibility tree reports `0.009999999776482582` after `Home`; the visible hint and the submitted `budgetByn` stay
-  exact. This is the same M6 item as the note above, now with evidence.
-- **Scenario validation errors lose the page and the entered budget.** `GET /app/scenarios?budgetByn=8082.01`
-  returns a plain-text 400 («Бюджет больше 3× текущего недельного бюджета в BYN»), not the styled builder with an
-  error card, so the person cannot correct the value in place. The same is true of the zero/one-kopeck messages. A
-  page-level catch that renders the builder with an alert would match the empty-builder treatment; the API may keep
-  the plain JSON error.
+- **The slider's HTML `min="0.01"` was below the server's feasible minimum.** The optimizer rejected a budget smaller
+  than one kopeck per optimizable curve; the demo has six curves, so `0.01` returned 400 «Бюджета не хватает даже на
+  1 копейку каждому каналу», while `0.06` was the first accepted value. **Resolved in the final M5 fix wave:** the
+  screen model derives `budget.minInput` from the optimizable channel count, so `Home` lands on `0.06`.
+- **The raw-float `aria-valuenow` was confirmed in a real browser, not just inferred.** On `/app/scenarios` the
+  accessibility tree reported `0.009999999776482582` after `Home`. **Resolved in the final M5 fix wave:** the slider
+  now pairs it with `aria-valuetext` («2 694,00 BYN в неделю») and the minimum is feasible; `aria-valuenow` itself
+  stays native.
+- **Scenario validation errors lost the page and the entered budget.** `GET /app/scenarios?budgetByn=8082.01`
+  returned a plain-text 400, not the styled builder with an error card. **Resolved in the final M5 fix wave:** the
+  page catches builder `ValidationError`s (including schema errors) and renders the parameter form with a styled error
+  card and the entered values, while `/api/v1/scenarios` keeps the plain JSON 400.
 - **Waterfall was not added; `IncrementBars` is the intended chart.** The stored snapshot has no cumulative steps, so
   a classical waterfall would invent an ordering. Design spec §8 already describes «бары прироста по каналам», and
   `IMPROVEMENTS.md` records the divergence; no copy change was needed in Task 8.

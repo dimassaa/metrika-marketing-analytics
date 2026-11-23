@@ -53,7 +53,13 @@ const SEVERITY_OPTIONS = Object.freeze([
 ]);
 
 /**
- * Converts a NUMERIC(14,4) BYN decimal string to whole kopecks without a float round trip. * @param {string | null | undefined} value Decimal BYN amount as stored in `alerts.value`/`threshold`.
+ * Converts a NUMERIC(14,4) BYN decimal string to whole kopecks without a float round trip.
+ *
+ * The stored fraction is a BYN fraction (four decimals), not kopecks. Treating its first three digits as kopecks
+ * (the previous bug) turns `58.6850` into `6485` instead of `5869`. Scaling the four-digit fraction to kopecks and
+ * adding half a kopeck before the integer division implements half-up rounding at the fourth decimal.
+ *
+ * @param {string | null | undefined} value Decimal BYN amount as stored in `alerts.value`/`threshold`.
  * @returns {bigint | null} Kopecks, or null when the value is absent.
  */
 export function bynDecimalToCents(value) {
@@ -63,11 +69,8 @@ export function bynDecimalToCents(value) {
   if (!match) throw new TypeError(`alert decimal is not a BYN amount: ${JSON.stringify(value)}`);
 
   const [, whole, fraction = ''] = match;
-  const centsDigits = fraction.padEnd(3, '0').slice(0, 3);
-  const fourth = Number(fraction[3] ?? '0');
-  let cents = BigInt(whole) * 100n + BigInt(centsDigits);
-  if (fourth >= 5) cents += 1n;
-  return cents;
+  const fractionCents = (BigInt(fraction.padEnd(4, '0')) + 50n) / 100n;
+  return BigInt(whole) * 100n + fractionCents;
 }
 
 /**
@@ -96,17 +99,18 @@ function formatRuleValue(rule, raw) {
 
 /**
  * @param {string | Date | null | undefined} value
- * @returns {string} `DD.MM.YYYY HH:mm` in Minsk, or the honest empty-state label.
+ * @returns {string} `DD.MM.YYYY HH:mm` in Minsk, or the honest no-trigger label.
  */
-function lastRecalculatedLabel(value) {
-  return value ? formatDateTimeRu(value) : 'Ещё не проверяли';
+function lastTriggeredLabel(value) {
+  return value ? formatDateTimeRu(value) : 'Срабатываний ещё не было';
 }
 
 /**
  * Alert list and summary model.
  *
- * `lastRecalculatedLabel` is an absolute `MAX(detected_at)` timestamp, never the request time. `isStale` only reports
- * whether that stored check is older than the session throttle; it is a hint for the analyst, not the throttle itself.
+ * `lastTriggeredLabel` is an absolute `MAX(detected_at)` timestamp, never the request time. That column records the
+ * last time a rule fired, not a heartbeat: a recalculation with no triggers leaves it unchanged. `isStale` is decided
+ * by the controller from that stored check and only reports the age; this builder deliberately has no clock.
  *
  * @param {{
  *   window: object,
@@ -136,12 +140,9 @@ export function buildAlertsScreen({
   const total = pagination?.total ?? summary.total ?? rows.length;
   const hasMore = pagination?.hasMore ?? summary.hasMore === true;
   const lastDetectedAt = summary.lastDetectedAt ?? null;
-  // A stand with no detections yet is "never checked", not "stale": the label already says so, and claiming old data
-  // would be a second, contradictory warning. Staleness only applies to a stored check.
-  const stale = isStale ?? (
-    lastDetectedAt !== null &&
-    Date.now() - new Date(lastDetectedAt).getTime() > METRICS_CONFIG.alerts.autoRecalcMs
-  );
+  // Staleness belongs to the controller: it knows when the check ran and must not make the screen model depend on the
+  // system clock, which would make one model render differently on two identical requests.
+  const stale = isStale === true;
   const query = { status, severity, channelId };
 
   const mappedRows = rows.map((row) => {
@@ -241,8 +242,7 @@ export function buildAlertsScreen({
       resolvedLabel: formatInteger(summary.resolved ?? 0),
       dismissed: summary.dismissed ?? 0,
       dismissedLabel: formatInteger(summary.dismissed ?? 0),
-      lastDetectedAt: lastDetectedAt instanceof Date ? lastDetectedAt.toISOString() : lastDetectedAt,
-      lastRecalculatedLabel: summary.lastRecalculatedLabel ?? lastRecalculatedLabel(lastDetectedAt),
+      lastTriggeredLabel: summary.lastTriggeredLabel ?? lastTriggeredLabel(lastDetectedAt),
       isStale: stale,
     },
     rows: mappedRows,
@@ -289,6 +289,26 @@ function scenarioHistory(anchor) {
 
   const { firstWeekStart, lastWeekStart } = resolveWeekRange(anchor, weeks);
   return { weeks, label: `${weeks} недель`, from: firstWeekStart, to: addDays(lastWeekStart, 6) };
+}
+
+/**
+ * Current weekly spend of the channels the optimizer can allocate. This is the single base for the cap, the
+ * extrapolation warning and the chart's "current" reference. A linear/no_data channel stays in `totals.current` — it
+ * is real spend — but its spend must not raise a ceiling for a plan it cannot receive.
+ *
+ * @param {object[]} channels Stored scenario channel rows.
+ * @returns {bigint}
+ */
+function optimizableBaselineCents(channels) {
+  return channels.reduce(
+    (sum, channel) => (channel.model === 'saturation' ? sum + BigInt(channel.current.spendCents) : sum),
+    0n,
+  );
+}
+
+/** @param {object[]} channels @returns {number} */
+function optimizableChannelCount(channels) {
+  return channels.filter((channel) => channel.model === 'saturation').length;
 }
 
 /**
@@ -376,14 +396,20 @@ function mapScenarioChannel(channel) {
 }
 
 /**
- * Builds the budget block from the current weekly baseline and the resolved plan budget.
- * @param {{ baselineCents: bigint, budgetCents: bigint }} input
+ * Builds the budget block from the optimizable baseline and the resolved plan budget.
+ *
+ * `minCents` is the feasible minimum the optimizer accepts: one kopeck per optimizable channel. The slider used to
+ * start at a hard-coded `0.01`, which is below that minimum whenever two or more curves exist and made the keyboard
+ * Home position submit an invalid budget.
+ *
+ * @param {{ baselineCents: bigint, budgetCents: bigint, optimizableCount: number }} input
  * @returns {object}
  */
-function buildBudget({ baselineCents, budgetCents }) {
+function buildBudget({ baselineCents, budgetCents, optimizableCount }) {
   const capCents = baselineCents * BigInt(METRICS_CONFIG.scenarios.maxBudgetMultiplier);
   const warnAboveCents = baselineCents * BigInt(METRICS_CONFIG.scenarios.warnBudgetMultiplier);
   const forecast12mCents = budgetCents * BigInt(DECISIONS_CONFIG.weeksPerYear);
+  const minCents = BigInt(Math.max(1, optimizableCount));
 
   return {
     weeklyCents: centsToApi(budgetCents),
@@ -394,6 +420,11 @@ function buildBudget({ baselineCents, budgetCents }) {
     weeksPerYear: DECISIONS_CONFIG.weeksPerYear,
     maxMultiplier: METRICS_CONFIG.scenarios.maxBudgetMultiplier,
     warnMultiplier: METRICS_CONFIG.scenarios.warnBudgetMultiplier,
+    baselineCents: centsToApi(baselineCents),
+    baselineLabel: formatCentsToByn(baselineCents),
+    minCents: centsToApi(minCents),
+    minInput: centsToInput(minCents),
+    minLabel: formatCentsToByn(minCents),
     capCents: centsToApi(capCents),
     capLabel: formatCentsToByn(capCents),
     capInput: centsToInput(capCents),
@@ -417,6 +448,30 @@ function mapScenarioList(rows) {
     channelCountLabel: row.channelCount === null ? '—' : formatInteger(row.channelCount),
     href: `/app/scenarios/${row.id}`,
   }));
+}
+
+/**
+ * Saved-scenario list block. The page lists at most `scenariosPageSize` snapshots, so it must say how many of the
+ * total it is showing and offer the next page instead of silently truncating the history.
+ *
+ * @param {{ rows: object[], page: number, total: number, hasMore: boolean }} list
+ * @param {object} [query] Current builder query, replayed on the pager links.
+ * @returns {object}
+ */
+function buildScenarioList(list, query = {}) {
+  const rows = mapScenarioList(list.rows);
+  const pageHref = (page) => `/app/scenarios?${buildQueryString(query, { page })}`;
+
+  return {
+    rows,
+    page: list.page,
+    pageSize: DECISIONS_CONFIG.scenariosPageSize,
+    total: list.total,
+    hasMore: list.hasMore,
+    shownLabel: list.total > rows.length ? `Показаны ${rows.length} из ${list.total}` : null,
+    prevHref: list.page > 1 ? pageHref(list.page - 1) : null,
+    nextHref: list.hasMore ? pageHref(list.page + 1) : null,
+  };
 }
 
 /**
@@ -467,7 +522,7 @@ export function buildScenariosScreen({
   curveFallback = false,
   mode = 'builder',
 }) {
-  const baselineCents = BigInt(scenario.totals.current.spendCents);
+  const baselineCents = optimizableBaselineCents(scenario.channels);
   const budgetCents = BigInt(scenario.totals.planned.spendCents);
   const mappedChannels = scenario.channels.map(mapScenarioChannel);
   const selected = new Set(query.channelIds ?? scenario.channels.map((channel) => channel.channelId));
@@ -526,7 +581,11 @@ export function buildScenariosScreen({
     weeksPerYear: DECISIONS_CONFIG.weeksPerYear,
     anchor,
     history: historyWindow,
-    budget: buildBudget({ baselineCents, budgetCents }),
+    budget: buildBudget({
+      baselineCents,
+      budgetCents,
+      optimizableCount: optimizableChannelCount(scenario.channels),
+    }),
     controls,
     channels: mappedChannels,
     totals: mapTotals(scenario),
@@ -536,13 +595,7 @@ export function buildScenariosScreen({
       history: historyWindow,
       curveChannelId: controls.curveChannelId,
     }),
-    list: {
-      rows: mapScenarioList(list.rows),
-      page: list.page,
-      pageSize: DECISIONS_CONFIG.scenariosPageSize,
-      total: list.total,
-      hasMore: list.hasMore,
-    },
+    list: buildScenarioList(list, query),
     empty: list.total === 0,
     error: null,
   };
@@ -599,19 +652,90 @@ export function buildScenariosUnavailableScreen({
     totals: null,
     warnings: [],
     charts: null,
-    list: {
-      rows: mapScenarioList(list.rows),
-      page: list.page,
-      pageSize: DECISIONS_CONFIG.scenariosPageSize,
-      total: list.total,
-      hasMore: list.hasMore,
-    },
+    list: buildScenarioList(list),
     empty: true,
     unavailable: true,
     error:
       error ??
       'Кривая насыщения не построена: ни один выбранный канал не набрал восьми недель одновременно с расходом и ' +
         'новыми клиентами.',
+  };
+}
+
+/**
+ * Builder model for a rejected calculation: the query or the service refused the budget, the channel set or the
+ * baseline. The page renders the parameter form with the entered values plus a styled error card, so a person can
+ * correct the input instead of reading a bare-text 400.
+ *
+ * The model carries no budget or chart block: inventing a zeroed one would show numbers the server did not compute.
+ *
+ * @param {{
+ *   anchor?: string | null,
+ *   list?: { rows: object[], page: number, total: number, hasMore: boolean },
+ *   channels?: object[],
+ *   query?: object,
+ *   error?: string,
+ * }} input
+ * @returns {object} Builder-shaped model with `builderError: true`.
+ */
+export function buildScenariosErrorScreen({
+  anchor = null,
+  list = { rows: [], page: 1, total: 0, hasMore: false },
+  channels = [],
+  query = {},
+  error = 'Не удалось рассчитать сценарий с этими параметрами.',
+}) {
+  const requestedIds = query.channelIds ?? null;
+  const selected = new Set(
+    (requestedIds ?? channels.map((channel) => channel.id)).map((id) => String(id)),
+  );
+  const dimension = channels.map((channel) => ({
+    value: channel.id,
+    label: channel.name,
+    code: channel.code,
+    selected: selected.has(String(channel.id)),
+  }));
+  const requestedCurve = query.curveChannelId === null || query.curveChannelId === undefined
+    ? null
+    : String(query.curveChannelId);
+  const rawBudget = query.budgetByn === null || query.budgetByn === undefined
+    ? ''
+    : String(query.budgetByn).trim();
+  // A range input only accepts a plain non-negative number; the raw entry is kept separately for the error card so
+  // an invalid value such as `abc` is still shown back to the person.
+  const rangeBudget = /^\d+(?:[.,]\d+)?$/.test(rawBudget) ? rawBudget.replace(',', '.') : '';
+
+  return {
+    page: 'scenarios',
+    mode: 'builder',
+    budgetPeriod: 'week',
+    weeksPerYear: DECISIONS_CONFIG.weeksPerYear,
+    anchor,
+    history: scenarioHistory(anchor),
+    budget: null,
+    controls: {
+      budgetPeriod: 'week',
+      budgetInput: rangeBudget,
+      budgetEntry: rawBudget,
+      budgetValue: null,
+      budgetLabel: '—',
+      budgetMinInput: centsToInput(1n),
+      curveChannelId: requestedCurve,
+      curveChannelName: null,
+      curveNote: null,
+      channels: dimension,
+      selectedChannels: dimension.filter((channel) => channel.selected),
+      curveOptions: dimension.filter((channel) => channel.selected),
+      presets: [],
+    },
+    channels: [],
+    totals: null,
+    warnings: [],
+    charts: null,
+    list: buildScenarioList(list, query),
+    empty: list.total === 0,
+    builderError: true,
+    error,
   };
 }
 
@@ -655,9 +779,13 @@ export function buildScenarioDetailScreen({ scenario }) {
   }
 
   const result = scenario.result;
-  const baselineCents = BigInt(result.totals.current.spendCents);
+  const baselineCents = optimizableBaselineCents(result.channels);
   const budgetCents = BigInt(scenario.params.budgetCents);
-  const budget = buildBudget({ baselineCents, budgetCents });
+  const budget = buildBudget({
+    baselineCents,
+    budgetCents,
+    optimizableCount: optimizableChannelCount(result.channels),
+  });
   const history = {
     weeks: scenario.params.history.weeks,
     from: scenario.params.history.from,

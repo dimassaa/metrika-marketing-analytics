@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { AUDIT_ACTIONS, AUDIT_ENTITIES } from '../../src/config/audit-actions.js';
 import { METRICS_CONFIG } from '../../src/config/metrics.js';
 import { createAuditService } from '../../src/services/audit.service.js';
+import { buildForecast } from '../../src/services/decisions/scenarios.service.js';
 import {
   scenarioSaveSchema,
   storedScenarioParamsSchema,
@@ -33,7 +34,7 @@ const RESULT = {
       observed: [{ spendCents: '250000', customers: 74 }],
       current: { spendCents: '240000', customers: 70 },
       planned: { spendCents: '260000', customers: 76.5 },
-      forecast: { customers: 76.5, revenue12Cents: '1530000', cacCents: '3399', romi12: -11.4 },
+      forecast: { customers: 76.5, revenue12Cents: '19890000', cacCents: '3399', romi12: 47.1154 },
       note: null,
     },
     {
@@ -54,7 +55,7 @@ const RESULT = {
   totals: {
     current: { spendCents: '240000', customers: 70 },
     planned: { spendCents: '260000', customers: 76.5 },
-    forecast: { customers: 76.5, revenue12Cents: '1530000', cacCents: '3399', romi12: -11.4 },
+    forecast: { customers: 76.5, revenue12Cents: '19890000', cacCents: '3399', romi12: 47.1154 },
   },
   warnings: ['SEO: Нет данных для кривой'],
 };
@@ -104,9 +105,37 @@ describe('stored scenario schemas', () => {
     expect(
       storedScenarioResultSchema.safeParse({
         ...RESULT,
-        totals: { ...RESULT.totals, forecast: { ...RESULT.totals.forecast, revenue12Cents: 1530000 } },
+        totals: { ...RESULT.totals, forecast: { ...RESULT.totals.forecast, revenue12Cents: 19890000 } },
       }).success,
     ).toBe(false);
+  });
+});
+
+describe('scenario 12-month forecast arithmetic', () => {
+  it('annualises both customers and spend by 52 and keeps ROMI consistent', () => {
+    const forecast = buildForecast({
+      customers: 10,
+      plannedCents: 50000n,
+      ltvCents: 6000n,
+    });
+
+    // CAC stays weekly: 500,00 BYN / 10 customers.
+    expect(forecast.customers).toBe(10);
+    expect(forecast.cacCents).toBe('5000');
+    // Revenue12 = 10 customers/week × 52 weeks × 60,00 BYN LTV.
+    expect(forecast.revenue12Cents).toBe('3120000');
+    // Spend12 = 500,00 BYN/week × 52; ROMI = (3 120 000 − 2 600 000) / 2 600 000 = 20 %.
+    expect(forecast.romi12).toBe(20);
+    // The 52 cancels: (q × LTV − b) / b must equal the annual calculation.
+    expect(forecast.romi12).toBeCloseTo(((10 * 6000 - 50000) / 50000) * 100, 10);
+  });
+
+  it('keeps a missing LTV unknowable instead of fabricating revenue', () => {
+    const forecast = buildForecast({ customers: 7.5, plannedCents: 30000n, ltvCents: null });
+
+    expect(forecast.cacCents).toBe('4000');
+    expect(forecast.revenue12Cents).toBeNull();
+    expect(forecast.romi12).toBeNull();
   });
 });
 

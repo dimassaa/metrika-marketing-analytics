@@ -105,10 +105,11 @@ const DETAIL_KEYS = Object.freeze([
   ['truncated', 'Обрезано'],
   ['filters', 'Фильтры'],
   // Alert dismissals and scenario saves carry these; the numeric channel id is deliberately not rendered because the
-  // journal line already has the entity id column.
+  // journal line already has the entity id column. A scenario payload also carries its name and weekly budget.
   ['rule', 'Правило'],
   ['severity', 'Важность'],
   ['reason', 'Причина'],
+  ['budgetCents', 'Бюджет, коп.'],
 ]);
 
 /**

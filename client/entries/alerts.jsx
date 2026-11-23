@@ -8,7 +8,7 @@ import { ChartErrorBoundary } from '../components/charts/ChartErrorBoundary.jsx'
 import { ChartFrame } from '../components/charts/ChartFrame.jsx';
 
 /**
- * Alerts island: the unfiltered summary, the last-check line and the weekly CAC line of the problem channel.
+ * Alerts island: the unfiltered summary, the last-trigger line and the weekly CAC line of the problem channel.
  *
  * The filterable table and its dismissal forms are server-rendered in `pages/alerts.ejs`; this island deliberately
  * does not duplicate them. Every number is a ready string from the screen model, which is the same object
@@ -23,7 +23,7 @@ import { ChartFrame } from '../components/charts/ChartFrame.jsx';
  *   summary: {
  *     activeLabel: string, criticalLabel: string, warningLabel: string,
  *     resolvedLabel: string, dismissedLabel: string,
- *     lastRecalculatedLabel: string, isStale: boolean,
+ *     lastTriggeredLabel: string, isStale: boolean,
  *   },
  *   chart: object | null,
  *   pagination: { page: number, total: number, hasMore: boolean },
@@ -77,8 +77,8 @@ export function AlertsIsland({ window, summary, rows, chart, pagination, empty, 
   return (
     <div className="stack stack--lg">
       <Card
-        title="Сводка проверки"
-        meta={`Последняя проверка: ${summary.lastRecalculatedLabel}${summary.isStale ? ' · данные старше часа' : ''}`}
+        title="Сводка алертов"
+        meta={`Последнее срабатывание: ${summary.lastTriggeredLabel}${summary.isStale ? ' · данные старше часа' : ''}`}
       >
         <div className="grid grid--4">
           {kpis.map((item) => (

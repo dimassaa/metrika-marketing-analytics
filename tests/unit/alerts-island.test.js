@@ -88,8 +88,8 @@ describe('alerts island structure', () => {
   it('renders the summary and one accessible CAC chart with a duplicate table', () => {
     const html = renderToStaticMarkup(createElement(AlertsIsland, alertModel()));
 
-    expect(html).toContain('Сводка проверки');
-    expect(html).toContain('Последняя проверка:');
+    expect(html).toContain('Сводка алертов');
+    expect(html).toContain('Последнее срабатывание:');
     expect((html.match(/<figure class="card chart"/g) ?? []).length).toBe(1);
     expect(html).toContain('role="img"');
     expect(html).toContain('aria-label="CAC: Instagram');
@@ -275,7 +275,8 @@ describe('alert chart trailing gap', () => {
 
     expect(chart.hasData).toBe(true);
     expect(chart.caption).not.toContain('нет измеренных значений');
-    expect(chart.caption).toContain('последняя 20,00 BYN');
+    expect(chart.caption).toContain('последняя 20,00');
+    expect(chart.caption).not.toContain('20,00 BYN BYN');
     expect(chart.ariaLabel).toContain('Последняя измеренная неделя 20,00 BYN');
     expect(chart.ariaLabel).not.toContain('Последняя неделя —');
   });

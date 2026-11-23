@@ -15,6 +15,31 @@ function actorOf(req) {
 }
 
 /**
+ * Reads the builder inputs without trusting the schema. Used only when `scenarioQuerySchema` already rejected the
+ * query: the styled error page still has to show the person what they entered instead of a bare 400.
+ *
+ * @param {import('express').Request} req
+ * @returns {{ budgetByn: unknown, channelIds: string[] | null, curveChannelId: unknown, page: number }}
+ */
+function rawBuilderQuery(req) {
+  const rawChannels = req.query.channelIds;
+  let channelIds = null;
+  if (rawChannels !== null && rawChannels !== undefined) {
+    const list = (Array.isArray(rawChannels) ? rawChannels : [rawChannels])
+      .flatMap((value) => String(value).split(','))
+      .map((value) => value.trim())
+      .filter((value) => value !== '');
+    channelIds = list.length > 0 ? list : null;
+  }
+  return {
+    budgetByn: req.query.budgetByn ?? null,
+    channelIds,
+    curveChannelId: req.query.curveChannelId ?? null,
+    page: 1,
+  };
+}
+
+/**
  * Scenarios builder, detail and save controller.
  *
  * The builder page and `/api/v1/scenarios` share `loadBuilder`; the detail page and `/api/v1/scenarios/:id` share
@@ -23,7 +48,8 @@ function actorOf(req) {
  *
  * @param {{
  *   services: { scenarios: object },
- *   screenModels: { scenarios: Function, scenarioDetail: Function },
+ *   screenModels: { scenarios: Function, scenarioDetail: Function, scenariosUnavailable: Function,
+ *     scenariosError: Function },
  *   referenceRepository: ReturnType<typeof import('../repositories/reference.repo.js').createReferenceRepository>,
  *   channelsRepository?: ReturnType<typeof import('../repositories/channels.repo.js').createChannelsRepository> | null,
  * }} deps
@@ -134,35 +160,62 @@ export function createScenariosController({
 
     /**
      * Renders the builder frame. The GET form recalculates from the URL; the island receives the resulting model.
+     *
+     * A builder failure is a page state, not a bare-text 400: a malformed or infeasible budget renders the parameter
+     * form with a styled error card and the entered values. The JSON API keeps the strict validation response. The one
+     * exception is "no curve can be fitted": that is an empty stand, not a malformed request, and gets the designed
+     * empty builder with a 200.
      * @type {import('express').RequestHandler}
      */
     async page(req, res) {
-      let anchor;
-      let screen;
+      const anchor = await referenceRepository.getDataAnchor();
+      let query;
+      let failure = null;
       try {
-        ({ anchor, screen } = await loadBuilder(req));
+        query = parseQuery(scenarioQuerySchema, req.query);
       } catch (error) {
-        // A fresh stand has channels but no 26 weeks of spend/customers. That is not a malformed request, so the
-        // page shows the designed empty builder instead of a bare 400; the API keeps the validation error.
-        if (!(error instanceof ValidationError) || error.message !== NO_CURVE_CHANNELS_MESSAGE) throw error;
+        if (!(error instanceof ValidationError)) throw error;
+        failure = error;
+        query = rawBuilderQuery(req);
+      }
 
-        anchor = await referenceRepository.getDataAnchor();
+      let screen;
+      if (failure === null) {
+        try {
+          ({ screen } = await loadBuilder(req, { query, anchor }));
+        } catch (error) {
+          if (!(error instanceof ValidationError)) throw error;
+          failure = error;
+        }
+      }
+
+      if (failure !== null) {
         const [list, channels] = await Promise.all([
           services.scenarios.listScenarios({ page: 1 }),
           channelsRepository ? channelsRepository.listChannels() : Promise.resolve([]),
         ]);
-        screen = screenModels.scenariosUnavailable({
-          anchor,
-          list,
-          channels,
-          error:
-            'Кривая насыщения не построена: ни один выбранный канал не набрал восьми недель одновременно с расходом ' +
-            'и новыми клиентами.',
-        });
+        if (failure.message === NO_CURVE_CHANNELS_MESSAGE) {
+          screen = screenModels.scenariosUnavailable({
+            anchor,
+            list,
+            channels,
+            error:
+              'Кривая насыщения не построена: ни один выбранный канал не набрал восьми недель одновременно с ' +
+              'расходом и новыми клиентами.',
+          });
+        } else {
+          screen = screenModels.scenariosError({
+            anchor,
+            list,
+            channels,
+            query,
+            error: failure.message,
+          });
+        }
       }
 
       res.set('Cache-Control', 'no-store');
-      res.status(200).render('pages/scenarios', {
+      res.status(screen.builderError ? 400 : 200).render('pages/scenarios', {
         ...buildShellLocals(req, { title: 'Сценарии', activeNav: 'scenarios', dataAnchor: anchor }),
         model: screen,
         islandEntries: screen.charts === null ? [] : ['scenarios'],

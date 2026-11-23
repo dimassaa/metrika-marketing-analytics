@@ -23,7 +23,7 @@ import { ChartTooltip } from './ChartTooltip.jsx';
  *   unit: 'BYN' | 'чел.',
  *   compareLabel: string,
  *   series: Array<{
- *     channelId: string, name: string, current: number, compare: number, plannedMissing: boolean,
+ *     channelId: string, name: string, current: number, compare: number | null, plannedMissing: boolean,
  *   }>,
  * } }} props
  */

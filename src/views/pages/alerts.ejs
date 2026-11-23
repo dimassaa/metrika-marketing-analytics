@@ -9,8 +9,9 @@
       <h2>Алерты по каналам</h2>
       <p class="u-muted">
         Правила сравнивают четыре полные недели с четырьмя предыдущими. Порог и измеренное значение хранятся с
-        четырьмя знаками, а в таблице показываются с точностью, достаточной для решения. «Последняя проверка» — это
-        время последнего пересчёта в базе, а не время открытия страницы.
+        четырьмя знаками, а в таблице показываются с точностью, достаточной для решения. «Последнее срабатывание» —
+        это время последнего срабатывания правила в базе, а не время открытия страницы: пересчёт без срабатываний
+        его не обновляет.
       </p>
     </div>
 
@@ -89,7 +90,7 @@
               <th scope="col" class="u-right">Значение</th>
               <th scope="col" class="u-right">Порог</th>
               <th scope="col">Период</th>
-              <th scope="col">Проверено</th>
+              <th scope="col">Сработало</th>
               <th scope="col">Статус</th>
               <% if (can('alerts:manage')) { %>
               <th scope="col">Действие</th>
@@ -120,7 +121,8 @@
                   <input type="hidden" name="severity" value="<%= model.filters.severity %>">
                   <input type="hidden" name="channelId" value="<%= model.filters.channelId ?? '' %>">
                   <input type="hidden" name="page" value="<%= model.pagination.page %>">
-                  <input class="input" type="text" name="reason" maxlength="200" placeholder="Причина">
+                  <label class="u-visually-hidden" for="dismiss-reason-<%= row.id %>">Причина скрытия</label>
+                  <input class="input" id="dismiss-reason-<%= row.id %>" type="text" name="reason" maxlength="200" placeholder="Причина">
                   <button class="btn btn--ghost btn--sm" type="submit">Скрыть</button>
                 </form>
                 <% } else { %>

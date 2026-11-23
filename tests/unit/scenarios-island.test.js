@@ -28,7 +28,7 @@ function scenarioFixture() {
         ],
         current: { spendCents: '100000', customers: 4 },
         planned: { spendCents: '120000', customers: 6.5 },
-        forecast: { customers: 6.5, revenue12Cents: '250000', cacCents: '18462', romi12: 100.2 },
+        forecast: { customers: 6.5, revenue12Cents: '6760000', cacCents: '18462', romi12: 8.3333 },
         note: null,
       },
       {
@@ -49,7 +49,7 @@ function scenarioFixture() {
     totals: {
       current: { spendCents: '100000', customers: 4 },
       planned: { spendCents: '120000', customers: 6.5 },
-      forecast: { customers: 6.5, revenue12Cents: '250000', cacCents: '18462', romi12: 100.2 },
+      forecast: { customers: 6.5, revenue12Cents: '6760000', cacCents: '18462', romi12: 8.3333 },
     },
     warnings: ['Email: Линейная кривая — без оптимума'],
   };
@@ -177,22 +177,34 @@ describe('scenario chart components', () => {
 });
 
 describe('scenarios frame contract', () => {
-  it('binds the slider max to the model cap and labels the weekly and 12-month budgets', () => {
+  it('binds the slider min/max to the feasible model bounds and labels the weekly and 12-month budgets', () => {
     const view = readFileSync('src/views/pages/scenarios.ejs', 'utf8');
 
     expect(view).toContain('type="range"');
-    expect(view).toContain('min="0.01"');
+    expect(view).toContain('min="<%= model.budget ? model.budget.minInput : model.controls.budgetMinInput %>"');
     expect(view).toContain('step="0.01"');
     expect(view).toContain('max="<%= model.budget.capInput %>"');
+    expect(view).toContain('aria-valuetext');
     expect(view).toContain('Недельный бюджет');
     expect(view).toContain('за 12 месяцев ×<%= model.budget.weeksPerYear %>');
+    expect(view).toContain('база оптимизации');
     expect(view).toContain('максимум');
-    expect(view).toContain('<%= model.budget.maxMultiplier %>× текущего бюджета');
+    expect(view).toContain('<%= model.budget.maxMultiplier %>× базы оптимизации');
     expect(view).not.toContain('×52');
     expect(view).not.toContain('3× текущего бюджета');
     expect(view).toContain('model.controls.presets');
     expect(view).toContain('name="_csrf"');
     expect(view).toContain('name="channelIds"');
+  });
+
+  it('renders a styled error card with the parameter form instead of a bare-text 400', () => {
+    const view = readFileSync('src/views/pages/scenarios.ejs', 'utf8');
+
+    expect(view).toContain('model.builderError');
+    expect(view).toContain('alert alert--error');
+    expect(view).toContain('Расчёт не выполнен');
+    expect(view).toContain('model.controls.budgetEntry');
+    expect(view).toContain('Параметры расчёта');
   });
 
   it('has the designed empty builder branch and no literal cap', () => {
@@ -240,6 +252,15 @@ describe('scenario review fixes', () => {
 
     expect(html).toContain('причина — в предупреждениях расчёта');
     expect(html).not.toContain('Примечание в таблице');
+  });
+
+  it('takes the year length and warning multiplier from the model instead of literals', () => {
+    const entry = readFileSync('client/entries/scenarios.jsx', 'utf8');
+
+    expect(entry).not.toContain('×52');
+    expect(entry).not.toContain('(2×)');
+    expect(entry).toContain('${weeksPerYear}');
+    expect(entry).toContain('${budget.warnMultiplier}');
   });
 
   it('formats customer axis ticks with the same precision as the values', () => {

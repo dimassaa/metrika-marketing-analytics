@@ -56,6 +56,16 @@ beforeEach(async () => {
 });
 
 /**
+ * @param {object} built `buildScenario` result.
+ * @returns {bigint} Current spend of the optimizable channels — the cap/warning base.
+ */
+function optimizableBaseline(built) {
+  return built.channels
+    .filter((channel) => channel.model === 'saturation')
+    .reduce((sum, channel) => sum + BigInt(channel.current.spendCents), 0n);
+}
+
+/**
  * @param {string} entity
  * @param {string} entityId
  * @returns {Promise<Array<Record<string, any>>>}
@@ -99,8 +109,11 @@ describe('scenario persistence', () => {
     expect(row.params.history.weeks).toBe(METRICS_CONFIG.saturation.historyWeeks);
     expect(row.params.optimizer).toEqual({ ...METRICS_CONFIG.saturation });
     expect(typeof row.params.budgetCents).toBe('string');
-    // An omitted budget means "what the company spends now", so the stored snapshot is the current baseline.
-    expect(row.params.budgetCents).toBe(built.totals.current.spendCents);
+    // An omitted budget means "what the optimizable channels spend now": the cap base, not the all-channel total.
+    const optimizableBaseline = built.channels
+      .filter((channel) => channel.model === 'saturation')
+      .reduce((sum, channel) => sum + BigInt(channel.current.spendCents), 0n);
+    expect(row.params.budgetCents).toBe(optimizableBaseline.toString());
     expect(row.params.channelIds).toEqual(channels.map((channel) => channel.id));
 
     expect(row.result.channels).toHaveLength(channels.length);
@@ -149,7 +162,7 @@ describe('scenario persistence', () => {
 
   it('enforces the 3× cap, warns above 2× and accepts the exact boundaries', async () => {
     const built = await scenariosService.buildScenario({ anchor: SEED_ANCHOR });
-    const baseline = BigInt(built.totals.current.spendCents);
+    const baseline = optimizableBaseline(built);
 
     const threeTimes = baseline * BigInt(METRICS_CONFIG.scenarios.maxBudgetMultiplier);
     const accepted = await scenariosService.buildScenario({
@@ -195,10 +208,19 @@ describe('scenario persistence', () => {
     const optimizableIds = built.channels
       .filter((channel) => channel.model === 'saturation')
       .map((channel) => channel.channelId);
+    const baselineCents = optimizableBaseline(built);
+    const allCurrentCents = built.channels.reduce(
+      (sum, channel) => sum + BigInt(channel.current.spendCents),
+      0n,
+    );
+    // `current` is every selected channel; the cap base is only the saturation subset.
+    expect(built.totals.current.spendCents).toBe(allCurrentCents.toString());
+    expect(allCurrentCents).toBeGreaterThanOrEqual(baselineCents);
+
     const withoutExcluded = await scenariosService.buildScenario({
       anchor: SEED_ANCHOR,
       channelIds: optimizableIds,
-      budgetByn: centsToBynDecimal(BigInt(built.totals.current.spendCents)),
+      budgetByn: centsToBynDecimal(baselineCents),
     });
 
     expect(withoutExcluded.totals.planned).toEqual(built.totals.planned);
@@ -223,17 +245,18 @@ describe('scenario persistence', () => {
       );
       const campaignId = campaign.rows[0].id;
 
-      // Three positive weeks, all inside the 26-week history, one order-bearing customer each.
+      // Three positive weeks inside the last four complete weeks: the linear channel's spend must appear in the
+      // all-channel "current" total even though it is outside the optimizable baseline.
       for (let index = 0; index < 3; index += 1) {
         await pool.query(
           `INSERT INTO daily_stats (campaign_id, stat_date, spend_cents, impressions, clicks, leads)
            VALUES ($1::bigint, $2::date, 100000, 1000, 100, 10)`,
-          [campaignId, addDays('2026-09-28', index * 7)],
+          [campaignId, addDays('2026-10-19', index * 7)],
         );
         await pool.query(
           `INSERT INTO customers (external_id, first_channel_id, first_campaign_id, acquired_at, first_order_at)
            VALUES ($1, $2::bigint, $3::bigint, $4::timestamptz, $4::timestamptz)`,
-          [`linear_customer_${suffix}_${index}`, channelId, campaignId, `${addDays('2026-09-28', index * 7)}T12:00:00Z`],
+          [`linear_customer_${suffix}_${index}`, channelId, campaignId, `${addDays('2026-10-19', index * 7)}T12:00:00Z`],
         );
       }
 
@@ -244,6 +267,18 @@ describe('scenario persistence', () => {
       expect(linear.planned).toBeNull();
       expect(linear.note).toBe('Линейная кривая — без оптимума');
       expect(built.warnings).toContain('Линейный тест: Линейная кривая — без оптимума');
+
+      const allCurrentCents = built.channels.reduce(
+        (sum, channel) => sum + BigInt(channel.current.spendCents),
+        0n,
+      );
+      const baselineCents = optimizableBaseline(built);
+      const linearCurrentCents = BigInt(linear.current.spendCents);
+      expect(linearCurrentCents).toBeGreaterThan(0n);
+      expect(built.totals.current.spendCents).toBe(allCurrentCents.toString());
+      expect(allCurrentCents).toBeGreaterThan(baselineCents);
+      // The linear spend is in "current" but not in the base the cap and warning use.
+      expect(allCurrentCents - baselineCents).toBeGreaterThanOrEqual(linearCurrentCents);
     } finally {
       await pool.query('DELETE FROM customers WHERE first_channel_id = $1::bigint', [channelId]);
       await pool.query('DELETE FROM campaigns WHERE channel_id = $1::bigint', [channelId]);

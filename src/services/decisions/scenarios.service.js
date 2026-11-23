@@ -114,9 +114,14 @@ function currentWeek(buckets) {
 /**
  * One channel's 12-month forecast (metrics spec §6.3).
  *
- * `customers` is the fitted conversion count, so it stays fractional; CAC and revenue are derived money and are
- * rounded to whole kopecks. A channel with zero predicted customers has no CAC and no ROMI — null, never a fabricated
- * zero. A missing LTV makes revenue and ROMI unknowable but leaves CAC valid, because CAC does not depend on LTV.
+ * The budget and the fitted conversion count are weekly, so the annual revenue must multiply the weekly customers by
+ * `weeksPerYear` before applying LTV12. Comparing one week of LTV with a full year of spend was the source of the
+ * −94 % ROMI: a plan with CAC below LTV must read as profitable.
+ *
+ * `customers` stays the weekly conversion count because the CAC and the weekly charts use it; annual customers are
+ * implied by `customers × weeksPerYear`. A channel with zero predicted customers has no CAC and no ROMI — null, never
+ * a fabricated zero. A missing LTV makes revenue and ROMI unknowable but leaves CAC valid, because CAC does not
+ * depend on LTV.
  *
  * @param {{
  *   customers: number,
@@ -130,7 +135,7 @@ function currentWeek(buckets) {
  *   romi12: number | null,
  * }}
  */
-function buildForecast({ customers, plannedCents, ltvCents }) {
+export function buildForecast({ customers, plannedCents, ltvCents }) {
   const hasCustomers = customers > 0;
   const cacCents = hasCustomers && plannedCents > 0n ? roundHalfUp(Number(plannedCents) / customers) : null;
 
@@ -150,9 +155,10 @@ function buildForecast({ customers, plannedCents, ltvCents }) {
   // A forecast customer count is fractional, so this one multiplication cannot stay in bigint. The LTV itself is a
   // per-customer average of realistic size; `Number` is exact for every kopeck count below 2^53 and the rounded
   // result is validated against the stored JSON schema before it is written.
-  const revenue12Cents = roundHalfUp(customers * Number(ltvCents));
+  const weeksPerYear = BigInt(DECISIONS_CONFIG.weeksPerYear);
+  const revenue12Cents = roundHalfUp(customers * Number(weeksPerYear) * Number(ltvCents));
   const romi12 = plannedCents > 0n
-    ? computeRomi({ revenueCents: revenue12Cents, spendCents: plannedCents * 52n })
+    ? computeRomi({ revenueCents: revenue12Cents, spendCents: plannedCents * weeksPerYear })
     : null;
 
   return {
@@ -297,15 +303,26 @@ export function createScenariosService({
       (sum, channel) => sum + currentByChannel.get(channel.id).spendCents,
       0n,
     );
+    if (baselineCents <= 0n) {
+      throw new ValidationError(
+        'Нет текущего расхода по каналам с кривой — бюджет не из чего рассчитывать',
+      );
+    }
 
     let budgetCents = parseOptionalBudget(budgetByn);
     if (budgetCents === null) budgetCents = baselineCents;
     if (budgetCents <= 0n) throw new ValidationError('Бюджет в BYN должен быть больше нуля');
+    const minimumCents = BigInt(optimizable.length);
+    if (budgetCents < minimumCents) {
+      throw new ValidationError(
+        `Бюджета не хватает даже на 1 копейку каждому каналу: минимум ${minimumCents} копеек`,
+      );
+    }
 
     const capCents = baselineCents * BigInt(METRICS_CONFIG.scenarios.maxBudgetMultiplier);
     if (budgetCents > capCents) {
       throw new ValidationError(
-        `Бюджет больше ${METRICS_CONFIG.scenarios.maxBudgetMultiplier}× текущего недельного бюджета в BYN`,
+        `Бюджет больше ${METRICS_CONFIG.scenarios.maxBudgetMultiplier}× базы оптимизации в BYN`,
       );
     }
 
@@ -332,7 +349,8 @@ export function createScenariosService({
     const warnAboveCents = baselineCents * BigInt(METRICS_CONFIG.scenarios.warnBudgetMultiplier);
     if (budgetCents > warnAboveCents) {
       warnings.push(
-        `Бюджет больше фактического более чем в ${METRICS_CONFIG.scenarios.warnBudgetMultiplier} раза — прогноз экстраполяция`,
+        `Бюджет больше фактического более чем в ${METRICS_CONFIG.scenarios.warnBudgetMultiplier} раза — ` +
+          'прогноз за пределами наблюдённых расходов (экстраполяция)',
       );
     }
 
@@ -340,6 +358,11 @@ export function createScenariosService({
       const fit = fits.get(channel.id);
       const current = currentByChannel.get(channel.id);
       const optimizableChannel = fit.model === 'saturation';
+
+      // The "before" side describes every selected channel, including linear/no_data ones: their spend and customers
+      // are real facts even though they receive no allocation. Only the plan and the forecast are optimizable-only.
+      totalCurrentCents += current.spendCents;
+      totalCurrentCustomers += current.customers;
 
       let planned = null;
       let forecast = null;
@@ -356,8 +379,6 @@ export function createScenariosService({
         });
         note = fit.warning;
 
-        totalCurrentCents += current.spendCents;
-        totalCurrentCustomers += current.customers;
         totalPlannedCents += spendCents;
         totalPlannedCustomers += customers;
         if (forecast.revenue12Cents === null) {
@@ -399,12 +420,13 @@ export function createScenariosService({
       totalPlannedCustomers > 0 && revenueKnown && totalPlannedCents > 0n
         ? computeRomi({
             revenueCents: totalRevenue12Cents,
-            spendCents: totalPlannedCents * 52n,
+            spendCents: totalPlannedCents * BigInt(DECISIONS_CONFIG.weeksPerYear),
           })
         : null;
 
-    // Totals describe the optimised set only: they are the cap baseline and the sum of what the plan allocated.
-    // Excluded channels remain visible in `channels` with a note but cannot contribute to a plan they are not part of.
+    // `current` is every selected channel, as the metrics spec defines the "before" side. `planned` is the
+    // optimizable set only, because a linear/no_data channel has no allocation. The cap/warning baseline is neither:
+    // it is the saturation set's current spend, derived by the screen model from `channels`.
     const result = {
       channels: resultChannels,
       totals: {

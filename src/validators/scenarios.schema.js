@@ -66,6 +66,7 @@ export const storedScenarioParamsSchema = z
     schemaVersion: z.literal(1),
     anchor: dateField,
     history: z.object({ from: dateField, to: dateField, weeks: z.number().int().positive() }).strict(),
+    // Weekly plan budget in kopecks. The annual spend is derived as `budgetCents × weeksPerYear`, never stored.
     budgetCents: centsField,
     channelIds: z.array(idField),
     optimizer: optimizerField,
@@ -90,8 +91,11 @@ const sideSchema = z
 const forecastSchema = z
   .object({
     customers: nonNegativeNumber,
+    // Annual revenue: weekly customers × 52 × LTV12, in kopecks.
     revenue12Cents: nullableCentsField,
+    // Weekly CAC: weekly planned spend / weekly predicted customers.
     cacCents: nullableCentsField,
+    // ROMI of the annual revenue against the annual spend (`weekly × 52`).
     romi12: nullableFiniteNumber,
   })
   .strict();

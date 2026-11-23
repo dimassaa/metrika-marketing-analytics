@@ -107,12 +107,28 @@ describe('scenarios builder screen', () => {
       const api = await agent.get(`/api/v1/scenarios?budgetByn=${encodeURIComponent(budget)}`);
 
       expect(page.status, budget).toBe(400);
+      expect(page.headers['content-type'], budget).toMatch(/text\/html/);
+      expect(page.text, budget).toContain('Расчёт не выполнен');
+      expect(page.text, budget).toContain('Параметры расчёта');
       expect(api.status, budget).toBe(400);
       expect(api.body.error.code, budget).toBe('VALIDATION_ERROR');
       expect(page.text, budget).toMatch(/BYN/i);
       expect(api.body.error.message, budget).toMatch(/BYN/i);
       expect(api.body.error.message, budget).not.toMatch(/NaN|undefined/i);
     }
+  });
+
+  it('accepts the feasible minimum and renders the builder instead of a Home-position 400', async () => {
+    const agent = await signedIn(VIEWER);
+    const base = extractDataProps((await agent.get('/app/scenarios')).text, 'scenarios');
+
+    expect(base.budget.minInput).toMatch(/^\d+\.\d{2}$/);
+    const res = await agent.get(`/app/scenarios?budgetByn=${base.budget.minInput}`);
+
+    expect(res.status).toBe(200);
+    expect(countIslands(res.text, 'scenarios')).toBe(1);
+    expect(res.text).toContain('Параметры расчёта');
+    expect(res.text).not.toContain('Расчёт не выполнен');
   });
 
   it('rejects an unusable budget when saving, not just when previewing', async () => {

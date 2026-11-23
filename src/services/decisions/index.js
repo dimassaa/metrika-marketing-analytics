@@ -14,6 +14,7 @@ import { createScenariosService } from './scenarios.service.js';
 import {
   buildAlertsScreen,
   buildScenarioDetailScreen,
+  buildScenariosErrorScreen,
   buildScenariosScreen,
   buildScenariosUnavailableScreen,
 } from './screen-models.js';
@@ -89,6 +90,7 @@ export function createDecisionsModule({ db, referenceRepository, auditServiceFac
     alerts: buildAlertsScreen,
     scenarios: buildScenariosScreen,
     scenariosUnavailable: buildScenariosUnavailableScreen,
+    scenariosError: buildScenariosErrorScreen,
     scenarioDetail: buildScenarioDetailScreen,
   };
   const alertsController = createAlertsController({

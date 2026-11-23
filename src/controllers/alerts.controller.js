@@ -119,6 +119,11 @@ export function createAlertsController({
       channelName: chartChannel?.channelName ?? null,
       weeklySeries,
     });
+    const lastTriggeredAt = list.summary.lastDetectedAt ?? null;
+    // Staleness is decided here, where the request time lives, and passed into the model. A builder that called
+    // `Date.now()` itself could not be tested deterministically and treated "no alerts yet" as a stale check.
+    const isStale = lastTriggeredAt !== null &&
+      Date.now() - new Date(lastTriggeredAt).getTime() > METRICS_CONFIG.alerts.autoRecalcMs;
 
     return {
       query,
@@ -135,6 +140,7 @@ export function createAlertsController({
         filters: { status: query.status, severity: query.severity, channelId: query.channelId },
         filterOptions: { channels },
         chart,
+        isStale,
       }),
     };
   }

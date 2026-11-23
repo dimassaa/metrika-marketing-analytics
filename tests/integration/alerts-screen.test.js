@@ -125,10 +125,33 @@ describe('alerts screen', () => {
     expect(props.rows).toEqual([]);
     expect(props.empty).toBe(true);
     expect(props.emptyState.title).toBe('Алертов пока нет');
-    expect(props.summary.lastRecalculatedLabel).toBe('Ещё не проверяли');
+    expect(props.summary.lastTriggeredLabel).toBe('Срабатываний ещё не было');
     expect(props.summary.isStale).toBe(false);
     expect(res.text).not.toContain('action="/app/alerts/recalculate"');
     expect(res.text).not.toContain('/dismiss');
+  });
+
+  it('formats a stored cac_spike value and threshold as BYN, not as kopecks', async () => {
+    const { rows: channels } = await pool.query('SELECT id::text AS id FROM channels ORDER BY id LIMIT 1');
+    await pool.query(
+      `INSERT INTO alerts (channel_id, rule, period_start, severity, value, threshold, status)
+       VALUES ($1::bigint, 'cac_spike', '2030-01-07'::date, 'warning', 58.6850, 47.0494, 'dismissed')`,
+      [channels[0].id],
+    );
+
+    const agent = await signedIn(VIEWER);
+    const page = await agent.get('/app/alerts?status=dismissed');
+    const api = await agent.get('/api/v1/alerts?status=dismissed');
+    const props = extractDataProps(page.text, 'alerts');
+    const row = props.rows.find((entry) => entry.value === '58.6850');
+    const apiRow = api.body.rows.find((entry) => entry.value === '58.6850');
+
+    expect(page.status).toBe(200);
+    expect(api.status).toBe(200);
+    expect(row.valueLabel).toBe('58,69');
+    expect(row.thresholdLabel).toBe('47,05');
+    expect(apiRow.valueLabel).toBe('58,69');
+    expect(apiRow.thresholdLabel).toBe('47,05');
   });
 
   it('uses filtered-empty copy when alerts exist but the filter matches none', async () => {
@@ -172,8 +195,8 @@ describe('alerts screen', () => {
 
     expect(await alertCount()).toBeGreaterThan(0);
     expect(new Date(await lastDetectedAt()).toISOString()).toBe('2020-01-01T00:00:00.000Z');
-    expect(props.summary.lastRecalculatedLabel).toBe(formatDateTimeRu('2020-01-01T00:00:00Z'));
-    expect(props.summary.lastRecalculatedLabel).not.toBe(formatDateTimeRu(firstCheck));
+    expect(props.summary.lastTriggeredLabel).toBe(formatDateTimeRu('2020-01-01T00:00:00Z'));
+    expect(props.summary.lastTriggeredLabel).not.toBe(formatDateTimeRu(firstCheck));
     expect(props.summary.isStale).toBe(true);
   });
 

@@ -20,8 +20,10 @@ import {
 import {
   buildAlertsScreen,
   buildScenarioDetailScreen,
+  buildScenariosErrorScreen,
   buildScenariosScreen,
   buildScenariosUnavailableScreen,
+  bynDecimalToCents,
 } from '../../src/services/decisions/screen-models.js';
 import {
   buildCustomersForecastChart,
@@ -1455,9 +1457,9 @@ function scenarioFixture() {
         planned: { spendCents: '120000', customers: 6.5 },
         forecast: {
           customers: 6.5,
-          revenue12Cents: '250000',
+          revenue12Cents: '6760000',
           cacCents: '18462',
-          romi12: 100.2,
+          romi12: 8.3333,
         },
         note: null,
       },
@@ -1481,9 +1483,9 @@ function scenarioFixture() {
       planned: { spendCents: '120000', customers: 6.5 },
       forecast: {
         customers: 6.5,
-        revenue12Cents: '250000',
+        revenue12Cents: '6760000',
         cacCents: '18462',
-        romi12: 100.2,
+        romi12: 8.3333,
       },
     },
     warnings: ['Email: Линейная кривая — без оптимума'],
@@ -1561,6 +1563,62 @@ describe('scenario screen model and charts', () => {
     expect(linear.planned).toBeNull();
     expect(screen.totals.planned.spendCents).toBe('120000');
     expect(screen.charts.spend.table.rows.find((row) => row.key === '2').cells.planned).toBe('—');
+  });
+
+  it('keeps excluded spend in "current" but out of the optimizable baseline', () => {
+    const { scenario, list } = scenarioFixture();
+    // A selected linear channel with real spend: it belongs to the "before" total, not to the cap/warning base.
+    scenario.channels[1].current = { spendCents: '50000', customers: 2 };
+    scenario.totals.current = { spendCents: '150000', customers: 6 };
+    const screen = buildScenariosScreen({ scenario, list, query: {}, anchor: '2026-11-20' });
+
+    expect(screen.totals.current.spendCents).toBe('150000');
+    expect(screen.budget.baselineCents).toBe('100000');
+    expect(screen.budget.baselineLabel).toBe('1 000,00');
+    expect(screen.budget.capCents).toBe('300000');
+    expect(screen.budget.warnAboveCents).toBe('200000');
+    // The excluded row gets no zero-length plan bar and no plan value in the table.
+    const linearSeries = screen.charts.spend.series.find((row) => row.channelId === '2');
+    expect(linearSeries.compare).toBeNull();
+    expect(linearSeries.plannedMissing).toBe(true);
+    expect(screen.charts.spend.ariaLabel).toContain('база оптимизации 1 000,00 BYN');
+    expect(screen.charts.spend.title).toContain('к базе оптимизации');
+  });
+
+  it('states how many saved scenarios are shown and links the next page', () => {
+    const { scenario, list } = scenarioFixture();
+    list.total = 60;
+    list.hasMore = true;
+    const screen = buildScenariosScreen({ scenario, list, query: { budgetByn: '1200.00' }, anchor: '2026-11-20' });
+
+    expect(screen.list.shownLabel).toBe('Показаны 1 из 60');
+    expect(screen.list.nextHref).toContain('page=2');
+    expect(screen.list.nextHref).toContain('budgetByn=1200.00');
+    expect(screen.list.prevHref).toBeNull();
+  });
+
+  it('renders a rejected calculation as a builder error that preserves the entered values', () => {
+    const screen = buildScenariosErrorScreen({
+      anchor: '2026-11-20',
+      list: { rows: [], page: 1, total: 2, hasMore: false },
+      channels: [
+        { id: '1', code: 'instagram', name: 'Instagram' },
+        { id: '2', code: 'email', name: 'Email' },
+      ],
+      query: { budgetByn: '0.01', channelIds: ['1'], curveChannelId: '1' },
+      error: 'Бюджета не хватает даже на 1 копейку каждому каналу',
+    });
+
+    expect(screen.builderError).toBe(true);
+    expect(screen.budget).toBeNull();
+    expect(screen.charts).toBeNull();
+    expect(screen.error).toContain('Бюджета не хватает');
+    expect(screen.controls.budgetEntry).toBe('0.01');
+    expect(screen.controls.budgetInput).toBe('0.01');
+    expect(screen.controls.channels.find((channel) => channel.value === '1').selected).toBe(true);
+    expect(screen.controls.channels.find((channel) => channel.value === '2').selected).toBe(false);
+    expect(screen.controls.curveChannelId).toBe('1');
+    expect(screen.list.shownLabel).toBe('Показаны 0 из 2');
   });
 
   it('turns an empty input into an empty chart with a non-empty dash table', () => {
@@ -1654,6 +1712,44 @@ describe('scenario screen model and charts', () => {
   });
 });
 
+describe('alert BYN parser', () => {
+  it('treats the stored four-decimal fraction as BYN, not as kopecks, and rounds half up', () => {
+    expect(bynDecimalToCents('58.6850')).toBe(5869n);
+    expect(bynDecimalToCents('47.0494')).toBe(4705n);
+    expect(bynDecimalToCents('50.5000')).toBe(5050n);
+    expect(bynDecimalToCents('0.1000')).toBe(10n);
+    expect(bynDecimalToCents('12')).toBe(1200n);
+    expect(bynDecimalToCents(null)).toBeNull();
+  });
+
+  it('formats a real cac_spike row with the corrected amount', () => {
+    const screen = buildAlertsScreen({
+      window: { anchor: '2026-11-20', weeks: 4, now: { from: '2026-10-26', to: '2026-11-22' } },
+      rows: [
+        {
+          id: '1',
+          channelId: '4',
+          channelCode: 'yandex',
+          channelName: 'Яндекс Директ',
+          rule: 'cac_spike',
+          severity: 'warning',
+          value: '58.6850',
+          threshold: '47.0494',
+          periodStart: '2026-10-26',
+          status: 'active',
+          detectedAt: '2026-11-23T10:00:00Z',
+        },
+      ],
+      summary: { active: 1, critical: 0, warning: 1, resolved: 0, dismissed: 0, lastDetectedAt: null },
+      filters: { status: 'active', severity: 'all', channelId: null },
+    });
+
+    expect(screen.rows[0].valueLabel).toBe('58,69');
+    expect(screen.rows[0].valueUnit).toBe('BYN');
+    expect(screen.rows[0].thresholdLabel).toBe('47,05');
+  });
+});
+
 describe('alerts screen model chart slot', () => {
   it('carries the chart object through untouched and keeps the absolute check label', () => {
     const chart = { title: 'CAC: Instagram', caption: '12 недель', table: { columns: [], rows: [] } };
@@ -1668,7 +1764,7 @@ describe('alerts screen model chart slot', () => {
 
     expect(screen.page).toBe('alerts');
     expect(screen.chart).toBe(chart);
-    expect(screen.summary.lastRecalculatedLabel).toBe('Ещё не проверяли');
+    expect(screen.summary.lastTriggeredLabel).toBe('Срабатываний ещё не было');
     expect(screen.summary.isStale).toBe(false);
     expect(screen.emptyState.title).toBe('Алертов пока нет');
   });

@@ -10,7 +10,8 @@
       <p class="u-muted">
         Сценарий распределяет недельный бюджет между платными каналами по кривым насыщения. Расчёт опирается на
         <%= model.history.weeks %> полных недель, а сохранённый снимок не меняется задним числом. Суммы — в BYN, за
-        12 месяцев бюджет умножается на <%= model.weeksPerYear %>.
+        12 месяцев бюджет умножается на <%= model.weeksPerYear %>. Итог «Сейчас» включает все выбранные каналы, а
+        потолок и предупреждение считаются от базы оптимизации — текущего расхода каналов с кривой.
       </p>
     </div>
 
@@ -36,14 +37,29 @@
     </div>
     <% } else { %>
 
+    <% if (model.builderError) { %>
+    <div class="alert alert--error" role="alert">
+      <p class="alert__title">Расчёт не выполнен</p>
+      <p><%= model.error %></p>
+      <% if (model.controls.budgetEntry) { %>
+      <p class="field__hint">Введённый бюджет: <strong><%= model.controls.budgetEntry %></strong></p>
+      <% } %>
+      <p class="field__hint">Исправьте параметры ниже и нажмите «Рассчитать».</p>
+    </div>
+    <% } %>
+
     <div class="card card--flat">
       <div class="card__header">
         <div>
           <h3 class="card__title">Параметры расчёта</h3>
+          <% if (model.budget) { %>
           <p class="card__meta">
             Недельный бюджет: <strong class="u-numeric"><%= model.budget.weeklyLabel %> <span class="byn">BYN</span></strong>
             · за 12 месяцев: <strong class="u-numeric"><%= model.budget.forecast12mLabel %> <span class="byn">BYN</span></strong>
           </p>
+          <% } else { %>
+          <p class="card__meta">Проверьте бюджет и набор каналов — сервер пересчитает план.</p>
+          <% } %>
         </div>
       </div>
 
@@ -56,17 +72,29 @@
             type="range"
             name="budgetByn"
             value="<%= model.controls.budgetInput %>"
-            min="0.01"
-            max="<%= model.budget.capInput %>"
+            min="<%= model.budget ? model.budget.minInput : model.controls.budgetMinInput %>"
+            <% if (model.budget) { %>max="<%= model.budget.capInput %>"<% } %>
             step="0.01"
             aria-describedby="budget-hint"
+            aria-valuetext="<%= model.budget ? `${model.budget.weeklyLabel} BYN в неделю` : 'Бюджет не рассчитан' %>"
             required
           >
+          <% if (model.budget) { %>
           <span class="field__hint" id="budget-hint">
             <strong class="u-numeric"><%= model.budget.weeklyLabel %> <span class="byn">BYN</span></strong>
             · за 12 месяцев ×<%= model.budget.weeksPerYear %>: <strong class="u-numeric"><%= model.budget.forecast12mLabel %> <span class="byn">BYN</span></strong>
-            · максимум <%= model.budget.capLabel %> <span class="byn">BYN</span> — <%= model.budget.maxMultiplier %>× текущего бюджета
+            · база оптимизации: <strong class="u-numeric"><%= model.budget.baselineLabel %> <span class="byn">BYN</span></strong>
+            · минимум: <span class="u-numeric"><%= model.budget.minLabel %></span> <span class="byn">BYN</span>
+            (по 1 копейке на канал с кривой)
+            · максимум: <strong class="u-numeric"><%= model.budget.capLabel %></strong> <span class="byn">BYN</span>
+            — <%= model.budget.maxMultiplier %>× базы оптимизации
           </span>
+          <% } else { %>
+          <span class="field__hint" id="budget-hint">
+            Минимальный бюджет — по 1 копейке на каждый канал с кривой. Слишком маленькая или некорректная сумма
+            останется здесь, и форма покажет ошибку без перехода на отдельную страницу.
+          </span>
+          <% } %>
           <div class="cluster" aria-label="Пресеты недельного бюджета">
             <% for (const preset of model.controls.presets) { %>
             <a
@@ -107,14 +135,15 @@
         </div>
       </form>
 
-      <% if (model.budget.isAboveWarn) { %>
+      <% if (model.budget && model.budget.isAboveWarn) { %>
       <p class="alert alert--warning" role="status">
-        Бюджет больше фактического более чем в <%= model.budget.warnMultiplier %> раза — прогноз за пределами
+        Бюджет больше базы оптимизации более чем в <%= model.budget.warnMultiplier %> раза — прогноз за пределами
         наблюдённых расходов.
       </p>
       <% } %>
     </div>
 
+    <% if (!model.builderError) { %>
     <%- include('../partials/island', { name: 'scenarios', model }) %>
 
     <% if (can('scenarios:manage')) { %>
@@ -142,6 +171,7 @@
         <button class="btn btn--ghost" type="submit">Сохранить сценарий</button>
       </form>
     </div>
+    <% } %>
     <% } %>
     <% } %>
 
@@ -188,6 +218,21 @@
           </tbody>
         </table>
       </div>
+
+      <% if (model.list.shownLabel) { %>
+      <p class="card__meta"><%= model.list.shownLabel %></p>
+      <% } %>
+      <% if (model.list.prevHref || model.list.nextHref) { %>
+      <nav class="cluster" aria-label="Страницы сохранённых сценариев">
+        <% if (model.list.prevHref) { %>
+        <a class="btn btn--ghost btn--sm" href="<%= model.list.prevHref %>">Назад</a>
+        <% } %>
+        <span class="u-muted">Страница <%= model.list.page %></span>
+        <% if (model.list.nextHref) { %>
+        <a class="btn btn--ghost btn--sm" href="<%= model.list.nextHref %>">Дальше</a>
+        <% } %>
+      </nav>
+      <% } %>
       <% } %>
 
     </div>

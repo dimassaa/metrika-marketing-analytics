@@ -29,6 +29,7 @@ import { SaturationCurve } from '../components/charts/SaturationCurve.jsx';
  *   warnings: string[],
  *   charts: { spend: object, customers: object, saturation: object, increment: object } | null,
  *   empty: boolean,
+ *   weeksPerYear: number,
  * }} props
  */
 export function ScenariosIsland({
@@ -42,6 +43,7 @@ export function ScenariosIsland({
   totals,
   warnings,
   charts,
+  weeksPerYear,
 }) {
   if (invalid) {
     return (
@@ -63,10 +65,10 @@ export function ScenariosIsland({
     },
     {
       id: 'forecast',
-      label: 'За 12 месяцев ×52',
+      label: `За 12 месяцев ×${weeksPerYear}`,
       value: budget.forecast12mLabel,
       unit: 'BYN',
-      hint: 'Недельный бюджет × 52',
+      hint: `Недельный бюджет × ${weeksPerYear}`,
       tone: null,
     },
     {
@@ -74,7 +76,7 @@ export function ScenariosIsland({
       label: 'Текущий расход',
       value: totals.current.spendLabel,
       unit: 'BYN',
-      hint: `Среднее за 4 недели${history ? ` · история ${history.label}` : ''}`,
+      hint: `Все выбранные каналы · среднее за 4 недели${history ? ` · история ${history.label}` : ''}`,
       tone: null,
     },
     {
@@ -130,9 +132,9 @@ export function ScenariosIsland({
       <Card
         title={mode === 'detail' ? `Снимок: ${name}` : 'Результат расчёта'}
         meta={
-          budget.isAboveWarn
-            ? 'Бюджет выше фактического более чем в 2 раза — прогноз за пределами наблюдённых расходов.'
-            : `Потолок бюджета: ${budget.capLabel} BYN · предупреждение выше ${budget.warnAboveLabel} BYN (2×)`
+          `Потолок бюджета: ${budget.capLabel} BYN (${budget.maxMultiplier}× базы оптимизации ` +
+          `${budget.baselineLabel} BYN) · предупреждение выше ${budget.warnAboveLabel} BYN ` +
+          `(${budget.warnMultiplier}×)`
         }
       >
         <div className="grid grid--4">
@@ -144,7 +146,10 @@ export function ScenariosIsland({
 
       <Card
         title="До и после"
-        meta="Прогноз на 12 месяцев при текущем LTV. CAC и ROMI появляются только там, где модель предсказывает клиентов."
+        meta={
+          'Сейчас — все выбранные каналы, план — только каналы с кривой (база оптимизации). ' +
+          'Прогноз на 12 месяцев при текущем LTV; CAC и ROMI появляются только там, где модель предсказывает клиентов.'
+        }
       >
         <div className="table-wrap" role="region" aria-label="Сравнение до и после" tabIndex={0}>
           <table className="table">
