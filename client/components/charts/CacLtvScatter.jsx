@@ -34,7 +34,7 @@ export function CacLtvScatter({ chart }) {
 
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <ScatterChart margin={{ top: 8, right: 24, bottom: 24, left: 4 }}>
+      <ScatterChart accessibilityLayer={false} margin={{ top: 8, right: 24, bottom: 24, left: 4 }}>
         <CartesianGrid stroke={chartTheme.grid} />
         <XAxis
           type="number"
@@ -101,12 +101,16 @@ function ScatterTooltip({ active, payload }) {
         <li className="chart__tooltip-row">
           <span className="chart__tooltip-dot chart__tooltip-dot--value" aria-hidden="true" />
           <span className="chart__tooltip-name">CAC</span>
-          <strong className="chart__tooltip-value">{formatCentsToByn(point.cac)} BYN</strong>
+          <strong className="chart__tooltip-value">
+            {formatCentsToByn(point.cac)} <span className="byn">BYN</span>
+          </strong>
         </li>
         <li className="chart__tooltip-row">
           <span className="chart__tooltip-dot chart__tooltip-dot--value" aria-hidden="true" />
           <span className="chart__tooltip-name">LTV12</span>
-          <strong className="chart__tooltip-value">{formatCentsToByn(point.ltv)} BYN</strong>
+          <strong className="chart__tooltip-value">
+            {formatCentsToByn(point.ltv)} <span className="byn">BYN</span>
+          </strong>
         </li>
         <li className="chart__tooltip-row">
           <span className="chart__tooltip-dot" aria-hidden="true" />

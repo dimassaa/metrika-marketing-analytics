@@ -39,6 +39,7 @@ export function ChannelsIsland({ period, filters, weights, rows, excluded, spark
   const weightLabel = ['cac', 'romi', 'ltvCac', 'newCustomers']
     .map((key) => `${WEIGHT_LABELS[key]} ${formatWeightPercent(weights[key])}%`)
     .join(' · ');
+  const noDataCount = rows.filter((row) => row.status === 'no_data').length;
 
   return (
     <div className="stack stack--lg">
@@ -59,7 +60,7 @@ export function ChannelsIsland({ period, filters, weights, rows, excluded, spark
             По этому фильтру каналов нет. Измените статус или тип — или вернитесь к полному списку.
           </EmptyState>
         ) : (
-          <div className="table-wrap">
+          <div className="table-wrap" role="region" aria-label="Рейтинг каналов" tabIndex={0}>
             <table className="table table--channels">
               <thead>
                 <tr>
@@ -106,6 +107,14 @@ export function ChannelsIsland({ period, filters, weights, rows, excluded, spark
               </tbody>
             </table>
           </div>
+        )}
+
+        {noDataCount > 0 && (
+          <p className="matrix__note">
+            Неполные данные: у {noDataCount} {noDataCount === 1 ? 'канала' : 'каналов'} не хватило измерений за
+            период. CAC, ROMI и место в рейтинге для них не определены, в таблице стоит «—» — это не нулевой
+            результат, а отсутствие измерения.
+          </p>
         )}
       </Card>
 
@@ -187,23 +196,23 @@ function ChannelTableRow({ row, sparkline }) {
           {row.metaLabel ?? 'Канал'} <span className="u-muted">· {row.code}</span>
         </span>
       </td>
-      <td className="u-right">
+      <td className="u-right u-nowrap">
         <Money value={row.spendCents} />
       </td>
-      <td className="u-right">
+      <td className="u-right u-nowrap">
         <Money value={row.revenueCents} />
       </td>
-      <td className="u-right">{formatInteger(row.newCustomers)}</td>
-      <td className="u-right">
+      <td className="u-right u-nowrap">{formatInteger(row.newCustomers)}</td>
+      <td className="u-right u-nowrap">
         <Money value={row.cacCents} />
       </td>
-      <td className="u-right">
+      <td className="u-right u-nowrap">
         <Money value={row.ltv12Cents} />
       </td>
-      <td className="u-right">{row.romiLabel}</td>
-      <td className="u-right">{row.paybackLabel}</td>
-      <td className="u-right">{row.ratioLabel}</td>
-      <td>
+      <td className="u-right u-nowrap">{row.romiLabel}</td>
+      <td className="u-right u-nowrap">{row.paybackLabel}</td>
+      <td className="u-right u-nowrap">{row.ratioLabel}</td>
+      <td className="u-nowrap">
         <HealthBadge status={row.status} label={row.statusLabel} />
       </td>
       <td className="table__spark">

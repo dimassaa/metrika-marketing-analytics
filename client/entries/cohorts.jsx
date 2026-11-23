@@ -13,7 +13,8 @@ import { HEAT_BUCKETS } from '../../src/lib/heat-scale.js';
  *
  * One island per page. The matrix is a real `<table>` rendered from the server's `table` contract: a caption, column
  * scopes and a row scope per cohort. Colour is never the only signal, every cell carries its percentage as text, and
- * a future month is `—` with an explanatory title instead of a painted zero.
+ * a future month is `—` with an explanatory title instead of a painted zero. The cumulative LTV in that title is also
+ * the cell's accessible name, so the detail is not hidden in a hover-only tooltip.
  *
  * @param {{
  *   horizonMonths: number,
@@ -53,7 +54,7 @@ export function CohortsIsland({ horizonMonths, hasData, channelFilter, excludedI
         {channelFilter && <p className="matrix__filter">{channelFilter.label}</p>}
 
         {hasData ? (
-          <div className="matrix-wrap">
+          <div className="matrix-wrap" role="region" aria-label="Удержание по когортам: таблица данных" tabIndex={0}>
             <table className="matrix">
               <caption className="u-visually-hidden">{table.caption}</caption>
               <thead>
@@ -89,6 +90,7 @@ export function CohortsIsland({ horizonMonths, hasData, channelFilter, excludedI
                         className={`matrix__cell ${cell.heatClass}`}
                         key={cell.monthOffset}
                         title={cell.title}
+                        aria-label={`${cell.label}; ${cell.title}`}
                       >
                         {cell.label}
                       </td>
@@ -109,8 +111,8 @@ export function CohortsIsland({ horizonMonths, hasData, channelFilter, excludedI
         {hasData && (
           <>
             <p className="matrix__note">
-              Пунктиром отмечены неполные когорты: у них ещё не прошёл весь горизонт. Пустая ячейка «—» означает, что
-              месяц ещё не наступил, а не нулевое удержание.
+              Неполные данные: пунктиром отмечены когорты, у которых ещё не прошёл весь горизонт. Пустая ячейка «—»
+              означает, что месяц ещё не наступил, а не нулевое удержание.
             </p>
             <MatrixLegend monthCount={monthColumns.length} />
           </>

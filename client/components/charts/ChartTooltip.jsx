@@ -26,8 +26,7 @@ export function ChartTooltip({ active, payload, label, unit, names = {} }) {
           <li className="chart__tooltip-row" key={entry.dataKey}>
             <span className={`chart__tooltip-dot chart__tooltip-dot--${entry.dataKey}`} aria-hidden="true" />
             <span className="chart__tooltip-name">{names[entry.dataKey] ?? entry.name}</span>
-            <strong className="chart__tooltip-value">{formatValue(entry.value, unit)}</strong>
-          </li>
+            <strong className="chart__tooltip-value">{formatValue(entry.value, unit)}</strong>          </li>
         ))}
       </ul>
     </div>
@@ -37,10 +36,17 @@ export function ChartTooltip({ active, payload, label, unit, names = {} }) {
 /**
  * @param {number | null | undefined} value Chart value.
  * @param {'BYN' | '%'} unit
- * @returns {string} `1 234,56 BYN`, `+12,4%`, or `—` for a missing point.
+ * @returns {import('react').ReactNode} `1 234,56 BYN` with the official glyph, `+12,4%`, or `—` for a missing
+ *   point. The glyph goes through `.byn` like every other money label in the app.
  */
 function formatValue(value, unit) {
   if (value === null || value === undefined) return '—';
-  if (unit === 'BYN') return `${formatCentsToByn(Math.round(value))} BYN`;
+  if (unit === 'BYN') {
+    return (
+      <>
+        {formatCentsToByn(Math.round(value))} <span className="byn">BYN</span>
+      </>
+    );
+  }
   return formatRomi(value);
 }

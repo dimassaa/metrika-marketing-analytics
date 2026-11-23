@@ -9,6 +9,7 @@ import { pinoHttp } from 'pino-http';
 import { HTTP_LOG_SERIALIZERS, logger } from './lib/logger.js';
 import { env } from './config/env.js';
 import { requestId } from './middleware/requestId.js';
+import { requestCache } from './lib/request-cache.js';
 import { errorHandler, notFound } from './middleware/errors.js';
 import { createPublicRouter } from './routes/public.routes.js';
 import { notFoundPage } from './controllers/public.controller.js';
@@ -114,6 +115,8 @@ export function createApp({ db, sessionStore, trustProxy = env.trustProxy, asset
   app.use(expressLayouts);
 
   app.use(requestId);
+  // Read requests share one small cache, so a screen that needs the channel list in three services reads it once.
+  app.use(requestCache);
 
   // The nonce has to exist before helmet builds the CSP header; templates read it back from res.locals.nonce.
   app.use((req, res, next) => {

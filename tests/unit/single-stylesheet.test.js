@@ -39,6 +39,21 @@ describe('single stylesheet rule', () => {
     expect(readFileSync('public/css/app.css', 'utf8')).not.toMatch(/@import\b/i);
   });
 
+  it('ships no second stylesheet inside the built island assets', () => {
+    if (!existsSync('public/assets')) return;
+
+    const built = [];
+    (function collect(dir) {
+      for (const name of readdirSync(dir)) {
+        const path = join(dir, name);
+        if (statSync(path).isDirectory()) collect(path);
+        else built.push(path);
+      }
+    })('public/assets');
+
+    expect(built.filter((file) => file.endsWith('.css'))).toEqual([]);
+  });
+
   it('ships every font file referenced from the stylesheet and the head partial', () => {
     const sources = [
       readFileSync('public/css/app.css', 'utf8'),

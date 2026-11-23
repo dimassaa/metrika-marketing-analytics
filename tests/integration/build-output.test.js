@@ -84,7 +84,9 @@ describe.skipIf(!hasBuild)('vite build output', () => {
 
   it.each([
     ['dashboard', 'client/entries/dashboard.jsx'],
+    ['channels', 'client/entries/channels.jsx'],
     ['channel passport', 'client/entries/channel.jsx'],
+    ['cohorts', 'client/entries/cohorts.jsx'],
     ['attribution', 'client/entries/attribution.jsx'],
   ])('keeps the %s entry and whole page under their gzip budgets', (label, entryKey) => {
     const { entryGzip, pageGzip } = measureEntry(entryKey);

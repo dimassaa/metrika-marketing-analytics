@@ -70,8 +70,10 @@ describe('channels island structure', () => {
     expect(html).toContain('aria-sort="ascending"');
     expect(html).toContain('aria-sort="none"');
     expect(html).toContain('table__row--clickable');
-    // The row is a mouse target; the channel link is the only keyboard tab stop.
-    expect(html).not.toContain('tabindex="0"');
+    // The row is a mouse target; the channel link is the only keyboard tab stop in the row itself. The scroll
+    // wrapper is separately focusable so a keyboard user can pan the wide table on a narrow screen.
+    expect(html).not.toMatch(/<tr[^>]*tabindex/);
+    expect(html).toContain('<div class="table-wrap" role="region" aria-label="Рейтинг каналов" tabindex="0">');
     // Recharts renders a div wrapper; never put it inside a span in a table cell.
     expect(html).toContain('<div class="sparkline');
     expect(html).not.toContain('<span class="sparkline');

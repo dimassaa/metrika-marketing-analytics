@@ -18,7 +18,7 @@ import { ChartTooltip } from './ChartTooltip.jsx';
 export function ChannelSpendBars({ chart }) {
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <BarChart
+      <BarChart accessibilityLayer={false}
         data={chart.series}
         layout="vertical"
         margin={{ top: 4, right: 24, bottom: 0, left: 0 }}

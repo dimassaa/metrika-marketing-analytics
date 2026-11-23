@@ -1,4 +1,5 @@
 import { centsFromDb } from '../lib/money.js';
+import { cachedRead } from '../lib/request-cache.js';
 
 /**
  * Campaign columns plus the channel label and spend aggregates, shared by the list, the passport section and the
@@ -109,14 +110,18 @@ export function createCampaignsRepository(db) {
      * @returns {Promise<ReturnType<typeof mapCampaignRow>[]>} Campaigns of one channel, same order as the list.
      */
     async listCampaignsByChannel(channelId) {
-      const { rows } = await db.query(
-        `${CAMPAIGN_SELECT}
-          WHERE cp.channel_id = $1::bigint
-          GROUP BY cp.id, ch.id
-          ${CAMPAIGN_ORDER}
-          LIMIT ${CAMPAIGN_LIST_LIMIT}`,
-        [channelId],
-      );
+      // The passport renders the campaign list twice from one render: once in the island and once in the edit card.
+      const rows = await cachedRead(`campaigns.listCampaignsByChannel:${channelId}`, async () => {
+        const result = await db.query(
+          `${CAMPAIGN_SELECT}
+            WHERE cp.channel_id = $1::bigint
+            GROUP BY cp.id, ch.id
+            ${CAMPAIGN_ORDER}
+            LIMIT ${CAMPAIGN_LIST_LIMIT}`,
+          [channelId],
+        );
+        return result.rows;
+      });
       return rows.map(mapCampaignRow);
     },
 

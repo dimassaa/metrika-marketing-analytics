@@ -126,4 +126,7 @@ export function DashboardIsland({ kpis, verdict, charts, labels, filter }) {
   );
 }
 
-mountIsland(DashboardIsland, 'dashboard', 'Дашборд');
+// The entry is also imported by the SSR structure test, where there is no DOM to mount into.
+if (typeof document !== 'undefined') {
+  mountIsland(DashboardIsland, 'dashboard', 'Дашборд');
+}

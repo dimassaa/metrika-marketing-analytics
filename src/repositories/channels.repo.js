@@ -1,4 +1,5 @@
 import { centsFromDb } from '../lib/money.js';
+import { cachedRead } from '../lib/request-cache.js';
 
 /**
  * Channel columns plus campaign counters, shared by the list and the passport query.
@@ -66,14 +67,18 @@ export function createChannelsRepository(db) {
      * @returns {Promise<ReturnType<typeof mapChannelRow>[]>} Active channels first, then by code for a stable order.
      */
     async listChannels({ onlyActive = null, kind = null } = {}) {
-      const { rows } = await db.query(
-        `${CHANNEL_SELECT}
-          WHERE ($1::boolean IS NULL OR c.is_active = $1::boolean)
-            AND ($2::text IS NULL OR c.kind = $2::text)
-          GROUP BY c.id
-          ORDER BY c.is_active DESC, c.code`,
-        [onlyActive, kind],
-      );
+      // Several services on one page need the same dimension; the request cache turns three selects into one.
+      const rows = await cachedRead(`channels.listChannels:${onlyActive}:${kind}`, async () => {
+        const result = await db.query(
+          `${CHANNEL_SELECT}
+            WHERE ($1::boolean IS NULL OR c.is_active = $1::boolean)
+              AND ($2::text IS NULL OR c.kind = $2::text)
+            GROUP BY c.id
+            ORDER BY c.is_active DESC, c.code`,
+          [onlyActive, kind],
+        );
+        return result.rows;
+      });
       return rows.map(mapChannelRow);
     },
 
@@ -82,12 +87,16 @@ export function createChannelsRepository(db) {
      * @returns {Promise<ReturnType<typeof mapChannelRow> | null>}
      */
     async findChannelById(id) {
-      const { rows } = await db.query(
-        `${CHANNEL_SELECT}
-          WHERE c.id = $1::bigint
-          GROUP BY c.id`,
-        [id],
-      );
+      // The passport loader reads the channel for metrics, the controller again for the edit card: one row, one read.
+      const rows = await cachedRead(`channels.findChannelById:${id}`, async () => {
+        const result = await db.query(
+          `${CHANNEL_SELECT}
+            WHERE c.id = $1::bigint
+            GROUP BY c.id`,
+          [id],
+        );
+        return result.rows;
+      });
       return rows[0] ? mapChannelRow(rows[0]) : null;
     },
 

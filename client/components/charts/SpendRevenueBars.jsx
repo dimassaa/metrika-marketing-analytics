@@ -29,7 +29,7 @@ const SERIES_NAMES = { spend: 'Расход', revenue: 'Выручка (атри
 export function SpendRevenueBars({ chart }) {
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={chart.series} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} barGap={2}>
+      <BarChart accessibilityLayer={false} data={chart.series} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} barGap={2}>
         <CartesianGrid stroke={chartTheme.grid} vertical={false} />
         <XAxis
           dataKey="weekLabel"
@@ -50,7 +50,7 @@ export function SpendRevenueBars({ chart }) {
           cursor={{ fill: chartTheme.canvas }}
         />
         <Legend
-          wrapperStyle={{ fontSize: chartTheme.fontSize, color: chartTheme.axisText }}
+          formatter={(value) => <span className="chart__legend-label">{value}</span>}
           iconType="square"
           iconSize={8}
         />

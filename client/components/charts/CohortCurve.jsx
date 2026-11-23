@@ -29,7 +29,7 @@ export function CohortCurve({ chart }) {
 
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <LineChart data={chart.series} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+      <LineChart accessibilityLayer={false} data={chart.series} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
         <CartesianGrid stroke={chartTheme.grid} vertical={false} />
         <XAxis
           dataKey="monthLabel"

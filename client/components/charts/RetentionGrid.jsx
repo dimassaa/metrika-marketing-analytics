@@ -34,7 +34,7 @@ export function RetentionGrid({ retention }) {
 
   return (
     <div className="stack stack--sm">
-      <div className="matrix-wrap">
+      <div className="matrix-wrap" role="region" aria-label="Удержание клиентов канала: таблица данных" tabIndex={0}>
         <table className="matrix">
           <caption className="u-visually-hidden">
             Удержание клиентов канала по когортам за {retention.horizonMonths} месяцев от первого заказа
@@ -68,6 +68,7 @@ export function RetentionGrid({ retention }) {
                     className={`matrix__cell ${cell.heatClass}`}
                     key={cell.monthOffset}
                     title={`Накопленный LTV: ${cell.cumLtvLabel} BYN`}
+                    aria-label={`${cell.retentionLabel}; накопленный LTV: ${cell.cumLtvLabel} BYN`}
                   >
                     {cell.retentionLabel}
                   </td>

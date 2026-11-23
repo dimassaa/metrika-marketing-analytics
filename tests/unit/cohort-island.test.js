@@ -104,7 +104,7 @@ describe('cohorts island structure', () => {
     expect(html).toContain('неполная');
     expect(html).toContain('is-empty');
     expect(html).toContain('—');
-    expect(html).toContain('Пунктиром');
+    expect(html).toContain('Неполные данные: пунктиром');
     expect(html).toContain('не вошли в кривую');
   });
 

@@ -687,3 +687,38 @@ Still open:
 - **Attribution has no campaign-scope allocation.** M3 exposes channel allocation only, so the screen has no campaign
   filter and no campaign breakdown. That remains deferred to M5 together with alerts, scenarios and the optimizer;
   drawing channels as campaigns would fabricate a dimension the service does not expose.
+
+## M4 Task 7 — shared states, accessibility and budget
+
+- **The per-cell cumulative LTV in the retention matrices is still a hover detail for sighted users.** Each cell now
+  carries `aria-label` with both the retention percentage and the cumulative LTV, so a screen reader is no longer
+  limited to the tooltip; a keyboard or touch user still cannot read it without hovering. A drill-down row or an
+  expandable cell would expose it visually, but that changes the dense matrix layout and is deferred.
+- **The channels ranking table needs horizontal scrolling at 1280px.** With 12 columns the card is narrower than the
+  table even on a laptop; the `.table-wrap` region is focusable and scrolls inside the card, and the page itself never
+  overflows. A sticky first column or a column chooser would remove the pan, but both are a redesign.
+- **The request cache covers three repository methods only.** `channels.listChannels`, `channels.findChannelById` and
+  `campaigns.listCampaignsByChannel` are deduplicated per GET; the dashboard still reads orders and touchpoints twice
+  with different windows (period and 12-week series), which is not a duplicate — the parameters differ. Extending the
+  cache to those would require the service to expose whether the windows are equal.
+- **The shared React + Recharts chunk is 641 KB minified / 193 KB gzip.** Vite prints its generic >500 KB warning on
+  every build. Every page total is under the 250 KB gzip budget, and the chunk is immutable and cached across all five
+  screens, so the warning is cosmetic; silencing it with `chunkSizeWarningLimit` would hide a real future regression.
+- **A chart error boundary cannot be reset without a reload.** Recharts errors usually come from the data shape that
+  the server sent, so the fallback's retry is an honest `window.location.reload()`; there is no per-chart endpoint to
+  refetch. If a future error is transient, a state reset button would need a data loader the island does not have.
+- **The mobile navigation checkbox is announced as "Разделы" with its checked state.** The visible label no longer
+  lies with a fixed `aria-label="Показать разделы"`; the trade-off is that the open/closed wording lives in the native
+  checkbox state, not in the label text.
+- **The Recharts legend cannot take a class name.** `Legend` ignores `className` and paints its labels with the series
+  colour (2.5:1 on white). The Money legend now uses a `formatter` that wraps the label in `.chart__legend-label`;
+  a chart that adds a default legend later must repeat that formatter, and `tests/unit/client-guards.test.js` does not
+  catch the visual regression — only the browser contrast sweep does.
+- **Other M2/M3 screens still use the word «рублях».** This task fixed the two M4 pages (`channels.ejs`,
+  `channel-detail.ejs`) because the currency rule is absolute for the interface. `campaigns.ejs`, `goals.ejs` and
+  `import.ejs` still say «в белорусских рублях»; the fix is a copy-only change but it sits outside this task's five
+  screens, so it is listed here instead of bundled in.
+- **An empty chart card shows two controls that open the same table.** The empty-state action “Показать таблицу” and
+  the `<summary>` below it both reveal the duplicate table. Both are honest and keyboard reachable; hiding one when
+  the other exists would need a state flag (`emptyAction` vs. the details) or a different empty layout. Deferred as
+  cosmetic.

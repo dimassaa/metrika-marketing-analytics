@@ -97,7 +97,7 @@ export function scoreStackCaption({ series, best }) {
 export function ScoreStack({ series }) {
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={series} layout="vertical" margin={{ top: 4, right: 24, bottom: 0, left: 0 }}>
+      <BarChart accessibilityLayer={false} data={series} layout="vertical" margin={{ top: 4, right: 24, bottom: 0, left: 0 }}>
         <CartesianGrid stroke={chartTheme.grid} horizontal={false} />
         <XAxis
           type="number"

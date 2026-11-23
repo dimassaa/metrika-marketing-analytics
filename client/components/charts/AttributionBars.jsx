@@ -46,7 +46,7 @@ function AttributionLegend() {
 export function AttributionBars({ chart }) {
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={chart.series} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} barGap={2} barCategoryGap="24%">
+      <BarChart accessibilityLayer={false} data={chart.series} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} barGap={2} barCategoryGap="24%">
         <CartesianGrid stroke={chartTheme.grid} vertical={false} />
         <XAxis
           dataKey="channelName"
@@ -66,7 +66,7 @@ export function AttributionBars({ chart }) {
           content={<ChartTooltip unit="BYN" names={SERIES_NAMES} />}
           cursor={{ fill: chartTheme.canvas }}
         />
-        <Legend content={<AttributionLegend />} wrapperStyle={{ fontSize: chartTheme.fontSize }} />
+        <Legend content={<AttributionLegend />} />
         <Bar
           dataKey="last_touch"
           name={SERIES_NAMES.last_touch}

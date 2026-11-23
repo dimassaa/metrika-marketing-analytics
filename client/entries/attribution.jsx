@@ -173,7 +173,7 @@ export function AttributionIsland({ period, models, summary, charts, table, sele
         title="Сравнение моделей по каналам"
         meta={`Дельта — ${table.deltaBaseLabel}: положительное значение означает, что линейная модель отдаёт каналу больше, чем последнее касание.`}
       >
-        <div className="table-wrap">
+        <div className="table-wrap" role="region" aria-label="Сравнение моделей по каналам" tabIndex={0}>
           <table className="table table--attribution">
             <caption className="u-visually-hidden">{table.caption}</caption>
             <thead>
@@ -192,7 +192,7 @@ export function AttributionIsland({ period, models, summary, charts, table, sele
                   {table.columns
                     .filter((column) => column.key !== 'channel')
                     .map((column) => (
-                      <td key={column.key} className="u-right u-numeric">
+                      <td key={column.key} className="u-right u-numeric u-nowrap">
                         {row.cells[column.key]}
                       </td>
                     ))}

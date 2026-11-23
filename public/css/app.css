@@ -336,6 +336,34 @@ hr {
   outline: none;
 }
 
+/* Skip link — the first tab stop, hidden until it receives keyboard focus. */
+.skip-link {
+  position: fixed;
+  top: -96px;
+  left: var(--spacing-16);
+  z-index: 100;
+  padding: var(--spacing-8) var(--spacing-16);
+  border: 1px solid var(--color-stone-border);
+  border-radius: var(--radius-input);
+  background-color: var(--color-pure-white);
+  color: var(--color-ink-black);
+  box-shadow: var(--shadow-card);
+  font-size: 14px;
+  text-decoration: none;
+  transition: top 120ms ease-out;
+}
+
+.skip-link:focus {
+  top: var(--spacing-16);
+}
+
+/* `#main` receives programmatic focus from the skip link; a ring confirms where the jump landed. */
+.app-content:focus-visible,
+main:focus-visible {
+  outline: 2px solid var(--color-cyan-edge);
+  outline-offset: -2px;
+}
+
 /* --------------------------------------------------------------------------
    5. Layout primitives
    -------------------------------------------------------------------------- */
@@ -919,11 +947,14 @@ input[type='file'] {
 .kpi__value {
   color: var(--color-ink-black);
   font-family: var(--font-display);
-  font-size: 32px;
+  /* The four-column grid narrows to ~220px on a 1280 laptop; 32px wrapped the currency glyph onto a second line.
+     Scaling with the viewport keeps the whole value on one line without inventing a second type scale. */
+  font-size: clamp(24px, 2.2vw, 32px);
   font-weight: 400;
   font-variant-numeric: tabular-nums;
   line-height: 1.1;
   letter-spacing: -0.02em;
+  white-space: nowrap;
 }
 
 .kpi__delta {
@@ -1747,7 +1778,8 @@ input[type='file'] {
 .app-nav__title {
   margin: 0 0 var(--spacing-8);
   padding-inline: var(--spacing-8);
-  color: var(--color-ash-gray);
+  /* Group labels are text, not decoration: ash gray fails the 4.5:1 contrast floor at 11px. */
+  color: var(--color-warm-gray);
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1853,7 +1885,7 @@ input[type='file'] {
 
 .app-topbar__company {
   margin: 0;
-  color: var(--color-ash-gray);
+  color: var(--color-warm-gray);
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -2043,7 +2075,8 @@ input[type='file'] {
 }
 
 .badge--no-data {
-  color: var(--color-ash-gray);
+  /* "Нет данных" is a status, not a disabled state; it must stay readable next to the colored statuses. */
+  color: var(--color-warm-gray);
 }
 
 .kpi--bad .kpi__value {
@@ -2088,7 +2121,7 @@ input[type='file'] {
   grid-column: 2;
   grid-row: 1 / span 2;
   align-self: start;
-  color: var(--color-ash-gray);
+  color: var(--color-warm-gray);
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -2098,6 +2131,14 @@ input[type='file'] {
   width: 100%;
   height: 240px;
   min-height: 180px;
+}
+
+/* Recharts paints the default legend text in the series colour, which is a 2.5:1 contrast on white for both the
+   cyan and the stone series. The formatter wraps the label so the text keeps the body colour while the icon keeps the
+   series colour. */
+.chart__legend-label {
+  color: var(--color-warm-gray);
+  font-size: 12px;
 }
 
 .chart__plot--sm {
@@ -2350,7 +2391,7 @@ input[type='file'] {
 
 .sparkline--empty {
   justify-content: center;
-  color: var(--color-ash-gray);
+  color: var(--color-warm-gray);
 }
 
 .sparkline svg {
@@ -2462,7 +2503,7 @@ input[type='file'] {
 }
 
 .target__status--none {
-  color: var(--color-ash-gray);
+  color: var(--color-warm-gray);
 }
 
 .target__status--unknown {
@@ -2821,7 +2862,8 @@ input[type='file'] {
 }
 
 .model-totals__selected {
-  color: var(--color-cyan-edge);
+  /* The cyan border already marks the card; this 11px text needs real text contrast, and cyan-edge is 3.1:1. */
+  color: var(--color-soot);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.02em;

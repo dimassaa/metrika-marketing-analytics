@@ -1,12 +1,14 @@
 <%- include('../partials/head') %>
 <body class="app-body">
+  <%# First tab stop on every screen: keyboard users reach the content without walking the whole sidebar. %>
+  <a class="skip-link" href="#main">Перейти к содержанию</a>
   <div class="app-shell">
     <%- include('../partials/sidebar') %>
 
     <div class="app-frame">
       <%- include('../partials/topbar') %>
 
-      <main id="main" class="app-content">
+      <main id="main" class="app-content" tabindex="-1">
         <%- body %>
       </main>
     </div>

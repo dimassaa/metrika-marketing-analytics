@@ -5,8 +5,10 @@
   const current = (key) => (activeNav === key ? ' aria-current="page"' : '');
 %>
 <aside class="app-sidebar">
-  <%# A checkbox drives the mobile collapse with CSS only; on desktop it is hidden and the navigation is always shown. %>
-  <input class="app-nav-toggle" type="checkbox" id="app-nav-toggle" aria-label="Показать разделы">
+  <%# A checkbox drives the mobile collapse with CSS only; on desktop it is hidden and the navigation is always shown.
+       Its accessible name comes from the visible "Разделы" label, and the checked state tells a screen reader whether
+       the list is open; a fixed aria-label would announce "Показать" even when it is already open. %>
+  <input class="app-nav-toggle" type="checkbox" id="app-nav-toggle">
 
   <div class="app-sidebar__head">
     <a class="app-sidebar__brand" href="/app/dashboard">

@@ -24,7 +24,7 @@ export function Sparkline({ values }) {
 
   return (
     <div className="sparkline" aria-hidden="true" title="CAC по неделям">
-      <LineChart data={values} width={72} height={20} margin={{ top: 2, right: 1, bottom: 2, left: 1 }}>
+      <LineChart accessibilityLayer={false} data={values} width={72} height={20} margin={{ top: 2, right: 1, bottom: 2, left: 1 }}>
         <Line
           type="monotone"
           dataKey="value"
