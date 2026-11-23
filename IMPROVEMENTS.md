@@ -735,3 +735,32 @@ Still open:
   already uses the latter; two controls with the same accessible name opened the same table. The names are now unique
   and the action is covered by a behaviour test (`revealDetails`) plus the browser pass, because a server render cannot
   click it.
+
+## M4 Task 8 — final E2E and build provenance
+
+- **`public/assets` has no legacy bundle provenance.** The directory is gitignored and the Vite manifest records only
+  content-hashed file names; it carries no git SHA, build time or source revision. A local stand that pulls a new
+  commit and forgets `npm run build` keeps serving the previous hashed files — in development the optional reader
+  reloads the old manifest, and in production a long-running process holds it until restart. The page cannot tell the
+  operator which source produced the bundle. The Docker build stage in M6 makes the artifact traceable; for the local
+  path, either stamp the manifest with `{ sha, builtAt }` behind a tiny Vite plugin or make `npm start` compare the
+  manifest mtime with `src/`/`client/` and refuse a stale tree. This pass only documents the gap; it does not add a
+  build step.
+- **The passport's M2 tables are scroll containers without a focusable wrapper at 390 px.** `.matrix-wrap` and the
+  chart duplicate tables carry `role="region"` and `tabindex="0"`, so a keyboard user can pan them; the settings and
+  campaign management tables keep the older `.table-wrap` markup with no tabindex. At 390 px they overflow internally
+  (up to 613 px of content in a 322 px card) and a keyboard-only user cannot scroll the settings table at all because
+  it contains no focusable child. The page itself does not overflow, so this is an accessibility gap, not a layout
+  break; add the same `tabindex="0"`/`role="region"`/`aria-label` triple when the M2 table partial is next touched.
+- **The strict-manifest test temporarily renames the real build output.** `tests/integration/assets-strict.test.js`
+  must prove refusal on the default path, and `createApp` exposes no manifest-path injection point, so the test moves
+  `public/assets/.vite/manifest.json` aside for the child process and restores it in `finally`. Vitest runs integration
+  files serially, so no other test observes the gap; a killed process between the rename and the restore leaves a
+  `.strict-test-backup` file and the next production start fails until it is renamed back. Injecting an optional
+  `manifestPath` into `createApp` (test-only wiring) would remove the window, but that is a product-code change for
+  one test and was deliberately not made in this evidence-only task.
+- **The unattributed-revenue note is unreachable on the seeded stand.** Every seeded order has at least one
+  touchpoint, so `unattributedNote` is always `null` and the E2E cannot exercise the visible warning. The branch is
+  covered by `screen-models.test.js` and the island test, and the API test asserts the null case; a browser pass would
+  need a fixture order without touchpoints. Recording it so a future fixture task does not mistake "not reachable in
+  E2E" for "not implemented".
