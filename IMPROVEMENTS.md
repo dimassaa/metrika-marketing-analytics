@@ -787,3 +787,17 @@ Still open:
   that the result discards. If `/app/alerts` ever approaches its 32-query or latency budget, add an optional
   `models` fast path in the attribution service or a narrow `getChannelRevenueByPeriod` method; the alert rules must
   keep using the same last-touch base, not a second attribution implementation.
+
+## M5 Task 3 — kopeck rounding decision
+
+- **Largest-remainder rounding is kept; monotonicity is specified with a one-kopeck tolerance.** The KKT shares are
+  continuous and strictly increasing in the budget, but converting them to integer kopecks with the largest-remainder
+  method can reorder one kopeck between channels when the budget grows (the Alabama paradox, the same flaw every
+  quota method has). The product needs an exact sum and at least one kopeck per channel, so the plan is not
+  house-monotone in the strict sense: a channel may lose one kopeck. The accepted contract is therefore "no
+  allocation drops by more than one kopeck when `B` grows by one kopeck", recorded in metrics spec §6.2 and pinned by
+  a step-1 sweep over the whole slider range (`tests/unit/budget-optimizer.test.js`). Rejected alternative: a divisor
+  method (Jefferson/Webster) is house-monotone but changes which channel gets the last kopeck for every budget and
+  adds a second bisection, so the rounding semantics would differ from the documented floor-plus-remainder rule for a
+  one-kopeck benefit. Evidence the sweep is sensitive: naive `Math.round` with the sum correction on the first channel
+  drops channel `a` from 28 360 to 28 358 kopecks between `B = 319 186` and `B = 319 187`; the tolerance rejects it.

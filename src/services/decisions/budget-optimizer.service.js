@@ -1,4 +1,3 @@
-import { METRICS_CONFIG } from '../../config/metrics.js';
 import { ValidationError } from '../../lib/errors.js';
 import { assertFinite } from '../../lib/metrics-math.js';
 import { centsFromDb } from '../../lib/money.js';
@@ -18,6 +17,9 @@ import { centsFromDb } from '../../lib/money.js';
  *
  * Money crosses the boundary as bigint kopecks: the KKT shares are BYN floats because `K` and `S` are model
  * parameters, then each share is floored to kopecks and the remaining kopecks go to the largest fractional parts.
+ * The continuous shares are strictly increasing in the budget, but largest-remainder rounding can move a kopeck
+ * between channels when the budget grows (Alabama paradox). The plan is therefore monotone within one kopeck, which
+ * is the tightest guarantee integer kopecks allow; metrics spec §6.2 states the same tolerance.
  */
 
 /** Fixed iteration count, not a tolerance: the result must be byte-identical between runs and processes. */
@@ -166,7 +168,6 @@ function toKopeckAllocation(sharesByn, budgetCents) {
  * @param {{
  *   curves?: Array<{ channelId: string, model: string, K: number, S: number }>,
  *   budgetCents?: bigint | string | number,
- *   config?: typeof METRICS_CONFIG.saturation,
  * }} [input]
  * @returns {{
  *   allocations: Array<{ channelId: string, spendCents: bigint, spendByn: number }>,
@@ -181,13 +182,7 @@ function toKopeckAllocation(sharesByn, budgetCents) {
  *   at least one kopeck per curve.
  * @throws {TypeError} When a curve is not a saturation fit with positive `K` and `S`.
  */
-export function allocateBudget({
-  curves = [],
-  budgetCents,
-  // Accepted to mirror the fit contract; the pure optimiser has no tuning knobs. The scenario cap and extrapolation
-  // warning live in the scenario service, never here.
-  config = METRICS_CONFIG.saturation,
-} = {}) {
+export function allocateBudget({ curves = [], budgetCents } = {}) {
   if (!Array.isArray(curves)) throw new TypeError('budget optimiser curves must be an array');
 
   const validated = curves.map(assertCurve);
@@ -221,6 +216,15 @@ export function allocateBudget({
   const lambda = (low + high) / 2;
   const shares = validated.map((curve) => kktShare(curve, lambda));
   for (const share of shares) assertFinite(share, 'budget optimiser share');
+
+  // Bisection narrows λ by 2^-80, so the represented shares land within a few kopecks of a safe-integer budget. If
+  // they do not, the numbers left the exact range and the rounding step would have to assign an arbitrary remainder
+  // one kopeck at a time (looping for the whole budget) and return a plan that is not equalised. Fail loudly instead:
+  // this is a numerical limit, not a business rule, so the caller gets a validation error rather than a silent plan.
+  const shareCents = shares.reduce((sum, share) => sum + share * 100, 0);
+  if (!Number.isFinite(shareCents) || Math.abs(shareCents - Number(cents)) > validated.length + 1) {
+    throw new ValidationError('Бюджет вне диапазона точности оптимизатора');
+  }
 
   const kopeckAllocation = toKopeckAllocation(shares, cents);
   const allocations = validated.map((curve, index) => ({
