@@ -133,10 +133,12 @@ describe('scenario save schema', () => {
     const parsed = scenarioSaveSchema.parse({
       name: 'Сценарий',
       _csrf: 'token',
-      // A caller cannot smuggle a result through the form: the key is stripped before the service is called.
+      // A caller cannot smuggle a result or choose the reporting date: both are stripped before the service.
       result: { channels: [] },
+      anchor: '2020-01-01',
     });
     expect(parsed).not.toHaveProperty('result');
+    expect(parsed).not.toHaveProperty('anchor');
     expect(parsed).not.toHaveProperty('_csrf');
   });
 });

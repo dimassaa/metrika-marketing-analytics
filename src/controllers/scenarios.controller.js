@@ -82,10 +82,35 @@ export function createScenariosController({
     return loadDetailById(req.params.id);
   }
 
+  /**
+   * Saves the server-recomputed snapshot from one request and returns its id.
+   *
+   * The data anchor is always read from the database; the request body cannot override it. Both the HTML form and the
+   * JSON API call this one function, so the anchor rule and the audit shape cannot drift between the two paths.
+   *
+   * @param {import('express').Request} req
+   * @returns {Promise<string>} New scenario id.
+   */
+  async function persistScenario(req) {
+    const parsed = parseQuery(scenarioSaveSchema, req.body);
+    const anchor = await referenceRepository.getDataAnchor();
+    const { id } = await services.scenarios.saveScenario(
+      {
+        name: parsed.name,
+        budgetByn: parsed.budgetByn ?? null,
+        channelIds: parsed.channelIds ?? null,
+        anchor,
+      },
+      actorOf(req),
+    );
+    return id;
+  }
+
   return {
     loadBuilder,
     loadDetail,
     loadDetailById,
+    persistScenario,
 
     /**
      * Renders the builder frame. The GET form recalculates from the URL; the island receives the resulting model.
@@ -155,18 +180,7 @@ export function createScenariosController({
      * @type {import('express').RequestHandler}
      */
     async save(req, res) {
-      const parsed = parseQuery(scenarioSaveSchema, req.body);
-      const anchor = parsed.anchor ?? (await referenceRepository.getDataAnchor());
-      const { id } = await services.scenarios.saveScenario(
-        {
-          name: parsed.name,
-          budgetByn: parsed.budgetByn ?? null,
-          channelIds: parsed.channelIds ?? null,
-          anchor,
-        },
-        actorOf(req),
-      );
-
+      const id = await persistScenario(req);
       res.redirect(302, `/app/scenarios/${id}`);
     },
   };

@@ -243,6 +243,62 @@ describe('decisions RBAC, CSRF and audit', () => {
     expect(audit.rows[0].total).toBe(0);
   });
 
+  it('rejects every viewer API mutation with the JSON 403 contract after successful reads', async () => {
+    const agent = await signedIn(VIEWER);
+    const csrf = await getAppCsrf(agent, '/app/dashboard');
+
+    expect((await agent.get('/api/v1/alerts')).status).toBe(200);
+    expect((await agent.get('/api/v1/scenarios')).status).toBe(200);
+
+    for (const [path, body] of [
+      ['/api/v1/alerts/recalculate', {}],
+      ['/api/v1/alerts/1/dismiss', { reason: 'Не моё' }],
+      ['/api/v1/scenarios', { name: 'Чужой API сценарий' }],
+    ]) {
+      const res = await agent.post(path).set('X-CSRF-Token', csrf).send(body);
+
+      expect(res.status, path).toBe(403);
+      expect(res.type, path).toMatch(/application\/json/);
+      expect(res.body.error.code, path).toBe('FORBIDDEN');
+    }
+
+    const scenarios = await pool.query('SELECT count(*)::int AS total FROM scenarios');
+    expect(scenarios.rows[0].total).toBe(0);
+  });
+
+  it.each([
+    ['analyst', ANALYST],
+    ['admin', ADMIN],
+  ])('lets an %s use every API mutation with a valid token', async (_role, email) => {
+    const agent = await signedIn(email);
+    await agent.get('/app/alerts');
+    const csrf = await getAppCsrf(agent, '/app/alerts');
+    const { rows } = await pool.query(
+      "SELECT id::text AS id FROM alerts WHERE status = 'active' ORDER BY id LIMIT 1",
+    );
+    expect(rows).toHaveLength(1);
+
+    const recalculate = await agent
+      .post('/api/v1/alerts/recalculate')
+      .set('X-CSRF-Token', csrf);
+    expect(recalculate.status).toBe(200);
+    expect(recalculate.type).toMatch(/application\/json/);
+
+    const dismiss = await agent
+      .post(`/api/v1/alerts/${rows[0].id}/dismiss`)
+      .set('X-CSRF-Token', csrf)
+      .send({ reason: 'API проверка' });
+    expect(dismiss.status).toBe(200);
+    expect(dismiss.body.alert).toMatchObject({ id: rows[0].id, status: 'dismissed' });
+
+    const save = await agent
+      .post('/api/v1/scenarios')
+      .set('X-CSRF-Token', csrf)
+      .send({ name: `Сценарий ${email}` });
+    expect(save.status).toBe(201);
+    expect(save.body.mode).toBe('detail');
+  });
+
   it('rejects an analyst mutation without a CSRF token', async () => {
     const agent = await signedIn(ANALYST);
 

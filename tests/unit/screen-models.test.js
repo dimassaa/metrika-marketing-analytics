@@ -1528,6 +1528,11 @@ describe('scenario screen model and charts', () => {
     expect(screen.controls.presets.map((preset) => preset.label)).toEqual(['Как сейчас', '+20 %', '×2']);
     expect(screen.controls.presets[0].href).toContain('budgetByn=1000.00');
     expect(screen.controls.curveChannelId).toBe('1');
+    expect(screen.controls.curveOptions.map((channel) => channel.value)).toEqual(
+      screen.controls.selectedChannels.map((channel) => channel.value),
+    );
+    expect(screen.weeksPerYear).toBe(52);
+    expect(screen.list.pageSize).toBe(50);
   });
 
   it('builds four charts from the same channel snapshot and names the conclusion', () => {
@@ -1664,5 +1669,19 @@ describe('alerts screen model chart slot', () => {
     expect(screen.page).toBe('alerts');
     expect(screen.chart).toBe(chart);
     expect(screen.summary.lastRecalculatedLabel).toBe('Ещё не проверяли');
+    expect(screen.summary.isStale).toBe(false);
+    expect(screen.emptyState.title).toBe('Алертов пока нет');
+  });
+
+  it('uses filtered-empty copy when other alerts exist', () => {
+    const screen = buildAlertsScreen({
+      window: { anchor: '2026-11-20', weeks: 4, now: { from: '2026-10-26', to: '2026-11-22' } },
+      rows: [],
+      summary: { active: 3, critical: 1, warning: 2, resolved: 0, dismissed: 0, lastDetectedAt: null },
+      filters: { status: 'dismissed', severity: 'all', channelId: null },
+    });
+
+    expect(screen.empty).toBe(true);
+    expect(screen.emptyState.title).toBe('По фильтру ничего не найдено');
   });
 });

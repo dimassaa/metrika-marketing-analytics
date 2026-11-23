@@ -28,10 +28,16 @@ import { ChartFrame } from '../components/charts/ChartFrame.jsx';
  *   chart: object | null,
  *   pagination: { page: number, total: number, hasMore: boolean },
  *   empty: boolean,
+ *   emptyState?: { title: string, text: string },
  * }} props
  */
-export function AlertsIsland({ window, summary, rows, chart, pagination, empty }) {
+export function AlertsIsland({ window, summary, rows, chart, pagination, empty, emptyState }) {
   if (!summary) return <Skeleton lines={4} />;
+
+  const emptyCopy = emptyState ?? {
+    title: 'По фильтру ничего не найдено',
+    text: 'Смените статус, важность или канал: сводка выше считает все алерты, а таблица следует фильтру.',
+  };
 
   const kpis = [
     {
@@ -103,9 +109,7 @@ export function AlertsIsland({ window, summary, rows, chart, pagination, empty }
         meta={`${pagination.total} строк по текущему фильтру · окно ${window.label}`}
       >
         {empty ? (
-          <EmptyState title="По фильтру ничего не найдено">
-            Смените статус или важность — сводка выше всегда считает все алерты, а таблица следует фильтру.
-          </EmptyState>
+          <EmptyState title={emptyCopy.title}>{emptyCopy.text}</EmptyState>
         ) : (
           <p className="u-muted">
             В таблице {rows.length} строк на этой странице. Значения и пороги показаны в единицах правила: CAC — в

@@ -1,4 +1,5 @@
 import { AUDIT_ACTIONS } from '../../config/audit-actions.js';
+import { DECISIONS_CONFIG } from '../../config/decisions.js';
 import { METRICS_CONFIG } from '../../config/metrics.js';
 import { addDays, toDateOnly } from '../../lib/dates.js';
 import { withTransaction } from '../../lib/db.js';
@@ -554,7 +555,11 @@ export function createAlertsService({
      * @returns {ReturnType<typeof alertsRepository.listAlerts>}
      */
     async list({ filters = {}, page = 1 } = {}) {
-      return alertsRepository.listAlerts({ filters, page: nextPage(page), limit: 50 });
+      return alertsRepository.listAlerts({
+        filters,
+        page: nextPage(page),
+        limit: DECISIONS_CONFIG.alertsPageSize,
+      });
     },
 
     /**

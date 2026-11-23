@@ -13,7 +13,7 @@ import { predictConversions } from './saturation.service.js';
  */
 
 /** Fixed point count of the analytic saturation curve; enough to draw a smooth line, small enough for the DOM. */
-export const CURVE_STEPS = 40;
+const CURVE_STEPS = 40;
 
 /**
  * @param {string | null | undefined} cents Kopeck string from the scenario snapshot.
@@ -37,7 +37,7 @@ function chartCents(cents, label) {
  * @param {number | null | undefined} value Fractional customer count.
  * @returns {string} One decimal with a comma, or `—`.
  */
-export function customersLabel(value) {
+function customersLabel(value) {
   if (value === null || value === undefined) return '—';
   return formatRatio(value, { decimals: 1 });
 }

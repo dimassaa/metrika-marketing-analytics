@@ -170,6 +170,61 @@ describe('scenario detail', () => {
     expect(props).toEqual(api.body);
   });
 
+  it('ignores a client-supplied anchor and stamps the data anchor on save', async () => {
+    const agent = await signedIn(ANALYST);
+    const csrf = await getAppCsrf(agent, '/app/scenarios');
+    const { rows: anchorRows } = await pool.query('SELECT max(stat_date)::text AS anchor FROM daily_stats');
+    const dataAnchor = anchorRows[0].anchor;
+
+    const saved = await agent
+      .post('/app/scenarios')
+      .type('form')
+      .send({ _csrf: csrf, name: 'Чужой якорь', anchor: '2020-01-01' });
+
+    expect(saved.status).toBe(302);
+    const id = saved.headers.location.split('/').at(-1);
+    const { rows: savedRows } = await pool.query(
+      "SELECT params->>'anchor' AS anchor FROM scenarios WHERE id = $1::bigint",
+      [id],
+    );
+    expect(savedRows[0].anchor).toBe(dataAnchor);
+
+    const { rows: auditRows } = await pool.query(
+      "SELECT payload->>'anchor' AS anchor FROM audit_log WHERE entity = 'scenario' AND entity_id = $1",
+      [id],
+    );
+    expect(auditRows[0].anchor).toBe(dataAnchor);
+
+    const api = await agent
+      .post('/api/v1/scenarios')
+      .set('X-CSRF-Token', csrf)
+      .send({ name: 'API чужой якорь', anchor: '2020-01-01' });
+
+    expect(api.status).toBe(201);
+    expect(api.body.savedAnchor).toBe(dataAnchor);
+    const { rows: apiRows } = await pool.query(
+      "SELECT params->>'anchor' AS anchor FROM scenarios WHERE id = $1::bigint",
+      [api.body.id],
+    );
+    expect(apiRows[0].anchor).toBe(dataAnchor);
+  });
+
+  it('limits the curve selector to the selected channels', async () => {
+    const agent = await signedIn(VIEWER);
+    const base = extractDataProps((await agent.get('/app/scenarios')).text, 'scenarios');
+    const selected = base.channels
+      .filter((channel) => channel.model === 'saturation')
+      .slice(0, 2)
+      .map((channel) => channel.channelId);
+
+    const res = await agent.get(`/app/scenarios?channelIds=${selected.join(',')}`);
+    const block = /name="curveChannelId"[\s\S]*?<\/select>/.exec(res.text)?.[0] ?? '';
+    const values = [...block.matchAll(/<option value="(\d+)"/g)].map((match) => match[1]);
+
+    expect(res.status).toBe(200);
+    expect(values.sort()).toEqual([...selected].sort());
+  });
+
   it('answers a missing scenario with the designed 404 page and JSON 404 on the API', async () => {
     const agent = await signedIn(VIEWER);
 

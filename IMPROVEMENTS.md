@@ -804,19 +804,15 @@ Still open:
 
 ## M5 Task 6 — decisions HTTP layer
 
-- **The alerts table is still server-rendered in the HTML frame while the island renders the summary.** T6 ships the
-  page and the API from one loader, so both presentations read the same `data-props` model; Task 7 moves the row
-  rendering and chart into the island. This is a staging choice, not a second data source, and no metric is computed
-  in EJS.
+- **The alerts table is server-rendered in the HTML frame while the island renders the summary and CAC chart.** The
+  page and the API share one loader, so both presentations read the same `data-props` model; this is not a second
+  data source, and no metric is computed in EJS. T7 kept this split because filters, pagination and dismissal must
+  work before React executes.
 - **The mutation endpoints have JSON-only response shapes that the page/API parity test does not cover.**
   `POST /api/v1/alerts/recalculate` answers `{ recalculated: counts }` and `POST /api/v1/alerts/:id/dismiss` answers
   `{ alert }`; no screen consumes those bodies (the page redirects), so they can be simplified or expanded when a
   client needs them. Scenario create is the exception: it answers 201 with the full detail model so the client can
   navigate without a second request.
-- **An empty stand answers `/app/scenarios` with a 400 instead of an empty builder state.** With no daily stats the
-  service cannot fit a curve and raises «Нет каналов с валидной кривой»; the central handler returns the short 400
-  text. Task 7 owns the designed empty/error state for the builder, so T6 keeps the honest service failure rather
-  than inventing a chart with no data.
 
 ## M5 Task 7 — decisions screens and charts
 

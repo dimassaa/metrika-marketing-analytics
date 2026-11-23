@@ -113,8 +113,6 @@ export function createDecisionsModule({ db, referenceRepository, auditServiceFac
   const apiController = createDecisionsApiController({
     alertsController: alertsApiController,
     scenariosController,
-    services,
-    referenceRepository,
   });
 
   return {

@@ -233,7 +233,6 @@ export const scenarioSaveSchema = z.object({
   // An empty budget means "the current weekly budget"; the service resolves it from the snapshot baseline.
   budgetByn: budgetField,
   channelIds: channelIdListField,
-  anchor: dateField.optional(),
 });
 
 /** `GET /app/scenarios` query: budget, channel selection, curve channel and the list page. */
@@ -243,9 +242,6 @@ export const scenarioQuerySchema = z.object({
   curveChannelId: optionalIdField,
   page: pageField,
 });
-
-/** `GET /app/scenarios/:id` has no user-controlled query beyond the list page. */
-export const scenarioDetailQuerySchema = z.object({ page: pageField });
 
 /**
  * Convenience export for tests and callers that want the same optimizer snapshot the service stores.

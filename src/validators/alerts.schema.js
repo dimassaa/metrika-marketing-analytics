@@ -26,6 +26,14 @@ const channelIdField = z
   .optional()
   .transform((value) => value ?? null);
 
+/** Page filter: a stale `channelId=abc` bookmark shows all channels instead of a dead 400. */
+const lenientChannelIdField = z
+  .string({ error: 'Некорректный идентификатор канала' })
+  .regex(/^\d+$/, 'Некорректный идентификатор канала')
+  .optional()
+  .catch(null)
+  .transform((value) => value ?? null);
+
 const pageField = z.coerce
   .number({ error: 'Страница указывается числом' })
   .int('Страница указывается целым числом')
@@ -46,7 +54,7 @@ export const alertsQuerySchema = z.object({
 export const alertsPageQuerySchema = z.object({
   status: lenientStatus,
   severity: lenientSeverity,
-  channelId: channelIdField,
+  channelId: lenientChannelIdField,
   page: lenientPageField,
 });
 

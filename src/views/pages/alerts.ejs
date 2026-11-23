@@ -74,11 +74,8 @@
 
       <% if (model.empty) { %>
       <div class="empty-state">
-        <p class="empty-state__title">Алертов пока нет</p>
-        <p class="empty-state__text">
-          Правила молчат, когда в обоих окнах есть расход и новые клиенты, а пороги не превышены. Откройте другой
-          фильтр или пересчитайте алерты.
-        </p>
+        <p class="empty-state__title"><%= model.emptyState.title %></p>
+        <p class="empty-state__text"><%= model.emptyState.text %></p>
       </div>
       <% } else { %>
       <div class="table-wrap" role="region" aria-label="Алерты" tabIndex="0">

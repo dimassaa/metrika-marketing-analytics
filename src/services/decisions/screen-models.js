@@ -1,3 +1,4 @@
+import { DECISIONS_CONFIG } from '../../config/decisions.js';
 import { METRICS_CONFIG } from '../../config/metrics.js';
 import { addDays, formatDateRu } from '../../lib/dates.js';
 import {
@@ -135,8 +136,10 @@ export function buildAlertsScreen({
   const total = pagination?.total ?? summary.total ?? rows.length;
   const hasMore = pagination?.hasMore ?? summary.hasMore === true;
   const lastDetectedAt = summary.lastDetectedAt ?? null;
+  // A stand with no detections yet is "never checked", not "stale": the label already says so, and claiming old data
+  // would be a second, contradictory warning. Staleness only applies to a stored check.
   const stale = isStale ?? (
-    lastDetectedAt === null ||
+    lastDetectedAt !== null &&
     Date.now() - new Date(lastDetectedAt).getTime() > METRICS_CONFIG.alerts.autoRecalcMs
   );
   const query = { status, severity, channelId };
@@ -189,6 +192,21 @@ export function buildAlertsScreen({
   const nextHref = hasMore
     ? `/app/alerts?${buildQueryString(query, { page: page + 1 })}`
     : null;
+  const anyAlerts =
+    (summary.active ?? 0) + (summary.resolved ?? 0) + (summary.dismissed ?? 0) > 0;
+  const filterActive = status !== 'active' || severity !== 'all' || channelId !== null;
+  const filteredEmpty = mappedRows.length === 0 && filterActive && anyAlerts;
+  const emptyState = filteredEmpty
+    ? {
+        title: 'По фильтру ничего не найдено',
+        text: 'Смените статус, важность или канал: сводка выше считает все алерты, а таблица следует фильтру.',
+      }
+    : {
+        title: 'Алертов пока нет',
+        text:
+          'Правила молчат, когда в обоих окнах есть расход и новые клиенты, а пороги не превышены. ' +
+          'Пересчитайте алерты или загрузите статистику.',
+      };
 
   return {
     page: 'alerts',
@@ -234,11 +252,12 @@ export function buildAlertsScreen({
       page,
       total,
       hasMore,
-      totalPages: Math.max(1, Math.ceil(total / 50)),
+      totalPages: Math.max(1, Math.ceil(total / DECISIONS_CONFIG.alertsPageSize)),
       prevHref,
       nextHref,
     },
     empty: mappedRows.length === 0,
+    emptyState,
   };
 }
 
@@ -364,7 +383,7 @@ function mapScenarioChannel(channel) {
 function buildBudget({ baselineCents, budgetCents }) {
   const capCents = baselineCents * BigInt(METRICS_CONFIG.scenarios.maxBudgetMultiplier);
   const warnAboveCents = baselineCents * BigInt(METRICS_CONFIG.scenarios.warnBudgetMultiplier);
-  const forecast12mCents = budgetCents * 52n;
+  const forecast12mCents = budgetCents * BigInt(DECISIONS_CONFIG.weeksPerYear);
 
   return {
     weeklyCents: centsToApi(budgetCents),
@@ -372,6 +391,9 @@ function buildBudget({ baselineCents, budgetCents }) {
     weeklyInput: centsToInput(budgetCents),
     forecast12mCents: centsToApi(forecast12mCents),
     forecast12mLabel: formatCentsToByn(forecast12mCents),
+    weeksPerYear: DECISIONS_CONFIG.weeksPerYear,
+    maxMultiplier: METRICS_CONFIG.scenarios.maxBudgetMultiplier,
+    warnMultiplier: METRICS_CONFIG.scenarios.warnBudgetMultiplier,
     capCents: centsToApi(capCents),
     capLabel: formatCentsToByn(capCents),
     capInput: centsToInput(capCents),
@@ -469,6 +491,9 @@ export function buildScenariosScreen({
     })),
   };
   controls.selectedChannels = controls.channels.filter((channel) => channel.selected);
+  // The service rejects a curve channel outside the selected set; limiting the select to the same set makes that
+  // validation unreachable from the form instead of turning a stale option into a 400.
+  controls.curveOptions = controls.selectedChannels;
   controls.presets = budgetPresets({
     baselineCents,
     budgetCents,
@@ -481,6 +506,7 @@ export function buildScenariosScreen({
     page: 'scenarios',
     mode,
     budgetPeriod: 'week',
+    weeksPerYear: DECISIONS_CONFIG.weeksPerYear,
     anchor,
     history: historyWindow,
     budget: buildBudget({ baselineCents, budgetCents }),
@@ -496,6 +522,7 @@ export function buildScenariosScreen({
     list: {
       rows: mapScenarioList(list.rows),
       page: list.page,
+      pageSize: DECISIONS_CONFIG.scenariosPageSize,
       total: list.total,
       hasMore: list.hasMore,
     },
@@ -529,6 +556,7 @@ export function buildScenariosUnavailableScreen({
     page: 'scenarios',
     mode: 'builder',
     budgetPeriod: 'week',
+    weeksPerYear: DECISIONS_CONFIG.weeksPerYear,
     anchor,
     history: scenarioHistory(anchor),
     budget: null,
@@ -546,6 +574,7 @@ export function buildScenariosUnavailableScreen({
         selected: false,
       })),
       selectedChannels: [],
+      curveOptions: [],
       presets: [],
     },
     channels: [],
@@ -555,6 +584,7 @@ export function buildScenariosUnavailableScreen({
     list: {
       rows: mapScenarioList(list.rows),
       page: list.page,
+      pageSize: DECISIONS_CONFIG.scenariosPageSize,
       total: list.total,
       hasMore: list.hasMore,
     },
@@ -575,6 +605,7 @@ export function buildScenarioDetailScreen({ scenario }) {
     page: 'scenarios',
     mode: 'detail',
     budgetPeriod: 'week',
+    weeksPerYear: DECISIONS_CONFIG.weeksPerYear,
     id: scenario.id,
     name: scenario.name,
     authorLabel: scenario.authorLabel,

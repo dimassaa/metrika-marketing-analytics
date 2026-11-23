@@ -124,9 +124,37 @@ describe('alerts screen', () => {
     expect(await alertCount()).toBe(0);
     expect(props.rows).toEqual([]);
     expect(props.empty).toBe(true);
+    expect(props.emptyState.title).toBe('Алертов пока нет');
     expect(props.summary.lastRecalculatedLabel).toBe('Ещё не проверяли');
+    expect(props.summary.isStale).toBe(false);
     expect(res.text).not.toContain('action="/app/alerts/recalculate"');
     expect(res.text).not.toContain('/dismiss');
+  });
+
+  it('uses filtered-empty copy when alerts exist but the filter matches none', async () => {
+    const agent = await signedIn(ANALYST);
+    await agent.get('/app/alerts');
+
+    const res = await agent.get('/app/alerts?status=dismissed');
+    const props = extractDataProps(res.text, 'alerts');
+
+    expect(res.status).toBe(200);
+    expect(props.empty).toBe(true);
+    expect(props.emptyState.title).toBe('По фильтру ничего не найдено');
+    expect(res.text).toContain('По фильтру ничего не найдено');
+    expect(res.text).not.toContain('Алертов пока нет');
+  });
+
+  it('falls back on an invalid page channel filter while the API rejects it', async () => {
+    const agent = await signedIn(ANALYST);
+
+    const page = await agent.get('/app/alerts?channelId=abc');
+    const api = await agent.get('/api/v1/alerts?channelId=abc');
+
+    expect(page.status).toBe(200);
+    expect(extractDataProps(page.text, 'alerts').filters.channelId).toBeNull();
+    expect(api.status).toBe(400);
+    expect(api.body.error.code).toBe('VALIDATION_ERROR');
   });
 
   it('throttles the automatic recalculation and takes the label from MAX(detected_at)', async () => {
@@ -153,11 +181,13 @@ describe('alerts screen', () => {
     const agent = await signedIn(ANALYST);
     await agent.get('/app/alerts');
 
-    const { rows: before } = await pool.query(
-      "SELECT (sess->>'alertsRecalculatedAt')::bigint AS stamp FROM sessions",
-    );
     const csrf = await getAppCsrf(agent, '/app/alerts');
     await pool.query("UPDATE alerts SET detected_at = '2020-01-01T00:00:00Z'");
+    // Make the session stamp unmistakably old. A manual recalculation must advance it to roughly now even though the
+    // page's automatic window would otherwise suppress a second check.
+    await pool.query(
+      "UPDATE sessions SET sess = jsonb_set(sess::jsonb, '{alertsRecalculatedAt}', '1'::jsonb)::json",
+    );
 
     const res = await agent
       .post('/app/alerts/recalculate')
@@ -173,7 +203,9 @@ describe('alerts screen', () => {
     const { rows: after } = await pool.query(
       "SELECT (sess->>'alertsRecalculatedAt')::bigint AS stamp FROM sessions",
     );
-    expect(Number(after[0].stamp)).toBeGreaterThanOrEqual(Number(before[0].stamp));
+    const stamp = Number(after[0].stamp);
+    expect(stamp).toBeGreaterThan(1);
+    expect(stamp).toBeGreaterThan(Date.now() - 60_000);
   });
 
   it('serves fifty rows per page and reports more rows', async () => {

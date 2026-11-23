@@ -1,4 +1,5 @@
 import { AUDIT_ACTIONS } from '../../config/audit-actions.js';
+import { DECISIONS_CONFIG } from '../../config/decisions.js';
 import { METRICS_CONFIG } from '../../config/metrics.js';
 import { addDays, toDateOnly } from '../../lib/dates.js';
 import { withTransaction } from '../../lib/db.js';
@@ -501,6 +502,7 @@ export function createScenariosService({
             name: safeName,
             budgetCents: params.budgetCents,
             channelIds: params.channelIds,
+            anchor: params.anchor,
           },
           ip: actor?.ip ?? null,
         });
@@ -522,7 +524,10 @@ export function createScenariosService({
      * }>}
      */
     async listScenarios({ page = 1 } = {}) {
-      const list = await scenariosRepository.listScenarios({ page, limit: 50 });
+      const list = await scenariosRepository.listScenarios({
+        page,
+        limit: DECISIONS_CONFIG.scenariosPageSize,
+      });
 
       return {
         ...list,

@@ -9,8 +9,8 @@
       <h2>Сценарии бюджета</h2>
       <p class="u-muted">
         Сценарий распределяет недельный бюджет между платными каналами по кривым насыщения. Расчёт опирается на
-        26 полных недель, а сохранённый снимок не меняется задним числом. Суммы — в BYN, за 12 месяцев бюджет
-        умножается на 52.
+        <%= model.history.weeks %> полных недель, а сохранённый снимок не меняется задним числом. Суммы — в BYN, за
+        12 месяцев бюджет умножается на <%= model.weeksPerYear %>.
       </p>
     </div>
 
@@ -63,8 +63,8 @@
           >
           <span class="field__hint" id="budget-hint">
             <strong class="u-numeric"><%= model.budget.weeklyLabel %> <span class="byn">BYN</span></strong>
-            · за 12 месяцев ×52: <strong class="u-numeric"><%= model.budget.forecast12mLabel %> <span class="byn">BYN</span></strong>
-            · максимум <%= model.budget.capLabel %> <span class="byn">BYN</span> — 3× текущего бюджета
+            · за 12 месяцев ×<%= model.budget.weeksPerYear %>: <strong class="u-numeric"><%= model.budget.forecast12mLabel %> <span class="byn">BYN</span></strong>
+            · максимум <%= model.budget.capLabel %> <span class="byn">BYN</span> — <%= model.budget.maxMultiplier %>× текущего бюджета
           </span>
           <div class="cluster" aria-label="Пресеты недельного бюджета">
             <% for (const preset of model.controls.presets) { %>
@@ -90,7 +90,7 @@
         <label class="field">
           <span class="field__label">Канал кривой</span>
           <select class="select" name="curveChannelId">
-            <% for (const channel of model.controls.channels) { %>
+            <% for (const channel of model.controls.curveOptions) { %>
             <option value="<%= channel.value %>"<%= channel.value === model.controls.curveChannelId ? ' selected' : '' %>><%= channel.label %></option>
             <% } %>
           </select>
@@ -105,7 +105,8 @@
 
       <% if (model.budget.isAboveWarn) { %>
       <p class="alert alert--warning" role="status">
-        Бюджет больше фактического более чем в 2 раза — прогноз за пределами наблюдённых расходов.
+        Бюджет больше фактического более чем в <%= model.budget.warnMultiplier %> раза — прогноз за пределами
+        наблюдённых расходов.
       </p>
       <% } %>
     </div>
@@ -185,9 +186,6 @@
       </div>
       <% } %>
 
-      <% if (model.list.hasMore) { %>
-      <p class="u-muted">Показаны последние 50 сценариев. Более ранние доступны по прямой ссылке.</p>
-      <% } %>
     </div>
   </div>
 </section>

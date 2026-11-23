@@ -185,9 +185,11 @@ describe('scenarios frame contract', () => {
     expect(view).toContain('step="0.01"');
     expect(view).toContain('max="<%= model.budget.capInput %>"');
     expect(view).toContain('Недельный бюджет');
-    expect(view).toContain('за 12 месяцев ×52');
+    expect(view).toContain('за 12 месяцев ×<%= model.budget.weeksPerYear %>');
     expect(view).toContain('максимум');
-    expect(view).toContain('3× текущего бюджета');
+    expect(view).toContain('<%= model.budget.maxMultiplier %>× текущего бюджета');
+    expect(view).not.toContain('×52');
+    expect(view).not.toContain('3× текущего бюджета');
     expect(view).toContain('model.controls.presets');
     expect(view).toContain('name="_csrf"');
     expect(view).toContain('name="channelIds"');
