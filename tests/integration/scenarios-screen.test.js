@@ -311,8 +311,10 @@ describe('stale curve selector', () => {
     const values = [...block.matchAll(/<option value="(\d+)"/g)].map((match) => match[1]);
     expect(values).toEqual(['1']);
 
+    // The JSON API is strict: it keeps the service's validation instead of the page's tolerant fallback.
     const api = await agent.get('/api/v1/scenarios?channelIds=1&curveChannelId=8');
-    expect(api.status).toBe(200);
-    expect(api.body.controls.curveNote).toMatch(/не входит в набор/);
+    expect(api.status).toBe(400);
+    expect(api.body.error.code).toBe('VALIDATION_ERROR');
+    expect(api.body.error.message).toMatch(/канал кривой/i);
   });
 });

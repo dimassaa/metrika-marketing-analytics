@@ -266,3 +266,17 @@ describe('alert chart review fixes', () => {
     expect(chart.title).not.toContain('за 12 недель');
   });
 });
+
+describe('alert chart trailing gap', () => {
+  it('uses the last measured value when the final week has no customers', () => {
+    const rows = weeklySeries();
+    rows[11] = { ...rows[11], cacCents: null, newCustomers: 0 };
+    const chart = buildAlertChannelChart({ channelName: 'Instagram', weeklySeries: rows });
+
+    expect(chart.hasData).toBe(true);
+    expect(chart.caption).not.toContain('нет измеренных значений');
+    expect(chart.caption).toContain('последняя 20,00 BYN');
+    expect(chart.ariaLabel).toContain('Последняя измеренная неделя 20,00 BYN');
+    expect(chart.ariaLabel).not.toContain('Последняя неделя —');
+  });
+});

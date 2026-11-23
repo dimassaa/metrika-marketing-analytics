@@ -67,7 +67,8 @@ function cacDelta(channel) {
  *     value: string, threshold: string }>,
  *   channelId?: string | null,
  *   channelName?: string | null,
- * }} input `rows` are the rows matching the current filter; a channel filter already narrows them.
+ * }} input `rows` are the candidate alerts to rank — normally every active alert of the current window, not the
+ *   filtered page, so status and pagination cannot change the chosen channel.
  * @returns {{ channelId: string, channelName: string } | null}
  */
 export function selectAlertChartChannel({ rows = [], channelId = null, channelName = null }) {
@@ -161,8 +162,11 @@ export function buildAlertChannelChart({
   const hasData = hasPlottableData(values);
   const weeks = weeklySeries.length;
   const windowWeeks = weeks === 0 ? METRICS_CONFIG.dashboard.weeks : weeks;
-  const measuredWeeks = values.filter((value) => value !== null).length;
-  const last = values.at(-1) ?? null;
+  const measured = values.filter((value) => value !== null);
+  const measuredWeeks = measured.length;
+  // The last bucket may be an unmeasured week (no customers), so "last" means the last measured value, not
+  // `values.at(-1)`: a trailing gap must not turn a chart with data into a "no values" caption.
+  const last = measured.at(-1) ?? null;
   const lastLabel = last === null ? '—' : `${formatCentsToByn(last)} BYN`;
   const trend = trendOf(values);
   const trendLabel = trend !== null
@@ -179,8 +183,12 @@ export function buildAlertChannelChart({
     title: conclusion,
     caption:
       `${range === '' ? `${windowWeeks} недель` : `${range} · ${windowWeeks} недель`} · ` +
-      (last === null ? 'нет измеренных значений CAC' : `недельный CAC в BYN, последняя ${lastLabel}`),
-    ariaLabel: `${conclusion}. Последняя неделя ${lastLabel}.`,
+      (measuredWeeks === 0
+        ? 'нет измеренных значений CAC'
+        : `недельный CAC в BYN, последняя ${lastLabel}`),
+    ariaLabel: measuredWeeks === 0
+      ? `${conclusion}. Измеренных недель нет.`
+      : `${conclusion}. Последняя измеренная неделя ${lastLabel}.`,
     unit: 'BYN',
     hasData,
     series: weeklySeries.map((bucket, index) => ({

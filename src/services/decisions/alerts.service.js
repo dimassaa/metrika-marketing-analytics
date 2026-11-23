@@ -440,7 +440,7 @@ export function createAlertsService({
      *
      * @param {{ periodStart: string }} input Monday of the current four-week window.
      * @returns {Promise<object[]>} Active alert rows of that period.
-     * @throws {ValidationError} When `periodStart` is not a calendar date.
+     * @throws {RangeError | TypeError} When `periodStart` cannot be read as a calendar date.
      */
     async listActiveForPeriod({ periodStart }) {
       return alertsRepository.listCurrentPeriodActive(toDateOnly(periodStart));

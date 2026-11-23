@@ -32,7 +32,7 @@ export function createDecisionsApiController({ alertsController, scenariosContro
      * @type {import('express').RequestHandler}
      */
     async scenarios(req, res) {
-      const { screen } = await scenariosController.loadBuilder(req);
+      const { screen } = await scenariosController.loadBuilder(req, { strictCurve: true });
       res.json(screen);
     },
 

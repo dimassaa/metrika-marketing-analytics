@@ -36,16 +36,21 @@ export function createScenariosController({
 }) {
   /**
    * @param {import('express').Request} req
-   * @param {{ query?: object, anchor?: string }} [prepared]
+   * @param {{ query?: object, anchor?: string, strictCurve?: boolean }} [prepared] Already parsed query, anchor and
+   *   the curve policy. `strictCurve` keeps the service's rejection for the JSON API; the page tolerates a stale
+   *   selector because a presentation choice must not turn a valid channel set into a 400.
    * @returns {Promise<{ query: object, anchor: string, screen: object }>}
    */
-  async function loadBuilder(req, { query: preparedQuery, anchor: preparedAnchor } = {}) {
+  async function loadBuilder(
+    req,
+    { query: preparedQuery, anchor: preparedAnchor, strictCurve = false } = {},
+  ) {
     const query = preparedQuery ?? parseQuery(scenarioQuerySchema, req.query);
     const anchor = preparedAnchor ?? (await referenceRepository.getDataAnchor());
 
     // The curve channel is a presentation choice. A stale select value must not turn a valid channel set into a 400:
     // when the requested curve is not part of the selected channels (or no longer exists), drop it and let the model
-    // fall back to the first fitted channel. The service stays strict for direct callers.
+    // fall back to the first fitted channel. The API keeps the service's strict rejection on purpose.
     const channels = channelsRepository ? await channelsRepository.listChannels() : [];
     const requestedCurve = query.curveChannelId === null || query.curveChannelId === undefined
       ? null
@@ -53,7 +58,8 @@ export function createScenariosController({
     const selectableIds = (query.channelIds ?? channels.map((channel) => channel.id)).map(String);
     const canValidateCurve =
       (query.channelIds !== null && query.channelIds !== undefined) || channels.length > 0;
-    const curveFallback = requestedCurve !== null &&
+    const curveFallback = !strictCurve &&
+      requestedCurve !== null &&
       canValidateCurve &&
       !selectableIds.includes(requestedCurve);
     const curveChannelId = curveFallback ? null : requestedCurve;
