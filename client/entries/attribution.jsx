@@ -24,11 +24,10 @@ import { ChartFrame } from '../components/charts/ChartFrame.jsx';
  *     selected: boolean,
  *   }>,
  *   summary: {
- *     key: string, label: string, totalRevenueCents: string, totalRevenueLabel: string,
+ *     key: string, label: string, totalRevenueLabel: string,
  *     totalAttributedCents: string, totalAttributedLabel: string, totalSpendCents: string,
  *     totalSpendLabel: string, romiPct: number | null, romiLabel: string,
  *   },
- *   comparison: object[],
  *   charts: { revenue: object },
  *   table: {
  *     caption: string, deltaModel: string, deltaBaseLabel: string,
@@ -103,8 +102,38 @@ export function AttributionIsland({ period, models, summary, charts, table, sele
       </nav>
 
       <Card
+        title="Итоги по моделям"
+        meta="У всех трёх моделей совпадает итог выручки: каждая раскладывает один и тот же период. Различается только распределение по каналам — смотрите дельту ниже."
+      >
+        <ul className="model-totals" aria-label="Итоги по моделям атрибуции">
+          {models.map((entry) => (
+            <li
+              className={entry.selected ? 'model-totals__item is-active' : 'model-totals__item'}
+              key={entry.key}
+            >
+              <p className="model-totals__label">
+                {entry.label}
+                {entry.selected && <span className="model-totals__selected">выбрана</span>}
+              </p>
+              <p className="model-totals__value">
+                {entry.totalAttributedLabel} <span className="byn">BYN</span>
+              </p>
+              <p className="model-totals__meta">
+                ROMI модели <strong>{entry.romiLabel}</strong>
+              </p>
+            </li>
+          ))}
+        </ul>
+      </Card>
+
+      <Card
         title={`Сводка: ${summary.label}`}
-        meta={`Атрибуция за ${period.label} · ${selected.totalAttributedLabel} BYN из ${summary.totalRevenueLabel} BYN выручки периода`}
+        meta={
+          <>
+            Атрибуция за {period.label} · {selected.totalAttributedLabel} <span className="byn">BYN</span> из{' '}
+            {summary.totalRevenueLabel} <span className="byn">BYN</span> выручки периода
+          </>
+        }
       >
         <div className="grid grid--4">
           {kpis.map((item) => (
@@ -115,8 +144,9 @@ export function AttributionIsland({ period, models, summary, charts, table, sele
 
       {unattributedNote && (
         <p className="alert alert--warning" role="status">
-          {unattributedNote}. Часть заказов осталась без канала: у клиента не было касания в окне и не было канала
-          привлечения, поэтому эти деньги не приписаны ни одному каналу.
+          {unattributedNote.replace(/ BYN$/, '')} <span className="byn">BYN</span>. Часть заказов осталась без канала:
+          у клиента не было касания в окне и не было канала привлечения, поэтому эти деньги не приписаны ни одному
+          каналу.
         </p>
       )}
 
@@ -158,7 +188,7 @@ export function AttributionIsland({ period, models, summary, charts, table, sele
             <tbody>
               {table.rows.map((row) => (
                 <tr key={row.key}>
-                  <th scope="row">{row.channelCode}</th>
+                  <th scope="row">{row.channelName}</th>
                   {table.columns
                     .filter((column) => column.key !== 'channel')
                     .map((column) => (
@@ -172,8 +202,8 @@ export function AttributionIsland({ period, models, summary, charts, table, sele
           </table>
         </div>
         <p className="matrix__note">
-          Все три модели раскладывают одну и ту же выручку периода; колонки не складываются между собой. Итог каждой
-          модели указан в её карточке выбора и в сводке выше.
+          Все три модели раскладывают одну и ту же выручку периода, поэтому их общий итог одинаков. Между моделями
+          меняется только вклад каналов: колонки моделей не складываются между собой.
         </p>
       </Card>
     </div>

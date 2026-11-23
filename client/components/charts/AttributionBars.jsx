@@ -1,17 +1,36 @@
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { formatCompactCents } from '../../../src/lib/format.js';
+import { ATTRIBUTION_MODEL_LABELS } from '../../../src/lib/metrics-labels.js';
 import { chartTheme } from '../../lib/chartTheme.js';
 import { ChartTooltip } from './ChartTooltip.jsx';
 
 /**
- * Legend wording names each attribution model, because the same channel revenue under three models is easy to
+ * Legend wording comes from the shared model labels, because the same channel revenue under three models is easy to
  * misread as three independent revenue streams.
  */
-const SERIES_NAMES = {
-  last_touch: 'Последнее касание',
-  first_touch: 'Первое касание',
-  linear: 'Линейная',
-};
+const SERIES_NAMES = ATTRIBUTION_MODEL_LABELS;
+
+/** Legend order follows the bars; Recharts' default content reorders payload, so the island renders its own list. */
+const LEGEND_ORDER = ['last_touch', 'first_touch', 'linear'];
+
+/**
+ * Legend as a real list: order is data-driven and the swatch colours come from stylesheet tokens, matching the bars.
+ * Recharts' default legend is not used because it rendered the payload in reverse bar order.
+ *
+ * @returns {import('react').ReactElement}
+ */
+function AttributionLegend() {
+  return (
+    <ul className="chart-legend" aria-label="Модели атрибуции">
+      {LEGEND_ORDER.map((key) => (
+        <li className="chart-legend__item" key={key}>
+          <span className={`chart-legend__swatch chart-legend__swatch--${key}`} aria-hidden="true" />
+          {SERIES_NAMES[key]}
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 /**
  * Grouped revenue bars per channel for the three attribution models.
@@ -30,7 +49,7 @@ export function AttributionBars({ chart }) {
       <BarChart data={chart.series} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} barGap={2} barCategoryGap="24%">
         <CartesianGrid stroke={chartTheme.grid} vertical={false} />
         <XAxis
-          dataKey="channelCode"
+          dataKey="channelName"
           tick={{ fontSize: chartTheme.fontSize, fill: chartTheme.axisText }}
           tickLine={false}
           axisLine={{ stroke: chartTheme.border }}
@@ -47,11 +66,7 @@ export function AttributionBars({ chart }) {
           content={<ChartTooltip unit="BYN" names={SERIES_NAMES} />}
           cursor={{ fill: chartTheme.canvas }}
         />
-        <Legend
-          wrapperStyle={{ fontSize: chartTheme.fontSize, color: chartTheme.axisText }}
-          iconType="square"
-          iconSize={8}
-        />
+        <Legend content={<AttributionLegend />} wrapperStyle={{ fontSize: chartTheme.fontSize }} />
         <Bar
           dataKey="last_touch"
           name={SERIES_NAMES.last_touch}
@@ -69,8 +84,7 @@ export function AttributionBars({ chart }) {
         <Bar
           dataKey="linear"
           name={SERIES_NAMES.linear}
-          // A darker stone than `seriesMuted` keeps the second comparison series distinguishable without a third hue.
-          fill={chartTheme.axisText}
+          fill={chartTheme.seriesStoneDark}
           radius={[2, 2, 0, 0]}
           isAnimationActive={false}
         />

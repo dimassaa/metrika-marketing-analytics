@@ -666,3 +666,24 @@ Still open:
 - **`KNOWN_ENTRIES` was missing `channel` as well as `cohorts`.** The optional-manifest guard in `src/lib/assets.js`
   is the only typo check before the first build; without `channel` a fresh development clone rendering a passport
   would throw while `dashboard` worked. Both entries are now listed; the manifest remains authoritative when present.
+
+## M4 Task 6 — attribution follow-ups
+
+- **Model-level totals and ROMI are invariant by mathematics.** Every model allocates the same order revenue, so
+  `totalAttributedCents` and model `romiPct` agree across `last_touch`, `first_touch` and `linear` whenever orders are
+  attributable at all; only the per-channel split changes. The screen states this explicitly and shows one totals tile
+  per model, but the actionable comparison is the channel delta (`linear − last_touch`), not a model leaderboard.
+  Do not add a "best model" verdict without a per-channel objective: the totals cannot rank the models.
+- **Channel names are now readable without a second lookup.** The M3 attribution comparison is an additive view-model
+  change: each row carries `channelName` next to `channelId`/`channelCode`, joined from the channel dimension already
+  loaded for the report. No query was added. The chart axis, its duplicate table and the delta table show names; codes
+  remain in the API for stable keys and exports.
+- **The delta percent column is rounded to one decimal for alignment.** Raw `deltaLinearVsLastPct` keeps its service
+  precision (two decimals or more), while the cell formats `roundNumber(pct, 1)`; mixing `+2,4%` with `+0,38%` made the
+  column impossible to scan. A future export should use the raw value, not the display rounding.
+- **The model switch is a GET link, not an auto-submitting select.** This matches the cohorts horizon control and the
+  plan's decision 10: the URL is the only state, and the links replay `days` or an explicit `from`/`to` range. A
+  JavaScript select would introduce a second navigation path without changing what the server can already do.
+- **Attribution has no campaign-scope allocation.** M3 exposes channel allocation only, so the screen has no campaign
+  filter and no campaign breakdown. That remains deferred to M5 together with alerts, scenarios and the optimizer;
+  drawing channels as campaigns would fabricate a dimension the service does not expose.

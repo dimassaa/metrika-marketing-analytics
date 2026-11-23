@@ -86,6 +86,10 @@ describe('attribution screen', () => {
     expect(props.charts.revenue.series[0]).toHaveProperty('last_touch');
     expect(props.charts.revenue.series[0]).toHaveProperty('first_touch');
     expect(props.charts.revenue.series[0]).toHaveProperty('linear');
+    expect(props.charts.revenue.series.every((row) => typeof row.channelName === 'string' && row.channelName !== '')).toBe(
+      true,
+    );
+    expect(props.comparison.every((row) => typeof row.channelName === 'string' && row.channelName !== '')).toBe(true);
   });
 
   it('changes the summary with ?model= but not the underlying numbers', async () => {
@@ -132,6 +136,8 @@ describe('attribution screen', () => {
       expect(row.deltaCents).toBe(String(BigInt(row.linearCents) - BigInt(row.lastTouchCents)));
       const source = props.comparison.find((entry) => entry.channelId === row.channelId);
       expect(row.deltaCents).toBe(source.deltaLinearVsLastCents);
+      expect(row.channelName).toBe(source.channelName);
+      expect(row.cells.channel).toBe(source.channelName);
     }
   });
 

@@ -2,7 +2,9 @@ import { METRICS_CONFIG } from '../../config/metrics.js';
 import { formatDateRu } from '../../lib/dates.js';
 import { formatCentsToByn, formatInteger, formatPercent, formatRomi } from '../../lib/format.js';
 import { heatBucket } from '../../lib/heat-scale.js';
-import { CHANNEL_KIND_LABELS } from '../../lib/metrics-labels.js';
+import { ATTRIBUTION_MODEL_LABELS, CHANNEL_KIND_LABELS } from '../../lib/metrics-labels.js';
+import { roundNumber } from '../../lib/metrics-math.js';
+import { inclusiveDays } from '../../lib/periods.js';
 import { buildQueryString } from '../../lib/query.js';
 import { CHANNEL_SORT_FIELDS } from '../../lib/sort-rows.js';
 import {
@@ -893,37 +895,14 @@ export function buildCohortsScreen({ matrix, curve }) {
 }
 
 /**
- * Russian names of the three attribution models. The keys and their order come from `METRICS_CONFIG`, so this map can
- * only rename a configured model, never invent one.
+ * Russian names of the three attribution models live in `metrics-labels.js`; only the column headers belong here.
+ * @type {Readonly<Record<string, string>>}
  */
-const ATTRIBUTION_MODEL_LABELS = Object.freeze({
-  last_touch: 'Последнее касание',
-  first_touch: 'Первое касание',
-  linear: 'Линейная',
-});
-
-/** Column headers of the chart's duplicate table, reused by the comparison table for the same three models. */
 const ATTRIBUTION_COLUMN_LABELS = Object.freeze({
   last_touch: 'Последнее касание, BYN',
   first_touch: 'Первое касание, BYN',
   linear: 'Линейная, BYN',
 });
-
-/**
- * @param {string} from `YYYY-MM-DD`.
- * @param {string} to `YYYY-MM-DD`.
- * @returns {number} Inclusive calendar length, independent of the machine timezone.
- * @throws {TypeError} When a bound is not a date-only string.
- */
-function inclusiveDays(from, to) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
-    throw new TypeError('attribution period bounds must be YYYY-MM-DD strings');
-  }
-  const [fromYear, fromMonth, fromDay] = from.split('-').map(Number);
-  const [toYear, toMonth, toDay] = to.split('-').map(Number);
-  const ms = Date.UTC(toYear, toMonth - 1, toDay) - Date.UTC(fromYear, fromMonth - 1, fromDay);
-  return Math.round(ms / 86_400_000) + 1;
-}
 
 /**
  * Converts a kopeck string into the number Recharts needs. A present amount above `Number.MAX_SAFE_INTEGER` would be
@@ -946,19 +925,6 @@ function chartCents(cents, label) {
 }
 
 /**
- * Formats a signed kopeck delta. `formatCentsToByn` only accepts non-negative kopecks because stored money never goes
- * below zero; a delta can. The typographic minus is the same glyph the percent formatter uses.
- *
- * @param {string} cents Integer kopeck string, possibly negative.
- * @returns {string} `−20,00` or `15,00`.
- */
-function formatDeltaCents(cents) {
-  const value = BigInt(cents);
-  const sign = value < 0n ? '\u2212' : '';
-  return `${sign}${formatCentsToByn(value < 0n ? -value : value)}`;
-}
-
-/**
  * Grouped bars for the three attribution models over the channel axis.
  *
  * All three models stay visible regardless of the selected one: hiding two of them would let the screen look like a
@@ -972,6 +938,7 @@ function buildAttributionChart({ comparison, periodRange }) {
   const series = comparison.map((row) => ({
     channelId: row.channelId,
     channelCode: row.channelCode,
+    channelName: row.channelName,
     last_touch: chartCents(row.lastTouchCents, 'lastTouchCents'),
     first_touch: chartCents(row.firstTouchCents, 'firstTouchCents'),
     linear: chartCents(row.linearCents, 'linearCents'),
@@ -1006,7 +973,7 @@ function buildAttributionChart({ comparison, periodRange }) {
       rows: comparison.map((row) => ({
         key: row.channelId,
         cells: {
-          channel: row.channelCode,
+          channel: row.channelName,
           last_touch: formatCentsToByn(row.lastTouchCents),
           first_touch: formatCentsToByn(row.firstTouchCents),
           linear: formatCentsToByn(row.linearCents),
@@ -1042,6 +1009,7 @@ function buildAttributionTable({ comparison }) {
       key: row.channelId,
       channelId: row.channelId,
       channelCode: row.channelCode,
+      channelName: row.channelName,
       lastTouchCents: row.lastTouchCents,
       firstTouchCents: row.firstTouchCents,
       linearCents: row.linearCents,
@@ -1052,12 +1020,15 @@ function buildAttributionTable({ comparison }) {
       deltaLinearVsLastCents: row.deltaLinearVsLastCents,
       deltaLinearVsLastPct: row.deltaLinearVsLastPct,
       cells: {
-        channel: row.channelCode,
+        channel: row.channelName,
         lastTouch: formatCentsToByn(row.lastTouchCents),
         firstTouch: formatCentsToByn(row.firstTouchCents),
         linear: formatCentsToByn(row.linearCents),
-        delta: formatDeltaCents(row.deltaLinearVsLastCents),
-        deltaPct: formatPercent(row.deltaLinearVsLastPct, { signed: true }),
+        // A bigint takes the signed branch of `formatCentsToByn`, unlike a negative kopeck string, which the money
+        // parser rejects because stored money is never negative.
+        delta: formatCentsToByn(BigInt(row.deltaLinearVsLastCents)),
+        // One decimal keeps the column aligned; `formatPercent` would otherwise print 2,4 next to 0,38.
+        deltaPct: formatPercent(roundNumber(row.deltaLinearVsLastPct, 1), { signed: true }),
       },
     })),
   };
@@ -1148,7 +1119,6 @@ export function buildAttributionScreen({ report, model, period = null, query = {
     return {
       key,
       label: ATTRIBUTION_MODEL_LABELS[key],
-      totalRevenueCents: view.totalRevenueCents,
       totalAttributedCents: view.totalAttributedCents,
       totalAttributedLabel: formatCentsToByn(view.totalAttributedCents),
       totalSpendCents: view.totalSpendCents,
@@ -1174,7 +1144,6 @@ export function buildAttributionScreen({ report, model, period = null, query = {
     summary: {
       key: model,
       label: selectedModel.label,
-      totalRevenueCents: selectedView.totalRevenueCents,
       totalRevenueLabel: formatCentsToByn(selectedView.totalRevenueCents),
       totalAttributedCents: selectedView.totalAttributedCents,
       totalAttributedLabel: selectedModel.totalAttributedLabel,

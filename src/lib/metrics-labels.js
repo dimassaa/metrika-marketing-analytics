@@ -28,6 +28,18 @@ export const RANKING_REASON_LABELS = Object.freeze({
 });
 
 /**
+ * Russian names of the three attribution models, shared by the server view-model, the API and the chart legend.
+ *
+ * The keys must stay the configured model codes; the object only renames them, so a label can never invent a model
+ * the attribution service does not allocate. One map keeps the selector, the table header and the legend aligned.
+ */
+export const ATTRIBUTION_MODEL_LABELS = Object.freeze({
+  last_touch: 'Последнее касание',
+  first_touch: 'Первое касание',
+  linear: 'Линейная',
+});
+
+/**
  * @param {number} count
  * @returns {string} Russian noun form for a cohort count (`1 когорта`, `2 когорты`, `5 когорт`).
  */

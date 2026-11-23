@@ -381,6 +381,7 @@ export function createAttributionService({ attributionRepository, metricsReposit
      *   comparison: Array<{
      *     channelId: string,
      *     channelCode: string,
+     *     channelName: string,
      *     lastTouchCents: string,
      *     firstTouchCents: string,
      *     linearCents: string,
@@ -402,7 +403,12 @@ export function createAttributionService({ attributionRepository, metricsReposit
       const channelRows = await channelsRepository.listChannels();
 
       const channels = channelRows
-        .map((channel) => ({ channelId: channel.id, channelCode: channel.code }))
+        .map((channel) => ({
+          channelId: channel.id,
+          channelCode: channel.code,
+          // The screen shows names; keeping both lets the API consumer choose without a second channel lookup.
+          channelName: channel.name,
+        }))
         .sort((left, right) => left.channelCode.localeCompare(right.channelCode));
       const channelById = new Map(channels.map((channel) => [channel.channelId, channel]));
       const spendByChannel = new Map(spendRows.map((row) => [row.channelId, row.spendCents]));
@@ -443,6 +449,7 @@ export function createAttributionService({ attributionRepository, metricsReposit
         return {
           channelId: channel.channelId,
           channelCode: channel.channelCode,
+          channelName: channel.channelName,
           lastTouchCents: centsToApi(lastTouchCents),
           firstTouchCents: centsToApi(firstTouchCents),
           linearCents: centsToApi(linearCents),

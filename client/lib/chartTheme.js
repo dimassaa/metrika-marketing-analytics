@@ -15,6 +15,9 @@ export const chartTheme = Object.freeze({
   axisMuted: '#a8a29e',
   seriesPrimary: '#3ba6f1',
   seriesMuted: '#a8a29e',
+  // Darker stone for the third comparison series; the warm-gray token is also a text colour, but here it is explicitly
+  // a series colour so a chart never borrows an axis token by accident.
+  seriesStoneDark: '#78716c',
   healthy: '#2f7d5f',
   watch: '#a16207',
   risk: '#b91c1c',

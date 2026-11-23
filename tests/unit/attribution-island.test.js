@@ -42,16 +42,18 @@ function model({ model = 'last_touch', totalRevenueCents = '13000' } = {}) {
         {
           channelId: '2',
           channelCode: 'email',
+          channelName: 'Email',
           lastTouchCents: '2500',
           firstTouchCents: '3500',
           linearCents: '4000',
           deltaModel: 'linear',
           deltaLinearVsLastCents: '1500',
-          deltaLinearVsLastPct: 60,
+          deltaLinearVsLastPct: 60.38,
         },
         {
           channelId: '1',
           channelCode: 'instagram',
+          channelName: 'Instagram',
           lastTouchCents: '10000',
           firstTouchCents: '9000',
           linearCents: '8000',
@@ -78,6 +80,22 @@ describe('attribution island structure', () => {
     expect(html).toContain('<caption class="u-visually-hidden">Выручка по моделям атрибуции');
   });
 
+  it('renders one totals tile per model with revenue, ROMI and the selected marker', () => {
+    const html = renderToStaticMarkup(createElement(AttributionIsland, model({ model: 'linear' })));
+
+    expect((html.match(/class="model-totals__item/g) ?? []).length).toBe(3);
+    expect(html).toContain('class="model-totals__item is-active"');
+    expect(html).toContain('выбрана');
+    expect(html).toContain('У всех трёх моделей совпадает итог выручки');
+    expect(html).toContain('Различается только распределение по каналам');
+    // Every tile carries its own attributed revenue and ROMI, not only the selected one.
+    expect(html).toContain('125,00');
+    expect(html).toContain('120,00');
+    expect(html).toContain('+150,0%');
+    expect(html).toContain('+140,0%');
+    expect(html).toContain('class="byn"');
+  });
+
   it('renders the delta table with scopes and the named base of the delta', () => {
     const html = renderToStaticMarkup(createElement(AttributionIsland, model()));
 
@@ -86,8 +104,12 @@ describe('attribution island structure', () => {
     expect((html.match(/scope="col"/g) ?? []).length).toBeGreaterThanOrEqual(5);
     expect((html.match(/scope="row"/g) ?? []).length).toBeGreaterThanOrEqual(2);
     expect(html).toContain('Дельта: линейная − последнее касание');
-    expect(html).toContain('+60,0%');
+    expect(html).toContain('+60,4%');
     expect(html).toContain('−20,0%');
+    // Channel names, not raw codes, in both the bars' duplicate table and the delta table.
+    expect(html).toContain('<th scope="row">Email</th>');
+    expect(html).toContain('<th scope="row">Instagram</th>');
+    expect(html).not.toContain('<th scope="row">email</th>');
   });
 
   it('marks the selected model link with aria-current and keeps all three visible', () => {

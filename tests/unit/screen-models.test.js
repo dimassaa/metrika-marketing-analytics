@@ -1223,16 +1223,18 @@ describe('attribution screen model', () => {
         {
           channelId: '2',
           channelCode: 'email',
+          channelName: 'Email',
           lastTouchCents: '2500',
           firstTouchCents: '3500',
           linearCents: '4000',
           deltaModel: 'linear',
           deltaLinearVsLastCents: '1500',
-          deltaLinearVsLastPct: 60,
+          deltaLinearVsLastPct: 60.38,
         },
         {
           channelId: '1',
           channelCode: 'instagram',
+          channelName: 'Instagram',
           lastTouchCents: '10000',
           firstTouchCents: '9000',
           linearCents: '8000',
@@ -1289,17 +1291,21 @@ describe('attribution screen model', () => {
     const table = screen.table;
 
     expect(table.rows.map((row) => row.channelCode)).toEqual(['email', 'instagram']);
+    expect(table.rows.map((row) => row.channelName)).toEqual(['Email', 'Instagram']);
     expect(table.rows[0]).toMatchObject({
       deltaCents: '1500',
-      deltaPct: 60,
+      deltaPct: 60.38,
       deltaLinearVsLastCents: '1500',
-      deltaLinearVsLastPct: 60,
+      deltaLinearVsLastPct: 60.38,
+      cells: { channel: 'Email' },
     });
     expect(table.rows[1]).toMatchObject({
       deltaCents: '-2000',
       deltaPct: -20,
     });
-    expect(table.rows[0].cells.deltaPct).toBe('+60,0%');
+    expect(table.rows[0].cells.delta).toBe('15,00');
+    expect(table.rows[1].cells.delta).toBe('−20,00');
+    expect(table.rows[0].cells.deltaPct).toBe('+60,4%');
     expect(table.rows[1].cells.deltaPct).toBe('−20,0%');
     expect(table.columns.find((column) => column.key === 'delta').label).toContain('линейная');
     expect(table.columns.find((column) => column.key === 'delta').label).toContain('последнее');
@@ -1326,12 +1332,14 @@ describe('attribution screen model', () => {
     expect(chart.series[0]).toMatchObject({
       channelId: '2',
       channelCode: 'email',
+      channelName: 'Email',
       last_touch: 2500,
       first_touch: 3500,
       linear: 4000,
     });
     expect(chart.caption).toContain('окно касания — 30 дней');
     expect(chart.table.rows[0].cells).toMatchObject({
+      channel: 'Email',
       last_touch: '25,00',
       first_touch: '35,00',
       linear: '40,00',

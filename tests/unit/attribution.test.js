@@ -330,8 +330,8 @@ function fakeRepositories({ orders = [], touchpoints = [], channels = [], spend 
 function serviceFixtures() {
   return fakeRepositories({
     channels: [
-      { id: '2', code: 'email' },
-      { id: '1', code: 'instagram' },
+      { id: '2', code: 'email', name: 'Email' },
+      { id: '1', code: 'instagram', name: 'Instagram' },
     ],
     spend: [
       { channelId: '1', channelCode: 'instagram', spendCents: 5000n },
@@ -457,6 +457,7 @@ describe('createAttributionService report', () => {
       {
         channelId: '2',
         channelCode: 'email',
+        channelName: 'Email',
         lastTouchCents: '2500',
         firstTouchCents: '2500',
         linearCents: '5833',
@@ -467,6 +468,7 @@ describe('createAttributionService report', () => {
       {
         channelId: '1',
         channelCode: 'instagram',
+        channelName: 'Instagram',
         lastTouchCents: '10000',
         firstTouchCents: '10000',
         linearCents: '6667',

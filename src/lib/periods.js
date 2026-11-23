@@ -29,11 +29,15 @@ function requireDate(value, label) {
 /**
  * Inclusive number of calendar days between two `YYYY-MM-DD` values. Arithmetic runs on UTC date parts, so neither
  * the machine's timezone nor a DST change can make a 30-day period 29 or 31 days long.
+ *
+ * Exported for the screen models that receive a service period without a `days` field; they must not re-implement the
+ * arithmetic and disagree with `resolvePeriod` by a day.
+ *
  * @param {string} from
  * @param {string} to
  * @returns {number}
  */
-function inclusiveDays(from, to) {
+export function inclusiveDays(from, to) {
   const [fromYear, fromMonth, fromDay] = from.split('-').map(Number);
   const [toYear, toMonth, toDay] = to.split('-').map(Number);
   const milliseconds = Date.UTC(toYear, toMonth - 1, toDay) - Date.UTC(fromYear, fromMonth - 1, fromDay);
