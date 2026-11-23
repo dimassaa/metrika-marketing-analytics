@@ -3,6 +3,7 @@ import { isoWeekStart, toDateOnly } from '../../lib/dates.js';
 import { ValidationError } from '../../lib/errors.js';
 import { parseBigIntId, normalizeChannelIds } from '../../lib/ids.js';
 import { centsPercent, centsToApi } from '../../lib/metrics-math.js';
+import { computeRomi } from './romi.service.js';
 
 const DAY_MS = 86_400_000;
 const ATTRIBUTION_MODELS = METRICS_CONFIG.attribution.models;
@@ -234,6 +235,8 @@ export function attributeOrders({
  *   revenueByChannel: Array<{ channelId: string, channelCode: string, revenueCents: string, romiPct: number | null }>,
  *   revenueCents: Map<string, bigint>,
  *   totalAttributedCents: string,
+ *   totalSpendCents: string,
+ *   romiPct: number | null,
  * }}
  * @throws {TypeError} When an allocation points at a channel missing from the dimension, which would leak kopecks.
  */
@@ -241,6 +244,7 @@ function buildModelView(allocations, spendByChannel, channels, channelById) {
   /** @type {Map<string, bigint>} */
   const revenueByChannel = new Map();
   let totalAttributed = 0n;
+  let totalSpend = 0n;
 
   for (const allocation of allocations) {
     if (!channelById.has(allocation.channelId)) {
@@ -256,6 +260,9 @@ function buildModelView(allocations, spendByChannel, channels, channelById) {
   const rows = channels.map((channel) => {
     const revenueCents = revenueByChannel.get(channel.channelId) ?? 0n;
     const spendCents = spendByChannel.get(channel.channelId) ?? 0n;
+    // Spend is a period aggregate, not a model allocation: every model compares its own attributed revenue with the
+    // same money. Summing the dimension (rather than the spend map) keeps the total consistent with the rows above.
+    totalSpend += spendCents;
     return {
       channelId: channel.channelId,
       channelCode: channel.channelCode,
@@ -265,7 +272,14 @@ function buildModelView(allocations, spendByChannel, channels, channelById) {
     };
   });
 
-  return { revenueByChannel: rows, revenueCents: revenueByChannel, totalAttributedCents: centsToApi(totalAttributed) };
+  return {
+    revenueByChannel: rows,
+    revenueCents: revenueByChannel,
+    totalAttributedCents: centsToApi(totalAttributed),
+    totalSpendCents: centsToApi(totalSpend),
+    // The model-level ROMI reuses the single formula; a zero period spend makes it null instead of Infinity.
+    romiPct: computeRomi({ revenueCents: totalAttributed, spendCents: totalSpend }),
+  };
 }
 
 /**
@@ -361,6 +375,8 @@ export function createAttributionService({ attributionRepository, metricsReposit
      *     }>,
      *     totalRevenueCents: string,
      *     totalAttributedCents: string,
+     *     totalSpendCents: string,
+     *     romiPct: number | null,
      *   }>,
      *   comparison: Array<{
      *     channelId: string,
@@ -409,6 +425,9 @@ export function createAttributionService({ attributionRepository, metricsReposit
           revenueByChannel: view.revenueByChannel,
           totalRevenueCents: centsToApi(totalRevenue),
           totalAttributedCents: view.totalAttributedCents,
+          // Additive M3 fields: the attribution screen compares each model's own ROMI against the same period spend.
+          totalSpendCents: view.totalSpendCents,
+          romiPct: view.romiPct,
         };
       }
 

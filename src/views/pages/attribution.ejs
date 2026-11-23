@@ -1,0 +1,21 @@
+<%#
+  Attribution frame. The page owns the heading and the mount node; the model switch, the selected-model summary, the
+  grouped bars and the delta table are rendered by `client/entries/attribution.jsx` from `model` — the same object
+  `/api/v1/attribution` returns.
+
+  The topbar period control replays the selected `model`, so changing the period does not silently switch back to the
+  default attribution model.
+%>
+<section class="app-section">
+  <div class="stack stack--lg">
+    <div class="stack stack--sm">
+      <h2>Атрибуция выручки</h2>
+      <p class="u-muted">
+        Одна и та же выручка за период, разложенная по каналам тремя моделями: последнее касание, первое касание и
+        линейная. Сравните, как меняется вклад канала, когда заслуга делится между всеми касаниями окна.
+      </p>
+    </div>
+
+    <%- include('../partials/island', { name: 'attribution', model }) %>
+  </div>
+</section>

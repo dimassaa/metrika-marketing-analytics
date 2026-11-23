@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { addDays } from '../../src/lib/dates.js';
 import {
+  buildAttributionScreen,
   buildChannelFilterControl,
   buildChannelsFilterControl,
   buildChannelsScreen,
@@ -1156,5 +1157,197 @@ describe('cohorts horizon control', () => {
     const twelve = control.options.find((option) => option.value === 12);
     expect(twelve.href).not.toContain('horizon=12');
     expect(twelve.href).toContain('channelId=4');
+  });
+});
+
+describe('attribution screen model', () => {
+  /**
+   * @param {{ totalRevenueCents?: string }} [options]
+   * @returns {object} An M3 attribution report with three models and a two-channel comparison.
+   */
+  function reportWith({ totalRevenueCents = '13000' } = {}) {
+    return {
+      period: { from: '2026-10-23', to: '2026-11-21' },
+      models: {
+        last_touch: {
+          revenueByChannel: [
+            { channelId: '1', channelCode: 'instagram', revenueCents: '10000', romiPct: 100 },
+            { channelId: '2', channelCode: 'email', revenueCents: '2500', romiPct: null },
+          ],
+          totalRevenueCents,
+          totalAttributedCents: '12500',
+          totalSpendCents: '5000',
+          romiPct: 150,
+        },
+        first_touch: {
+          revenueByChannel: [
+            { channelId: '1', channelCode: 'instagram', revenueCents: '9000', romiPct: 80 },
+            { channelId: '2', channelCode: 'email', revenueCents: '3500', romiPct: null },
+          ],
+          totalRevenueCents,
+          totalAttributedCents: '12500',
+          totalSpendCents: '5000',
+          romiPct: 150,
+        },
+        linear: {
+          revenueByChannel: [
+            { channelId: '1', channelCode: 'instagram', revenueCents: '8000', romiPct: 60 },
+            { channelId: '2', channelCode: 'email', revenueCents: '4000', romiPct: null },
+          ],
+          totalRevenueCents,
+          totalAttributedCents: '12000',
+          totalSpendCents: '5000',
+          romiPct: 140,
+        },
+      },
+      comparison: [
+        {
+          channelId: '2',
+          channelCode: 'email',
+          lastTouchCents: '2500',
+          firstTouchCents: '3500',
+          linearCents: '4000',
+          deltaModel: 'linear',
+          deltaLinearVsLastCents: '1500',
+          deltaLinearVsLastPct: 60,
+        },
+        {
+          channelId: '1',
+          channelCode: 'instagram',
+          lastTouchCents: '10000',
+          firstTouchCents: '9000',
+          linearCents: '8000',
+          deltaModel: 'linear',
+          deltaLinearVsLastCents: '-2000',
+          deltaLinearVsLastPct: -20,
+        },
+      ],
+    };
+  }
+
+  /**
+   * @param {{ model?: string, totalRevenueCents?: string, query?: object }} [options]
+   * @returns {object}
+   */
+  function screenWith({ model = 'last_touch', totalRevenueCents = '13000', query = {} } = {}) {
+    return buildAttributionScreen({
+      report: reportWith({ totalRevenueCents }),
+      model,
+      period: { from: '2026-10-23', to: '2026-11-21', days: 30 },
+      query,
+    });
+  }
+
+  it('marks exactly the chosen model and keeps the fixed model order', () => {
+    const screen = screenWith({ model: 'linear' });
+
+    expect(screen.page).toBe('attribution');
+    expect(screen.model).toBe('linear');
+    expect(screen.models.map((entry) => entry.key)).toEqual(['last_touch', 'first_touch', 'linear']);
+    expect(screen.models.filter((entry) => entry.selected).map((entry) => entry.key)).toEqual(['linear']);
+    expect(screen.models.find((entry) => entry.selected)).toMatchObject({
+      totalAttributedCents: '12000',
+      totalAttributedLabel: '120,00',
+      totalSpendCents: '5000',
+      romiPct: 140,
+      romiLabel: '+140,0%',
+    });
+    expect(screen.summary).toMatchObject({ key: 'linear', totalAttributedCents: '12000', romiPct: 140 });
+  });
+
+  it('takes the summary from the model total, not from a sum of comparison rows', () => {
+    const report = reportWith();
+    // A deliberately broken comparison would disagree with the model; the summary must not follow it.
+    report.comparison[0].linearCents = '999999';
+    const screen = buildAttributionScreen({ report, model: 'linear' });
+
+    expect(screen.summary.totalAttributedCents).toBe('12000');
+    expect(screen.summary.totalAttributedLabel).toBe('120,00');
+  });
+
+  it('builds the delta table with the linear-vs-last base named in the header', () => {
+    const screen = screenWith();
+    const table = screen.table;
+
+    expect(table.rows.map((row) => row.channelCode)).toEqual(['email', 'instagram']);
+    expect(table.rows[0]).toMatchObject({
+      deltaCents: '1500',
+      deltaPct: 60,
+      deltaLinearVsLastCents: '1500',
+      deltaLinearVsLastPct: 60,
+    });
+    expect(table.rows[1]).toMatchObject({
+      deltaCents: '-2000',
+      deltaPct: -20,
+    });
+    expect(table.rows[0].cells.deltaPct).toBe('+60,0%');
+    expect(table.rows[1].cells.deltaPct).toBe('−20,0%');
+    expect(table.columns.find((column) => column.key === 'delta').label).toContain('линейная');
+    expect(table.columns.find((column) => column.key === 'delta').label).toContain('последнее');
+    expect(table.caption).toContain('линейная');
+  });
+
+  it('shows the unattributed note only when the selected model loses revenue', () => {
+    expect(screenWith({ totalRevenueCents: '12500' }).unattributedNote).toBeNull();
+
+    expect(screenWith({ model: 'last_touch' }).unattributedNote).toBe(
+      'Не вся выручка атрибутирована: 5,00 BYN',
+    );
+    expect(screenWith({ model: 'linear' }).unattributedNote).toBe(
+      'Не вся выручка атрибутирована: 10,00 BYN',
+    );
+  });
+
+  it('builds one grouped bar series per channel with all three models', () => {
+    const chart = screenWith().charts.revenue;
+
+    expect(chart.hasData).toBe(true);
+    expect(chart.unit).toBe('BYN');
+    expect(chart.series).toHaveLength(2);
+    expect(chart.series[0]).toMatchObject({
+      channelId: '2',
+      channelCode: 'email',
+      last_touch: 2500,
+      first_touch: 3500,
+      linear: 4000,
+    });
+    expect(chart.caption).toContain('окно касания — 30 дней');
+    expect(chart.table.rows[0].cells).toMatchObject({
+      last_touch: '25,00',
+      first_touch: '35,00',
+      linear: '40,00',
+    });
+  });
+
+  it('keeps the sum of every model column equal to that model total', () => {
+    const screen = screenWith();
+
+    for (const entry of screen.models) {
+      const key = entry.key === 'last_touch' ? 'last_touch' : entry.key === 'first_touch' ? 'first_touch' : 'linear';
+      const sum = screen.charts.revenue.series.reduce((total, row) => total + row[key], 0);
+      expect(sum, entry.key).toBe(Number(entry.totalAttributedCents));
+    }
+  });
+
+  it('builds three model links that preserve days and marks the active one', () => {
+    const screen = screenWith({ model: 'first_touch', query: { days: '90', model: 'first_touch' } });
+
+    expect(screen.selector.options.map((option) => option.value)).toEqual([
+      'last_touch',
+      'first_touch',
+      'linear',
+    ]);
+    const active = screen.selector.options.find((option) => option.selected);
+    expect(active).toMatchObject({ value: 'first_touch', ariaCurrent: 'page' });
+    expect(active.href).toContain('days=90');
+    expect(active.href).toContain('model=first_touch');
+    expect(screen.selector.options[0].href).toContain('days=90');
+  });
+
+  it('serialises without a bigint, NaN or Infinity', () => {
+    const screen = screenWith();
+
+    expect(() => JSON.stringify(screen)).not.toThrow();
+    expect(JSON.stringify(screen)).not.toMatch(/NaN|Infinity/);
   });
 });

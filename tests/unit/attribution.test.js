@@ -4,6 +4,7 @@ import {
   attributeOrders,
   createAttributionService,
 } from '../../src/services/metrics/attribution.service.js';
+import { computeRomi } from '../../src/services/metrics/romi.service.js';
 
 const DAY_MS = 86_400_000;
 
@@ -393,6 +394,59 @@ describe('createAttributionService report', () => {
       { channelId: '2', channelCode: 'email', revenueCents: '5833', romiPct: null },
       { channelId: '1', channelCode: 'instagram', revenueCents: '6667', romiPct: 33.34 },
     ]);
+  });
+
+  it('adds the model total spend and ROMI without changing the per-channel rows', async () => {
+    const service = createAttributionService(serviceFixtures());
+    const report = await service.getAttributionReport({ from: '2026-11-01', to: '2026-11-21' });
+
+    // Spend is the same period aggregate for every model; only the attributed numerator moves.
+    for (const model of Object.values(report.models)) {
+      expect(model.totalSpendCents).toBe('5000');
+      expect(model.romiPct).toBe(
+        computeRomi({ revenueCents: BigInt(model.totalAttributedCents), spendCents: 5000n }),
+      );
+    }
+    expect(report.models.last_touch.romiPct).toBe(150);
+    expect(report.models.linear.romiPct).toBe(150);
+  });
+
+  it('leaves the model ROMI null when the period has no spend', async () => {
+    const fixtures = serviceFixtures();
+    fixtures.metricsRepository.listChannelSpend = async () => [];
+    const service = createAttributionService(fixtures);
+    const report = await service.getAttributionReport({ from: '2026-11-01', to: '2026-11-21' });
+
+    for (const model of Object.values(report.models)) {
+      expect(model.totalSpendCents).toBe('0');
+      expect(model.romiPct).toBeNull();
+    }
+  });
+
+  it('reads orders, touchpoints, spend and channels exactly once per report', async () => {
+    const fixtures = serviceFixtures();
+    const calls = { orders: 0, touchpoints: 0, spend: 0, channels: 0 };
+    fixtures.attributionRepository.listOrdersInPeriod = async () => {
+      calls.orders += 1;
+      return [];
+    };
+    fixtures.attributionRepository.listTouchpointsForOrders = async () => {
+      calls.touchpoints += 1;
+      return [];
+    };
+    fixtures.metricsRepository.listChannelSpend = async () => {
+      calls.spend += 1;
+      return [];
+    };
+    fixtures.channelsRepository.listChannels = async () => {
+      calls.channels += 1;
+      return [];
+    };
+
+    await createAttributionService(fixtures).getAttributionReport({ from: '2026-11-01', to: '2026-11-21' });
+
+    expect(calls).toEqual({ orders: 1, touchpoints: 1, spend: 1, channels: 1 });
+    expect(Object.values(calls).reduce((sum, value) => sum + value, 0)).toBe(4);
   });
 
   it('compares every channel against the default last-touch model', async () => {

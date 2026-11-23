@@ -4,6 +4,7 @@ import { createChannelsRepository } from '../../repositories/channels.repo.js';
 import { createCohortsRepository } from '../../repositories/cohorts.repo.js';
 import { createMetricsRepository } from '../../repositories/metrics.repo.js';
 import { createMetricsApiController } from '../../controllers/api/metrics.controller.js';
+import { createAttributionController } from '../../controllers/attribution.controller.js';
 import { createChannelPassportLoader, createChannelsScreenLoader } from '../../controllers/channels.controller.js';
 import { createCohortsController } from '../../controllers/cohorts.controller.js';
 import { createDashboardController } from '../../controllers/dashboard.controller.js';
@@ -15,7 +16,13 @@ import { createDashboardService } from './dashboard.service.js';
 import { createLtvService } from './ltv.service.js';
 import { createRankingService } from './ranking.service.js';
 import { createChannelHealthService } from './romi.service.js';
-import { buildChannelsScreen, buildCohortsScreen, buildDashboardScreen, buildPassportScreen } from './screen-models.js';
+import {
+  buildAttributionScreen,
+  buildChannelsScreen,
+  buildCohortsScreen,
+  buildDashboardScreen,
+  buildPassportScreen,
+} from './screen-models.js';
 import { channelsQuerySchema } from '../../validators/metrics.schema.js';
 
 /**
@@ -104,6 +111,7 @@ export function createMetricsModule({ db, referenceRepository = null } = {}) {
     channels: buildChannelsScreen,
     passport: buildPassportScreen,
     cohorts: buildCohortsScreen,
+    attribution: buildAttributionScreen,
   };
   const loaders = {
     channels: createChannelsScreenLoader({ services, screenModels, referenceRepository }),
@@ -117,9 +125,11 @@ export function createMetricsModule({ db, referenceRepository = null } = {}) {
   };
   const dashboardController = createDashboardController({ services, screenModels, referenceRepository });
   const cohortsController = createCohortsController({ services, screenModels, referenceRepository });
+  const attributionController = createAttributionController({ services, screenModels, referenceRepository });
   const apiController = createMetricsApiController({
     dashboardController,
     cohortsController,
+    attributionController,
     channelsScreenLoader: loaders.channelsApi,
     channelPassportScreenLoader: loaders.channelPassport,
     rankingService,
@@ -136,7 +146,12 @@ export function createMetricsModule({ db, referenceRepository = null } = {}) {
       attribution: attributionRepository,
     },
     services,
-    controllers: { dashboard: dashboardController, cohorts: cohortsController, api: apiController },
+    controllers: {
+      dashboard: dashboardController,
+      cohorts: cohortsController,
+      attribution: attributionController,
+      api: apiController,
+    },
     screenModels,
     loaders,
   };

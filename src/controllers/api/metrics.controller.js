@@ -12,6 +12,7 @@ import { rankingQuerySchema } from '../../validators/metrics.schema.js';
  * @param {{
  *   dashboardController: ReturnType<typeof import('../dashboard.controller.js').createDashboardController>,
  *   cohortsController: ReturnType<typeof import('../cohorts.controller.js').createCohortsController>,
+ *   attributionController: ReturnType<typeof import('../attribution.controller.js').createAttributionController>,
  *   channelsScreenLoader: (req: import('express').Request) => Promise<{ screen: object }>,
  *   channelPassportScreenLoader: (req: import('express').Request) => Promise<{ screen: object }>,
  *   rankingService: ReturnType<typeof import('../../services/metrics/ranking.service.js').createRankingService>,
@@ -21,6 +22,7 @@ import { rankingQuerySchema } from '../../validators/metrics.schema.js';
 export function createMetricsApiController({
   dashboardController,
   cohortsController,
+  attributionController,
   channelsScreenLoader,
   channelPassportScreenLoader,
   rankingService,
@@ -60,6 +62,15 @@ export function createMetricsApiController({
      */
     async cohorts(req, res) {
       const { screen } = await cohortsController.load(req);
+      res.json(screen);
+    },
+
+    /**
+     * Same object as the attribution page's `data-props`.
+     * @type {import('express').RequestHandler}
+     */
+    async attribution(req, res) {
+      const { screen } = await attributionController.load(req);
       res.json(screen);
     },
 

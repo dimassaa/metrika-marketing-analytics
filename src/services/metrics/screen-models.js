@@ -1,6 +1,6 @@
 import { METRICS_CONFIG } from '../../config/metrics.js';
 import { formatDateRu } from '../../lib/dates.js';
-import { formatCentsToByn, formatInteger, formatPercent } from '../../lib/format.js';
+import { formatCentsToByn, formatInteger, formatPercent, formatRomi } from '../../lib/format.js';
 import { heatBucket } from '../../lib/heat-scale.js';
 import { CHANNEL_KIND_LABELS } from '../../lib/metrics-labels.js';
 import { buildQueryString } from '../../lib/query.js';
@@ -13,6 +13,7 @@ import {
   buildFunnelSteps,
   buildRomiChart,
   buildSpendRevenueChart,
+  channelsLabel,
   daysLabel,
   monthsLabel,
   weeksLabel,
@@ -881,6 +882,305 @@ export function buildCohortsScreen({ matrix, curve }) {
     channelLtv: (matrix.channelLtv ?? []).map(toChannelLtvRow),
     charts: { ltv: buildCohortLtvChart({ curve, horizonMonths }) },
     table: buildCohortsTable({ cohorts, horizonMonths }),
+  };
+}
+
+/**
+ * Russian names of the three attribution models. The keys and their order come from `METRICS_CONFIG`, so this map can
+ * only rename a configured model, never invent one.
+ */
+const ATTRIBUTION_MODEL_LABELS = Object.freeze({
+  last_touch: 'Последнее касание',
+  first_touch: 'Первое касание',
+  linear: 'Линейная',
+});
+
+/** Column headers of the chart's duplicate table, reused by the comparison table for the same three models. */
+const ATTRIBUTION_COLUMN_LABELS = Object.freeze({
+  last_touch: 'Последнее касание, BYN',
+  first_touch: 'Первое касание, BYN',
+  linear: 'Линейная, BYN',
+});
+
+/**
+ * @param {string} from `YYYY-MM-DD`.
+ * @param {string} to `YYYY-MM-DD`.
+ * @returns {number} Inclusive calendar length, independent of the machine timezone.
+ * @throws {TypeError} When a bound is not a date-only string.
+ */
+function inclusiveDays(from, to) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+    throw new TypeError('attribution period bounds must be YYYY-MM-DD strings');
+  }
+  const [fromYear, fromMonth, fromDay] = from.split('-').map(Number);
+  const [toYear, toMonth, toDay] = to.split('-').map(Number);
+  const ms = Date.UTC(toYear, toMonth - 1, toDay) - Date.UTC(fromYear, fromMonth - 1, fromDay);
+  return Math.round(ms / 86_400_000) + 1;
+}
+
+/**
+ * Converts a kopeck string into the number Recharts needs. A present amount above `Number.MAX_SAFE_INTEGER` would be
+ * silently rounded by the chart, so it fails loudly instead of drawing a slightly wrong bar.
+ *
+ * @param {string} cents Integer kopeck string from the M3 report.
+ * @param {string} label Field name for the error message.
+ * @returns {number}
+ * @throws {TypeError} When the value is not an exact integer kopeck string.
+ */
+function chartCents(cents, label) {
+  if (typeof cents !== 'string' || !/^-?\d+$/.test(cents)) {
+    throw new TypeError(`${label} must be an integer kopeck string, got ${JSON.stringify(cents)}`);
+  }
+  const value = Number(cents);
+  if (!Number.isSafeInteger(value)) {
+    throw new TypeError(`${label} is outside the safe integer range`);
+  }
+  return value;
+}
+
+/**
+ * Formats a signed kopeck delta. `formatCentsToByn` only accepts non-negative kopecks because stored money never goes
+ * below zero; a delta can. The typographic minus is the same glyph the percent formatter uses.
+ *
+ * @param {string} cents Integer kopeck string, possibly negative.
+ * @returns {string} `−20,00` or `15,00`.
+ */
+function formatDeltaCents(cents) {
+  const value = BigInt(cents);
+  const sign = value < 0n ? '\u2212' : '';
+  return `${sign}${formatCentsToByn(value < 0n ? -value : value)}`;
+}
+
+/**
+ * Grouped bars for the three attribution models over the channel axis.
+ *
+ * All three models stay visible regardless of the selected one: hiding two of them would let the screen look like a
+ * single-model report. The chart uses the comparison rows, which already carry all three columns and are the same
+ * numbers as the delta table, so the picture and the table cannot disagree.
+ *
+ * @param {{ comparison: object[], periodRange: string }} input
+ * @returns {object} Chart contract consumed by `ChartFrame` + `AttributionBars`.
+ */
+function buildAttributionChart({ comparison, periodRange }) {
+  const series = comparison.map((row) => ({
+    channelId: row.channelId,
+    channelCode: row.channelCode,
+    last_touch: chartCents(row.lastTouchCents, 'lastTouchCents'),
+    first_touch: chartCents(row.firstTouchCents, 'firstTouchCents'),
+    linear: chartCents(row.linearCents, 'linearCents'),
+  }));
+
+  // A zero comparison on every model is a measured "no attributed revenue": showing empty axes would suggest a broken
+  // chart, so the frame explains it instead.
+  const hasData = series.some(
+    (row) => row.last_touch !== 0 || row.first_touch !== 0 || row.linear !== 0,
+  );
+  const windowDays = METRICS_CONFIG.attribution.windowDays;
+  const detail = `${channelsLabel(series.length)} · ${periodRange}`;
+
+  return {
+    id: 'attribution-revenue',
+    title: 'Выручка по моделям атрибуции',
+    // The wording is fixed by the task: it states the period and the touch window, which the bars do not show.
+    caption: `Выручка по моделям атрибуции за период; окно касания — ${windowDays} дней · ${periodRange}`,
+    ariaLabel: `Выручка по моделям атрибуции по ${detail}`,
+    unit: 'BYN',
+    hasData,
+    series,
+    table: {
+      columns: [
+        { key: 'channel', label: 'Канал', numeric: false },
+        ...Object.entries(ATTRIBUTION_COLUMN_LABELS).map(([key, label]) => ({
+          key,
+          label,
+          numeric: true,
+        })),
+      ],
+      rows: comparison.map((row) => ({
+        key: row.channelId,
+        cells: {
+          channel: row.channelCode,
+          last_touch: formatCentsToByn(row.lastTouchCents),
+          first_touch: formatCentsToByn(row.firstTouchCents),
+          linear: formatCentsToByn(row.linearCents),
+        },
+      })),
+    },
+  };
+}
+
+/**
+ * Channel × model table with the linear-vs-last-touch delta. The delta column header names both base models, so the
+ * sign cannot be read as "first touch vs something" or as an average.
+ *
+ * @param {{ comparison: object[] }} input
+ * @returns {object}
+ */
+function buildAttributionTable({ comparison }) {
+  const deltaModel = comparison[0]?.deltaModel ?? 'linear';
+
+  return {
+    caption: 'Сравнение моделей атрибуции по каналам; дельта — линейная модель минус последнее касание',
+    deltaModel,
+    deltaBaseLabel: 'линейная − последнее касание',
+    columns: [
+      { key: 'channel', label: 'Канал', numeric: false },
+      { key: 'lastTouch', label: ATTRIBUTION_COLUMN_LABELS.last_touch, numeric: true },
+      { key: 'firstTouch', label: ATTRIBUTION_COLUMN_LABELS.first_touch, numeric: true },
+      { key: 'linear', label: ATTRIBUTION_COLUMN_LABELS.linear, numeric: true },
+      { key: 'delta', label: 'Дельта: линейная − последнее касание, BYN', numeric: true },
+      { key: 'deltaPct', label: 'Дельта, %', numeric: true },
+    ],
+    rows: comparison.map((row) => ({
+      key: row.channelId,
+      channelId: row.channelId,
+      channelCode: row.channelCode,
+      lastTouchCents: row.lastTouchCents,
+      firstTouchCents: row.firstTouchCents,
+      linearCents: row.linearCents,
+      deltaCents: row.deltaLinearVsLastCents,
+      deltaPct: row.deltaLinearVsLastPct,
+      // The full service names are kept next to the short cell keys: an API consumer reading the table must not have
+      // to guess which two models the delta compares.
+      deltaLinearVsLastCents: row.deltaLinearVsLastCents,
+      deltaLinearVsLastPct: row.deltaLinearVsLastPct,
+      cells: {
+        channel: row.channelCode,
+        lastTouch: formatCentsToByn(row.lastTouchCents),
+        firstTouch: formatCentsToByn(row.firstTouchCents),
+        linear: formatCentsToByn(row.linearCents),
+        delta: formatDeltaCents(row.deltaLinearVsLastCents),
+        deltaPct: formatPercent(row.deltaLinearVsLastPct, { signed: true }),
+      },
+    })),
+  };
+}
+
+/**
+ * Model switch for the island: three GET links, the active one carrying `aria-current="page"`.
+ *
+ * The links replay the validated query, so a `days` period (or an explicit range) survives the model change. The
+ * default model is omitted from the URL to keep an untouched page short, matching the horizon and sort controls.
+ *
+ * @param {{ query?: Record<string, unknown>, model: string }} input
+ * @returns {{
+ *   current: string,
+ *   options: Array<{ value: string, label: string, href: string, selected: boolean, ariaCurrent: 'page' | null }>,
+ * }}
+ */
+function buildAttributionModelControl({ query = {}, model }) {
+  const defaultModel = METRICS_CONFIG.attribution.defaultModel;
+
+  return {
+    current: model,
+    options: METRICS_CONFIG.attribution.models.map((value) => {
+      const queryString = buildQueryString(query, { model: value === defaultModel ? null : value });
+      const selected = value === model;
+      return {
+        value,
+        label: ATTRIBUTION_MODEL_LABELS[value],
+        href: queryString === '' ? '/app/attribution' : `/app/attribution?${queryString}`,
+        selected,
+        ariaCurrent: selected ? 'page' : null,
+      };
+    }),
+  };
+}
+
+/**
+ * Builds the attribution screen model shared by `data-props` and `/api/v1/attribution`.
+ *
+ * The selected summary is read from `report.models[model]`, never recomputed by summing comparison rows: those are
+ * different aggregates, and a summary that disagreed with its own model would be worse than no summary. All three
+ * models are always present in the response (the service allocates them for the comparison anyway), so the selector
+ * can show their totals without a second report.
+ *
+ * @param {{
+ *   report: {
+ *     period: { from: string, to: string },
+ *     models: Record<string, {
+ *       totalRevenueCents: string, totalAttributedCents: string,
+ *       totalSpendCents: string, romiPct: number | null,
+ *     }>,
+ *     comparison: object[],
+ *   },
+ *   model: 'last_touch' | 'first_touch' | 'linear',
+ *   period?: { from: string, to: string, days: number } | null,
+ *   query?: Record<string, unknown>,
+ * }} input `period` and `query` are optional extras for the label and the model links; without them the period is
+ *   derived from the report bounds and the links keep only the non-default model.
+ * @returns {{
+ *   page: 'attribution',
+ *   period: { from: string, to: string, days: number, label: string },
+ *   model: string,
+ *   models: object[],
+ *   summary: object,
+ *   comparison: object[],
+ *   charts: { revenue: object },
+ *   table: object,
+ *   selector: object,
+ *   unattributedNote: string | null,
+ * }}
+ * @throws {TypeError} When the selected model is missing from the report.
+ */
+export function buildAttributionScreen({ report, model, period = null, query = {} }) {
+  const selectedView = report?.models?.[model];
+  if (!selectedView) {
+    throw new TypeError(`attribution report is missing the model ${String(model)}`);
+  }
+
+  const from = period?.from ?? report.period.from;
+  const to = period?.to ?? report.period.to;
+  const days = period?.days ?? inclusiveDays(from, to);
+  const periodLabel = daysLabel(days);
+  const periodRange = `${formatDateRu(from)} — ${formatDateRu(to)}`;
+
+  const models = METRICS_CONFIG.attribution.models.map((key) => {
+    const view = report.models[key];
+    if (!view) throw new TypeError(`attribution report is missing the model ${key}`);
+    return {
+      key,
+      label: ATTRIBUTION_MODEL_LABELS[key],
+      totalRevenueCents: view.totalRevenueCents,
+      totalAttributedCents: view.totalAttributedCents,
+      totalAttributedLabel: formatCentsToByn(view.totalAttributedCents),
+      totalSpendCents: view.totalSpendCents,
+      totalSpendLabel: formatCentsToByn(view.totalSpendCents),
+      romiPct: view.romiPct,
+      romiLabel: formatRomi(view.romiPct),
+      selected: key === model,
+    };
+  });
+  const selectedModel = models.find((entry) => entry.selected);
+
+  const difference = BigInt(selectedView.totalRevenueCents) - BigInt(selectedView.totalAttributedCents);
+  const unattributedNote = difference === 0n
+    ? null
+    : `Не вся выручка атрибутирована: ${formatCentsToByn(difference)} BYN`;
+
+  return {
+    page: 'attribution',
+    period: { from, to, days, label: periodLabel },
+    model,
+    models,
+    // A flat copy of the selected model: the island's summary block never has to search `models` or re-add rows.
+    summary: {
+      key: model,
+      label: selectedModel.label,
+      totalRevenueCents: selectedView.totalRevenueCents,
+      totalRevenueLabel: formatCentsToByn(selectedView.totalRevenueCents),
+      totalAttributedCents: selectedView.totalAttributedCents,
+      totalAttributedLabel: selectedModel.totalAttributedLabel,
+      totalSpendCents: selectedView.totalSpendCents,
+      totalSpendLabel: selectedModel.totalSpendLabel,
+      romiPct: selectedView.romiPct,
+      romiLabel: selectedModel.romiLabel,
+    },
+    comparison: report.comparison,
+    charts: { revenue: buildAttributionChart({ comparison: report.comparison, periodRange }) },
+    table: buildAttributionTable({ comparison: report.comparison }),
+    selector: buildAttributionModelControl({ query, model }),
+    unattributedNote,
   };
 }
 

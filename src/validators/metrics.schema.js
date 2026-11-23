@@ -101,6 +101,22 @@ export function parseChannelIds(value) {
 export const periodQuerySchema = z.object(periodShape).refine(hasNoPeriodConflict, PERIOD_CONFLICT);
 
 /**
+ * Attribution query: a period plus the selected model. The model is a real enum, so `?model=bogus` is a 400 rather
+ * than a silent fallback: a bookmarked comparison must not quietly report a different model than the one in its URL.
+ */
+export const attributionQuerySchema = z
+  .object({
+    ...periodShape,
+    model: z
+      .enum(
+        [...METRICS_CONFIG.attribution.models],
+        'Модель атрибуции: last_touch, first_touch или linear',
+      )
+      .default(METRICS_CONFIG.attribution.defaultModel),
+  })
+  .refine(hasNoPeriodConflict, PERIOD_CONFLICT);
+
+/**
  * Cohort horizon. The API and the page share the same allowed set, so a bookmarked `horizon=7` cannot silently
  * render a matrix whose completeness rule nobody designed (the spec has 3/6/12-month LTV horizons only).
  */

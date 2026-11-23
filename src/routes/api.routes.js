@@ -13,6 +13,7 @@ export const METRICS_API_PERMISSIONS = Object.freeze({
   '/channels': 'channels:view',
   '/channels/:id': 'channels:view',
   '/cohorts': 'cohorts:view',
+  '/attribution': 'attribution:view',
   '/ranking': 'channels:view',
 });
 
@@ -35,7 +36,7 @@ export function createApiRouter({ importController, mediaController, metrics }) 
   const importLimiter = createImportRateLimiter();
 
   // Metrics GETs depend on the data anchor, which moves when an import commits; a cached JSON body would outlive it.
-  router.use(['/dashboard', '/channels', '/cohorts', '/ranking'], (req, res, next) => {
+  router.use(['/dashboard', '/channels', '/cohorts', '/attribution', '/ranking'], (req, res, next) => {
     res.set('Cache-Control', 'no-store');
     next();
   });
@@ -62,6 +63,12 @@ export function createApiRouter({ importController, mediaController, metrics }) 
     requireAuth,
     requirePermission(METRICS_API_PERMISSIONS['/cohorts']),
     metrics.controllers.api.cohorts,
+  );
+  router.get(
+    '/attribution',
+    requireAuth,
+    requirePermission(METRICS_API_PERMISSIONS['/attribution']),
+    metrics.controllers.api.attribution,
   );
   router.get(
     '/ranking',

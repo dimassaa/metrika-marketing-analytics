@@ -13,7 +13,6 @@ import { createExportController } from '../controllers/export.controller.js';
  * shadow them.
  */
 const PLACEHOLDER_SECTIONS = [
-  { slug: 'attribution', title: 'Атрибуция' },
   { slug: 'scenarios', title: 'Сценарии' },
   { slug: 'alerts', title: 'Алерты' },
 ];
@@ -74,6 +73,14 @@ export function createAppRouter({
 
   // Cohorts are a read-only analytics view: every role with `cohorts:view` can open the matrix.
   router.get('/cohorts', requireAuth, requirePermission('cohorts:view'), metrics.controllers.cohorts.page);
+
+  // Attribution is read-only too: a viewer can compare the three models, but no role can edit an allocation.
+  router.get(
+    '/attribution',
+    requireAuth,
+    requirePermission('attribution:view'),
+    metrics.controllers.attribution.page,
+  );
 
   // Channels carry their own permissions per method: viewing is open to every role, mutations only to analysts.
   router.get('/channels', requireAuth, requirePermission('channels:view'), channelsController.list);

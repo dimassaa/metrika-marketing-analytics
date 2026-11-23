@@ -349,6 +349,52 @@ describe('GET /api/v1/ranking', () => {
   });
 });
 
+describe('GET /api/v1/attribution', () => {
+  it('requires a session and the attribution:view permission', async () => {
+    expect(METRICS_API_PERMISSIONS['/attribution']).toBe('attribution:view');
+
+    const anonymous = await request(app).get('/api/v1/attribution');
+    expect(anonymous.status).toBe(401);
+    expect(anonymous.body.error.code).toBe('UNAUTHORIZED');
+
+    const agent = await signedIn();
+    const res = await agent.get('/api/v1/attribution');
+
+    expect(res.status).toBe(200);
+    expect(res.type).toMatch(/application\/json/);
+    expect(res.headers['cache-control']).toBe('no-store');
+    expect(res.body.page).toBe('attribution');
+    expect(res.body.model).toBe('last_touch');
+    expect(res.body.models.map((entry) => entry.key)).toEqual(['last_touch', 'first_touch', 'linear']);
+    expect(JSON.stringify(res.body)).not.toMatch(/NaN|Infinity/);
+  });
+
+  it('switches the selected model and honours days without dropping the comparison', async () => {
+    const agent = await signedIn();
+
+    const last = await agent.get('/api/v1/attribution?days=90');
+    const linear = await agent.get('/api/v1/attribution?days=90&model=linear');
+
+    expect(last.status).toBe(200);
+    expect(linear.status).toBe(200);
+    expect(linear.body.model).toBe('linear');
+    expect(linear.body.models.find((entry) => entry.selected).key).toBe('linear');
+    expect(linear.body.comparison).toEqual(last.body.comparison);
+  });
+
+  it('rejects an unknown model with a Russian 400', async () => {
+    const agent = await signedIn();
+
+    for (const query of ['model=bogus', 'model=', 'model=time_decay']) {
+      const res = await agent.get(`/api/v1/attribution?${query}`);
+
+      expect(res.status, query).toBe(400);
+      expect(res.body.error.code, query).toBe('VALIDATION_ERROR');
+      expect(res.body.error.message, query).toMatch(/[А-Яа-яЁё]/);
+    }
+  });
+});
+
 describe('channel API query budgets', () => {
   it('keeps the channels list within 14 reads and the ranking within 12', async () => {
     const counter = wrapDb(pool);
