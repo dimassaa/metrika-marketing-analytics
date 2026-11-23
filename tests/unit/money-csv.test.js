@@ -21,6 +21,19 @@ describe('parseBynToCents', () => {
     expect(() => parseBynToCents('')).toThrow(ValidationError);
   });
 
+  it('names the currency as BYN in every validation message', () => {
+    for (const input of [null, '', 'abc']) {
+      try {
+        parseBynToCents(input);
+        throw new Error('expected a ValidationError');
+      } catch (error) {
+        expect(error).toBeInstanceOf(ValidationError);
+        expect(error.message).toContain('BYN');
+        expect(error.message).not.toMatch(/рубл/i);
+      }
+    }
+  });
+
   it('accepts the largest BIGINT kopeck value and rejects one kopeck more', () => {
     expect(parseBynToCents('92233720368547758,07')).toBe(9223372036854775807n);
     expect(() => parseBynToCents('92233720368547758,08')).toThrow('Сумма слишком велика');

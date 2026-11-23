@@ -20,8 +20,12 @@ EJS-каркас + один island`. `screen-models` — единственна�
 EJS-каркасе; React отвечает только за данные и графики.
 
 **Стек:** Node 24 LTS, ESM, Express 5, EJS 3, PostgreSQL 18, Zod 4, Vitest 3 + Supertest, agent-browser.
-Добавляются: `react@19`, `react-dom@19`, `recharts@3` (dependencies), `vite@7` (devDependency). Плагин React не
-нужен: JSX собирается esbuild'ом в автоматическом рантайме, HMR/dev-сервер по условию не используются.
+Добавляются: `react@19`, `react-dom@19`, `recharts@3` (dependencies), `vite@7` и `@vitejs/plugin-react@5`
+(devDependencies). Плагин нужен не для Fast Refresh и не для dev-сервера (их нет): он фиксирует JSX-рантайм.
+Vite читает `.env` Express-процесса при разборе конфига, и при `NODE_ENV=development` плагин иначе эмитит
+`jsxDEV`, которого нет в production-сборке (`jsxDEV is not a function`). Поэтому `vite.config.js` ставит
+`envDir: false`, выводит `NODE_ENV` из режима и явно передаёт его в `define`; плагин остаётся единственным
+местом, где выбран development/production-вариант React.
 `engines.node` поднимается до `>=22.12`: это нижняя граница Vite 7; `package-lock.json` коммитится вместе с
 `package.json`.
 

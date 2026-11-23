@@ -51,7 +51,7 @@ export function RetentionGrid({ retention }) {
                 </th>
               ))}
               <th scope="col" className="u-right">
-                LTV12
+                LTV{retention.horizonMonths}, BYN
               </th>
             </tr>
           </thead>

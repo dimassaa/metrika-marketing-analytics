@@ -168,7 +168,6 @@ export function createCampaignsController({ campaignsService, channelsService, r
       formValues: detail.form,
       formError: null,
       channelCampaigns,
-      campaignDefaults: { startedOn: dataAnchor },
       campaignCreateError: error,
       campaignCreateValues: values,
     });

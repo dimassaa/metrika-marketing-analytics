@@ -9,7 +9,6 @@ import { ChannelsIsland } from '../../client/entries/channels.jsx';
 function model() {
   return {
     page: 'channels',
-    period: { from: '2026-10-23', to: '2026-11-21', days: 30, label: '30 дней' },
     filters: { status: 'all', kind: 'all', active: false, label: 'Все каналы', resetHref: '/app/channels' },
     weights: { cac: 0.3, romi: 0.3, ltvCac: 0.25, newCustomers: 0.15 },
     weightsBasisPoints: { cac: 300, romi: 300, ltvCac: 250, newCustomers: 150 },
@@ -85,8 +84,33 @@ describe('channels island structure', () => {
 
     const html = renderToStaticMarkup(createElement(ChannelsIsland, props));
 
-    expect(html).toContain('Клиенты 0,1%');
+    expect(html).toContain('Новые клиенты 0,1%');
     expect(html).not.toContain('Клиенты 0%');
+  });
+
+  it('hides the excluded card when the blended summary is the only entry on an unfiltered page', () => {
+    const html = renderToStaticMarkup(createElement(ChannelsIsland, model()));
+
+    expect(html).not.toContain('Кто не попал в рейтинг');
+  });
+
+  it('keeps the excluded card for a real exclusion', () => {
+    const props = model();
+    props.excluded = [
+      { channelId: '3', code: 'offline', name: 'Офлайн', reason: 'no_data', reasonLabel: 'Мало данных' },
+      { code: 'blended', name: 'Все каналы', reason: 'blended', reasonLabel: 'Сводная строка' },
+    ];
+
+    const html = renderToStaticMarkup(createElement(ChannelsIsland, props));
+
+    expect(html).toContain('Кто не попал в рейтинг');
+    expect(html).toContain('Мало данных');
+  });
+
+  it('captions the ranking table with its period and filter', () => {
+    const html = renderToStaticMarkup(createElement(ChannelsIsland, model()));
+
+    expect(html).toContain('<caption class="u-visually-hidden">Рейтинг каналов за 30 дней; Все каналы; 1 канал</caption>');
   });
 
   it('shows a dash instead of a broken line for a one-point sparkline', () => {

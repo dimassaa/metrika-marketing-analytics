@@ -188,7 +188,7 @@ describe('channel passport screen', () => {
     const props = extractDataProps(res.text, 'channel');
 
     expect(res.status).toBe(200);
-    expect(props.channel).toMatchObject({ isActive: false, activityLabel: 'В архиве' });
+    expect(props.channel).toMatchObject({ isActive: false });
     // The archive badge is in the server frame as well, so it is visible before the island mounts.
     expect(res.text).toContain('В архиве');
   });

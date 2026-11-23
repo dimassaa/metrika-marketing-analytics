@@ -118,14 +118,14 @@ export function formatPercent(value, { signed = false } = {}) {
 }
 
 /**
- * Renders a signed percentage with one decimal, preserving the direction of a tiny negative value.
+ * Renders a signed percentage with one decimal, preserving the direction of a tiny value.
  *
  * Ordinary `formatPercent` trims to at most two decimals, but a delta rounded to one decimal can collapse `−0,04%`
- * into `0,0%` and hide that the channel lost share. This formatter keeps the sign: a negative that rounds to zero is
- * `−<0,1%`, exactly the rule ROMI uses; an exact zero stays `0,0%`.
+ * into `0,0%` and hide that the channel lost share. This formatter keeps the sign: a value that rounds to zero is
+ * `−<0,1%` or `+<0,1%`, exactly the rule ROMI uses; an exact zero stays `0,0%`.
  *
  * @param {string | number | null | undefined} value Percent value.
- * @returns {string} `+12,4%`, `−<0,1%`, `0,0%`, or `—` for NULL.
+ * @returns {string} `+12,4%`, `+<0,1%`, `−<0,1%`, `0,0%`, or `—` for NULL.
  * @throws {TypeError} When the value is not finite.
  */
 export function formatSignedPercent(value) {
@@ -139,7 +139,7 @@ export function formatSignedPercent(value) {
   const rounded = roundNumber(numeric, 1);
   if (rounded === 0) {
     if (numeric === 0) return '0,0%';
-    return numeric < 0 ? `${MINUS}<0,1%` : '+0,0%';
+    return numeric < 0 ? `${MINUS}<0,1%` : '+<0,1%';
   }
 
   const sign = rounded < 0 ? MINUS : '+';

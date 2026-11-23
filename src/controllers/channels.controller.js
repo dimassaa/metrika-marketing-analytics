@@ -248,7 +248,6 @@ export function createChannelsController({ channelsService, campaignsService, me
       formValues: values ?? detail.form,
       formError: error,
       channelCampaigns,
-      campaignDefaults: { startedOn: dataAnchor },
       campaignCreateError: null,
       campaignCreateValues: { code: '', name: '', startedOn: dataAnchor, budgetByn: '' },
     });

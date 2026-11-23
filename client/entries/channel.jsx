@@ -22,7 +22,7 @@ import { formatCentsToByn } from '../../src/lib/format.js';
  *
  * @param {{
  *   page: 'channel',
- *   channel: { id: string, name: string, kindLabel: string, isActive: boolean, activityLabel: string },
+ *   channel: { id: string, name: string, kindLabel: string, isActive: boolean },
  *   period: { from: string, to: string, days: number, label: string },
  *   health: object,
  *   charts: { cac: object, romi: object, spendRevenue: object },
@@ -136,6 +136,9 @@ export function ChannelIsland({
       >
         <div className="table-wrap">
           <table className="table">
+            <caption className="u-visually-hidden">
+              Цели канала: план и факт за {period.label}
+            </caption>
             <thead>
               <tr>
                 <th scope="col">Цель</th>
@@ -273,6 +276,9 @@ export function ChannelIsland({
         ) : (
           <div className="table-wrap">
             <table className="table">
+              <caption className="u-visually-hidden">
+                Кампании канала: расход, новые клиенты и CAC за {period.label}
+              </caption>
               <thead>
                 <tr>
                   <th scope="col">Кампания</th>

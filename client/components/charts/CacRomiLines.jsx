@@ -45,7 +45,7 @@ export function CacRomiLines({ chart }) {
           tickLine={false}
           axisLine={false}
           width={64}
-          tickFormatter={(value) => (isMoney ? formatCompactCents(Math.round(value)) : `${value}`)}
+          tickFormatter={(value) => (isMoney ? formatCompactCents(Math.round(value)) : `${value}%`)}
         />
         <Tooltip
           content={<ChartTooltip unit={chart.unit} names={{ value: chart.title }} />}

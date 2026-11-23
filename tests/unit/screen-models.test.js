@@ -134,7 +134,12 @@ describe('dashboard screen model', () => {
     expect(screen.charts.cac.unit).toBe('BYN');
     expect(screen.charts.romi.unit).toBe('%');
     expect(screen.charts.cac.caption).toContain('12 недель');
+    expect(screen.charts.cac.caption).toContain('24.08–15.11.2026');
     expect(screen.charts.cac.caption).toContain('последняя 100,00 BYN');
+    expect(screen.charts.cac.caption).toContain('к предыдущей 0,0%');
+    expect(screen.charts.spendRevenue.caption).toContain('24.08–15.11.2026');
+    expect(screen.charts.spendRevenue.caption).toContain('выручка больше расхода');
+    expect(screen.charts.cacLtv.caption).toContain('23.10–21.11.2026');
     expect(screen.charts.cac.series.at(-1)).toMatchObject({ value: 10000, weekLabel: '03.11.2026' });
     expect(screen.charts.cac.table.columns.map((column) => column.key)).toEqual(['week', 'value']);
     expect(screen.charts.cac.table.rows).toHaveLength(12);
@@ -886,7 +891,7 @@ describe('passport screen model', () => {
     });
     const screen = buildPassportScreen({ passport: zero, matrix: matrixWith() });
 
-    expect(screen.channel).toMatchObject({ isActive: false, activityLabel: 'В архиве' });
+    expect(screen.channel).toMatchObject({ isActive: false });
     expect(screen.health.statusLabel).toBe('В норме');
     expect(screen.funnel.hasData).toBe(false);
     expect(screen.funnel.meterMax).toBe(1);
@@ -1053,6 +1058,7 @@ describe('cohorts screen model', () => {
       'm2',
       'ltv',
     ]);
+    expect(screen.table.columns.at(-1).label).toBe('LTV3, BYN');
     expect(screen.table.rows).toHaveLength(2);
     expect(screen.table.rows[1]).toMatchObject({ isPartial: true, cohortLabel: 'ноя 2026' });
     expect(screen.table.caption).toContain('Удержание клиентов по когортам');
@@ -1340,6 +1346,7 @@ describe('attribution screen model', () => {
 
     expect(chart.hasData).toBe(true);
     expect(chart.unit).toBe('BYN');
+    expect(chart.selectedModel).toBe('last_touch');
     expect(chart.series).toHaveLength(2);
     expect(chart.series[0]).toMatchObject({
       channelId: '2',
@@ -1350,12 +1357,20 @@ describe('attribution screen model', () => {
       linear: 4000,
     });
     expect(chart.caption).toContain('окно касания — 30 дней');
+    expect(chart.caption).toContain('23.10–21.11.2026');
+    expect(chart.caption).toContain('лидер Instagram');
+    expect(chart.caption).toContain('модели «Последнее касание»');
     expect(chart.table.rows[0].cells).toMatchObject({
       channel: 'Email',
       last_touch: '25,00',
       first_touch: '35,00',
       linear: '40,00',
     });
+
+    const linear = screenWith({ model: 'linear' }).charts.revenue;
+    expect(linear.selectedModel).toBe('linear');
+    expect(linear.caption).toContain('лидер Instagram');
+    expect(linear.caption).toContain('модели «Линейная»');
   });
 
   it('keeps the sum of every model column equal to that model total', () => {

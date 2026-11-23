@@ -35,7 +35,9 @@ describe('chart theme', () => {
   });
 
   it('pins the primary series colour and the axis font size to the design tokens', () => {
+    // The chart line uses Cyan Edge, not the CTA fill: a data series needs the stronger contrast on white.
     expect(chartTheme.seriesPrimary).toBe('#3398e1');
+    expect(rootBlock()).toMatch(/--color-cyan-edge:\s*#3398e1\b/i);
     expect(chartTheme.fontSize).toBe(12);
     expect(chartTheme.strokeWidth).toBe(2);
   });

@@ -1,6 +1,8 @@
-import { formatCentsToByn, formatInteger, formatPercent, formatRomi } from '../../lib/format.js';
-import { cohortsLabel } from '../../lib/metrics-labels.js';
-import { centsToApi, roundNumber } from '../../lib/metrics-math.js';
+import { METRICS_CONFIG } from '../../config/metrics.js';
+import { addDays, formatDateRu } from '../../lib/dates.js';
+import { formatCentsToByn, formatInteger, formatPercent, formatRomi, formatSignedPercent } from '../../lib/format.js';
+import { ATTRIBUTION_MODEL_LABELS, cohortsLabel } from '../../lib/metrics-labels.js';
+import { roundNumber, percentChange, centsToApi } from '../../lib/metrics-math.js';
 import {
   hasPlottableData,
   toCacPoints,
@@ -103,12 +105,85 @@ function captionOf(title, detail) {
 }
 
 /**
+ * Compact range for a chart caption: `01.09–22.11.2026` inside one year, full dates across years.
+ *
+ * A caption that names only the metric leaves the reader guessing which window the shape describes, so every chart
+ * with a known boundary uses this helper. A missing bound is not invented: the range part is simply empty.
+ *
+ * @param {string} from `YYYY-MM-DD`.
+ * @param {string} to `YYYY-MM-DD`.
+ * @returns {string} Ready display range or an empty string.
+ */
+export function periodRangeLabel(from, to) {
+  if (typeof from !== 'string' || typeof to !== 'string') return '';
+  const fromLabel = formatDateRu(from);
+  const toLabel = formatDateRu(to);
+  return from.slice(0, 4) === to.slice(0, 4)
+    ? `${fromLabel.slice(0, 5)}–${toLabel}`
+    : `${fromLabel}—${toLabel}`;
+}
+
+/**
+ * @param {string} range Optional period range.
+ * @returns {string} Range followed by a separator, or nothing when no range is known.
+ */
+function rangePrefix(range) {
+  return range === '' || range === null || range === undefined ? '' : `${range} · `;
+}
+
+/**
+ * Actual window of a weekly chart: first bucket start to the Sunday of the last bucket.
+ *
+ * The KPI window (30 days) and the 12-week line are deliberately different windows. A caption that reused the KPI
+ * range would claim the line describes 30 days while its first point is three months old, so the chart computes its
+ * own range from the buckets it draws and falls back to the supplied period only for an empty series.
+ *
+ * @param {Array<{ weekStart: string }>} weeklySeries
+ * @param {string} fallback Range of the requested period.
+ * @returns {string}
+ */
+function weeklyRange(weeklySeries, fallback) {
+  const first = weeklySeries[0]?.weekStart;
+  const last = weeklySeries.at(-1)?.weekStart;
+  if (typeof first !== 'string' || typeof last !== 'string') return fallback;
+  return periodRangeLabel(first, addDays(last, 6));
+}
+
+/**
+ * Signed percent change against the previous point, or null when either point is missing or the baseline is zero.
+ *
+ * @param {number | null} current
+ * @param {number | null} previous
+ * @returns {string | null}
+ */
+function changeAgainstPrevious(current, previous) {
+  if (current === null || previous === null) return null;
+  const change = percentChange(current, previous);
+  return change === null ? null : formatSignedPercent(change);
+}
+
+/**
+ * Change in percentage points, keeping a tiny direction (`+<0,1 п.п.`) visible.
+ *
+ * @param {number | null} current
+ * @param {number | null} previous
+ * @returns {string | null}
+ */
+function pointsAgainstPrevious(current, previous) {
+  if (current === null || previous === null) return null;
+  return formatSignedPercent(current - previous).replace('%', ' п.п.');
+}
+
+/**
  * CAC line chart. Values stay in kopecks so the tooltip can use `formatCentsToByn` without a second rounding.
  *
- * @param {{ weeklySeries: object[], channelIds?: string[] | null }} input
+ * The caption names the window, the last measured value and its change against the previous week. A missing previous
+ * value is omitted rather than shown as zero: no baseline is not a 0 % change.
+ *
+ * @param {{ weeklySeries: object[], channelIds?: string[] | null, periodRange?: string }} input
  * @returns {object} Chart contract consumed by `ChartFrame` + `CacRomiLines`.
  */
-export function buildCacChart({ weeklySeries, channelIds = null }) {
+export function buildCacChart({ weeklySeries, channelIds = null, periodRange = '' }) {
   const values = toCacPoints(weeklySeries);
   const hasData = hasPlottableData(values);
   const weeks = weeksLabel(weeklySeries.length);
@@ -117,7 +192,9 @@ export function buildCacChart({ weeklySeries, channelIds = null }) {
     last === undefined
       ? '—'
       : `${formatCentsToByn(last.cacCents)}${last.cacCents === null ? '' : ' BYN'}`;
-  const detail = `${weeks} · последняя ${lastLabel}${filterSuffix(channelIds)}`;
+  const change = changeAgainstPrevious(values.at(-1) ?? null, values.length > 1 ? values.at(-2) : null);
+  const conclusion = `последняя ${lastLabel}${change === null ? '' : `, к предыдущей ${change}`}`;
+  const detail = `${rangePrefix(weeklyRange(weeklySeries, periodRange))}${weeks} · ${conclusion}${filterSuffix(channelIds)}`;
 
   return {
     id: 'cac',
@@ -148,16 +225,18 @@ export function buildCacChart({ weeklySeries, channelIds = null }) {
  * ROMI line chart in percent. ROMI is never plotted on the CAC axis: the units differ by two orders of magnitude
  * and a second Y axis is forbidden by the design rules.
  *
- * @param {{ weeklySeries: object[], channelIds?: string[] | null }} input
+ * @param {{ weeklySeries: object[], channelIds?: string[] | null, periodRange?: string }} input
  * @returns {object}
  */
-export function buildRomiChart({ weeklySeries, channelIds = null }) {
+export function buildRomiChart({ weeklySeries, channelIds = null, periodRange = '' }) {
   const values = toRomiPoints(weeklySeries);
   const hasData = hasPlottableData(values);
   const weeks = weeksLabel(weeklySeries.length);
-  const last = weeklySeries.at(-1);
-  const lastLabel = last === undefined || last.romiPct === null ? '—' : formatRomi(last.romiPct);
-  const detail = `${weeks} · последняя ${lastLabel}${filterSuffix(channelIds)}`;
+  const lastValue = values.at(-1) ?? null;
+  const lastLabel = lastValue === null ? '—' : formatRomi(lastValue);
+  const change = pointsAgainstPrevious(lastValue, values.length > 1 ? values.at(-2) : null);
+  const conclusion = `последняя ${lastLabel}${change === null ? '' : `, к предыдущей ${change}`}`;
+  const detail = `${rangePrefix(weeklyRange(weeklySeries, periodRange))}${weeks} · ${conclusion}${filterSuffix(channelIds)}`;
 
   return {
     id: 'romi',
@@ -188,10 +267,12 @@ export function buildRomiChart({ weeklySeries, channelIds = null }) {
  * Grouped spend/revenue bars. Revenue is attributed revenue of the selected model, never raw order revenue: the
  * bars and the ROMI line above them must use the same numerator.
  *
- * @param {{ weeklySeries: object[], channelIds?: string[] | null }} input
+ * The caption states the period totals and which side is larger; the per-week values stay in the tooltip and table.
+ *
+ * @param {{ weeklySeries: object[], channelIds?: string[] | null, periodRange?: string }} input
  * @returns {object}
  */
-export function buildSpendRevenueChart({ weeklySeries, channelIds = null }) {
+export function buildSpendRevenueChart({ weeklySeries, channelIds = null, periodRange = '' }) {
   const points = toSpendRevenuePoints(weeklySeries);
   // Product rule: a flat zero line means "nothing was measured", not "the period spent zero". When every week has
   // zero spend and zero attributed revenue the frame shows its empty state; the zero values stay in the duplicate
@@ -201,9 +282,15 @@ export function buildSpendRevenueChart({ weeklySeries, channelIds = null }) {
     (bucket) => String(bucket.spendCents) !== '0' || String(bucket.attributedCents) !== '0',
   );
   const weeks = weeksLabel(weeklySeries.length);
-  const last = weeklySeries.at(-1);
-  const lastLabel = last === undefined ? '—' : last.weekLabel;
-  const detail = `${weeks} · последняя ${lastLabel}${filterSuffix(channelIds)}`;
+  const totalSpend = weeklySeries.reduce((sum, bucket) => sum + BigInt(bucket.spendCents), 0n);
+  const totalRevenue = weeklySeries.reduce((sum, bucket) => sum + BigInt(bucket.attributedCents), 0n);
+  const conclusion =
+    totalSpend === totalRevenue
+      ? 'расход и выручка равны'
+      : totalRevenue > totalSpend
+        ? `выручка больше расхода на ${formatCentsToByn(totalRevenue - totalSpend)} BYN`
+        : `расход больше выручки на ${formatCentsToByn(totalSpend - totalRevenue)} BYN`;
+  const detail = `${rangePrefix(weeklyRange(weeklySeries, periodRange))}${weeks} · ${conclusion}${filterSuffix(channelIds)}`;
 
   return {
     id: 'spend-revenue',
@@ -244,10 +331,11 @@ export function buildSpendRevenueChart({ weeklySeries, channelIds = null }) {
  * the bars. With no filter the largest channel is highlighted; with a filter every shown channel is selected, so
  * highlighting is uniform.
  *
- * @param {{ channels: object[], channelIds?: string[] | null }} input `channels` are JSON-safe health rows.
+ * @param {{ channels: object[], channelIds?: string[] | null, periodRange?: string }} input `channels` are JSON-safe
+ *   health rows.
  * @returns {object}
  */
-export function buildChannelSpendChart({ channels, channelIds = null }) {
+export function buildChannelSpendChart({ channels, channelIds = null, periodRange = '' }) {
   const selected = channelIds && channelIds.length > 0 ? new Set(channelIds) : null;
   const rows = toChannelSpendPoints(channels).sort(
     (left, right) => right.spend - left.spend || left.name.localeCompare(right.name, 'ru'),
@@ -264,7 +352,7 @@ export function buildChannelSpendChart({ channels, channelIds = null }) {
     conclusion = `лидер ${top.name}, ${formatCentsToByn(top.spend)} BYN (${share}% расхода)`;
   }
 
-  const detail = `${count} · ${conclusion}`;
+  const detail = `${rangePrefix(periodRange)}${count} · ${conclusion}`;
 
   return {
     id: 'channel-spend',
@@ -299,10 +387,10 @@ export function buildChannelSpendChart({ channels, channelIds = null }) {
  * A channel missing CAC or LTV12 is not plotted (a point would claim a measurement that does not exist) but stays
  * in the duplicate table with a dash, so the reader can see which channels were filtered out of the picture and why.
  *
- * @param {{ channels: object[] }} input `channels` are JSON-safe health rows.
+ * @param {{ channels: object[], periodRange?: string }} input `channels` are JSON-safe health rows.
  * @returns {object}
  */
-export function buildCacLtvScatter({ channels }) {
+export function buildCacLtvScatter({ channels, periodRange = '' }) {
   const points = toCacLtvPoints(channels);
   const plottable = points.filter((point) => point.cac !== null && point.ltv !== null);
   const count = channelsLabel(points.length);
@@ -314,7 +402,7 @@ export function buildCacLtvScatter({ channels }) {
       : `${plottable.length} с CAC и LTV12 · LTV выше CAC у ${aboveCac}`;
   // The bubble size has no visible axis, so the caption states it; a single-series legend would only repeat the
   // chart title and was removed.
-  const detail = `${count} · ${conclusion} · размер круга — новые клиенты`;
+  const detail = `${rangePrefix(periodRange)}${count} · ${conclusion} · размер круга — новые клиенты`;
 
   return {
     id: 'cac-ltv',
@@ -470,11 +558,11 @@ export function buildCumulativeLtvCurve({ cohorts, horizonMonths }) {
  * shared formatter; Recharts receives a number and refuses an unsafe one instead of silently losing precision.
  *
  * @param {{ curve: Array<{ monthOffset: number, ltvCents: string | null, cohortCount: number }>,
- *   horizonMonths: number }} input
+ *   horizonMonths: number, cohortRange?: string }} input
  * @returns {object}
  * @throws {TypeError} When Recharts would have to round a kopeck string it cannot represent exactly.
  */
-export function buildCohortLtvChart({ curve, horizonMonths }) {
+export function buildCohortLtvChart({ curve, horizonMonths, cohortRange = '' }) {
   if (!Array.isArray(curve)) throw new TypeError('buildCohortLtvChart requires a curve array');
   if (!Number.isInteger(horizonMonths) || horizonMonths < 1) {
     throw new TypeError(`horizonMonths must be a positive integer, got ${String(horizonMonths)}`);
@@ -485,7 +573,7 @@ export function buildCohortLtvChart({ curve, horizonMonths }) {
   // The caption names both the population and the null-margin aggregation rule: a reader must not think a zero
   // point means "no data" when it is a measured zero over completed cohorts.
   const detail =
-    `Средний накопленный LTV по завершённым когортам, ${cohortsLabel(cohortCount)}` +
+    `${rangePrefix(cohortRange)}Средний накопленный LTV по завершённым когортам, ${cohortsLabel(cohortCount)}` +
     ` · горизонт ${monthsLabel(horizonMonths)}. Когорта без наблюдаемой маржи входит нулём.`;
 
   return {
@@ -612,11 +700,11 @@ export function buildFunnelSteps(funnel) {
  * cyan accent. A channel without ROMI (zero spend or no customers) is not plotted but stays in the table of the
  * screen, which is the honest "не измерено" state.
  *
- * @param {{ channels: object[], periodLabel?: string }} input JSON-safe health rows.
+ * @param {{ channels: object[], periodLabel?: string, periodRange?: string }} input JSON-safe health rows.
  * @returns {object} Chart contract consumed by `ChartFrame` + `RomiBars`.
  * @throws {TypeError} When a present ROMI is not a finite number.
  */
-export function buildRomiByChannelChart({ channels, periodLabel = '' }) {
+export function buildRomiByChannelChart({ channels, periodLabel = '', periodRange = '' }) {
   const points = [];
   for (const channel of channels) {
     if (channel.romiPct === null || channel.romiPct === undefined) continue;
@@ -636,7 +724,8 @@ export function buildRomiByChannelChart({ channels, periodLabel = '' }) {
   const leader = points[0] ?? null;
   const conclusion =
     leader === null ? 'нет каналов с измеренным ROMI' : `лидер ${leader.name}, ${leader.romiLabel}`;
-  const detail = `${count}${periodLabel === '' ? '' : ` · ${periodLabel}`} · ${conclusion}`;
+  const periodPart = [periodLabel, periodRange].filter((part) => part !== '').join(', ');
+  const detail = `${count}${periodPart === '' ? '' : ` · ${periodPart}`} · ${conclusion}`;
 
   return {
     id: 'romi',
@@ -657,6 +746,87 @@ export function buildRomiByChannelChart({ channels, periodLabel = '' }) {
       rows: points.map((point) => ({
         key: point.channelId,
         cells: { channel: point.name, value: point.romiLabel },
+      })),
+    },
+  };
+}
+
+/** Russian column headers of the attribution comparison; the model names themselves live in `metrics-labels.js`. */
+export const ATTRIBUTION_COLUMN_LABELS = Object.freeze({
+  last_touch: 'Последнее касание, BYN',
+  first_touch: 'Первое касание, BYN',
+  linear: 'Линейная, BYN',
+});
+
+/**
+ * Grouped bars for the three attribution models over the channel axis.
+ *
+ * All three models stay visible regardless of the selected one: hiding two of them would let the screen look like a
+ * single-model report. The chart uses the comparison rows, which already carry all three columns and are the same
+ * numbers as the delta table, so the picture and the table cannot disagree.
+ *
+ * The caption names the selected model's leader and its share of that model's total, because the bars alone do not
+ * say which allocation is currently being read.
+ *
+ * @param {{ comparison: object[], periodRange?: string, selectedModel?: string }} input
+ * @returns {object} Chart contract consumed by `ChartFrame` + `AttributionBars`.
+ */
+export function buildAttributionChart({ comparison, periodRange = '', selectedModel = 'last_touch' }) {
+  const series = comparison.map((row) => ({
+    channelId: row.channelId,
+    channelCode: row.channelCode,
+    channelName: row.channelName,
+    last_touch: chartCentsValue(row.lastTouchCents, 'lastTouchCents') ?? 0,
+    first_touch: chartCentsValue(row.firstTouchCents, 'firstTouchCents') ?? 0,
+    linear: chartCentsValue(row.linearCents, 'linearCents') ?? 0,
+  }));
+
+  // A zero comparison on every model is a measured "no attributed revenue": showing empty axes would suggest a broken
+  // chart, so the frame explains it instead.
+  const hasData = series.some(
+    (row) => row.last_touch !== 0 || row.first_touch !== 0 || row.linear !== 0,
+  );
+  const total = series.reduce((sum, row) => sum + row[selectedModel], 0);
+  const leader = series.reduce(
+    (best, row) => (best === null || row[selectedModel] > best[selectedModel] ? row : best),
+    null,
+  );
+  const modelLabel = ATTRIBUTION_MODEL_LABELS[selectedModel] ?? selectedModel;
+  const conclusion =
+    leader === null || total === 0
+      ? `нет атрибутированной выручки по модели «${modelLabel}»`
+      : `лидер ${leader.channelName}, ${formatCentsToByn(leader[selectedModel])} BYN` +
+        ` (${Math.round((leader[selectedModel] * 100) / total)}% модели «${modelLabel}»)`;
+  const windowDays = METRICS_CONFIG.attribution.windowDays;
+  const detail = `${rangePrefix(periodRange)}${channelsLabel(series.length)} · ${conclusion}`;
+
+  return {
+    id: 'attribution-revenue',
+    title: 'Выручка по моделям атрибуции',
+    // The wording states the period, the touch window and the selected model's leader, none of which the bars show.
+    caption: `Выручка по моделям атрибуции за период; окно касания — ${windowDays} дней · ${detail}`,
+    ariaLabel: `Выручка по моделям атрибуции: ${detail}`,
+    unit: 'BYN',
+    selectedModel,
+    hasData,
+    series,
+    table: {
+      columns: [
+        { key: 'channel', label: 'Канал', numeric: false },
+        ...Object.entries(ATTRIBUTION_COLUMN_LABELS).map(([key, label]) => ({
+          key,
+          label,
+          numeric: true,
+        })),
+      ],
+      rows: comparison.map((row) => ({
+        key: row.channelId,
+        cells: {
+          channel: row.channelName,
+          last_touch: formatCentsToByn(row.lastTouchCents),
+          first_touch: formatCentsToByn(row.firstTouchCents),
+          linear: formatCentsToByn(row.linearCents),
+        },
       })),
     },
   };

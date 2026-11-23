@@ -62,9 +62,10 @@ describe('formatSignedPercent', () => {
     expect(formatSignedPercent(12.44)).toBe('+12,4%');
     expect(formatSignedPercent(-8.11)).toBe('\u22128,1%');
     expect(formatSignedPercent(0)).toBe('0,0%');
-    // The delta column case: −0,04% must not become 0,0%.
+    // The delta column case: −0,04% must not become 0,0%, and a tiny positive keeps its + sign the same way.
     expect(formatSignedPercent(-0.04)).toBe('\u2212<0,1%');
-    expect(formatSignedPercent(0.04)).toBe('+0,0%');
+    expect(formatSignedPercent(0.04)).toBe('+<0,1%');
+    expect(formatSignedPercent(0)).toBe('0,0%');
   });
 
   it('keeps a missing value honest and rejects non-numeric input', () => {

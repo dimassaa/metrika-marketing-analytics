@@ -352,8 +352,9 @@ describe('goals progress', () => {
       status: 'off_track',
       favorable: false,
       fact: { value: 0, label: '−<0,1%' },
-      // The gap is directional ("behind" is positive), so 0.004 is kept exact even though the label rounds to zero.
-      deviation: { abs: 0.004, pct: null, label: '+0,0%' },
+      // The gap is directional ("behind" is positive), so 0.004 is kept exact even though the label is below a
+      // tenth of a point; the sign must stay visible on both sides of zero.
+      deviation: { abs: 0.004, pct: null, label: '+<0,1%' },
     });
   });
 

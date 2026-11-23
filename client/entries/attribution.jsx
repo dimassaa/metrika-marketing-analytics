@@ -39,7 +39,6 @@ import { ChartFrame } from '../components/charts/ChartFrame.jsx';
  *     }>,
  *   },
  *   selector: {
- *     current: string,
  *     options: Array<{ value: string, label: string, href: string, selected: boolean, ariaCurrent: 'page' | null }>,
  *   },
  *   unattributedNote: string | null,

@@ -3,8 +3,16 @@ import {
   buildCumulativeLtvCurve,
   buildFunnelSteps,
   buildRomiByChannelChart,
+  periodRangeLabel,
   toSparklinePoints,
 } from '../../src/services/metrics/chart-series.js';
+
+describe('periodRangeLabel', () => {
+  it('compacts a same-year range and keeps both years when they differ', () => {
+    expect(periodRangeLabel('2026-09-01', '2026-11-22')).toBe('01.09–22.11.2026');
+    expect(periodRangeLabel('2025-12-01', '2026-01-31')).toBe('01.12.2025—31.01.2026');
+  });
+});
 
 describe('toSparklinePoints', () => {
   it('keeps week order and a null gap', () => {

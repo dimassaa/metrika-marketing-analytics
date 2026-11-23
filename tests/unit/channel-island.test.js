@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ChannelIsland } from '../../client/entries/channel.jsx';
+import { RetentionGrid } from '../../client/components/charts/RetentionGrid.jsx';
 import { buildFunnelSteps } from '../../src/services/metrics/chart-series.js';
 
 /**
@@ -59,7 +60,6 @@ function model({
       name: 'Instagram',
       kindLabel: 'Платный',
       isActive,
-      activityLabel: isActive ? 'Активен' : 'В архиве',
     },
     period: { from: '2026-10-23', to: '2026-11-21', days: 30, label: '30 дней' },
     health: {
@@ -177,5 +177,33 @@ describe('channel island structure', () => {
     );
 
     expect(html).toContain('Показаны первые 1 кампания');
+  });
+
+  it('names the retention money column with the actual horizon and its unit', () => {
+    const html = renderToStaticMarkup(
+      createElement(RetentionGrid, {
+        retention: {
+          horizonMonths: 6,
+          anchor: '2026-11-21',
+          hasData: true,
+          incompleteCount: 0,
+          cohorts: [
+            {
+              cohortMonth: '2026-01-01',
+              cohortLabel: 'янв 2026',
+              cohortSize: 10,
+              ltvLabel: '100,00',
+              isPartial: false,
+              cells: [
+                { monthOffset: 0, retentionLabel: '100,0%', heatClass: 'heat-4', cumLtvLabel: '40,00' },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(html).toContain('LTV6, BYN');
+    expect(html).not.toContain('LTV12');
   });
 });

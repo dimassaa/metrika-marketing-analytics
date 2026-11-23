@@ -5,7 +5,7 @@ import { ValidationError } from '../../lib/errors.js';
 import { CHANNEL_KIND_LABELS, RANKING_REASON_LABELS } from '../../lib/metrics-labels.js';
 import { centsToApi } from '../../lib/metrics-math.js';
 import { CHANNEL_SORT_FIELDS, sortChannelRows } from '../../lib/sort-rows.js';
-import { buildRomiByChannelChart, channelsLabel, daysLabel, toSparklinePoints } from './chart-series.js';
+import { buildRomiByChannelChart, channelsLabel, daysLabel, periodRangeLabel, toSparklinePoints } from './chart-series.js';
 import { computeCac } from './cac.service.js';
 import { computeRanking } from './ranking.service.js';
 import { resolveWeekRange } from './weekly-series.js';
@@ -188,6 +188,7 @@ export function createChannelListService({ healthService, metricsRepository, cha
           romi: buildRomiByChannelChart({
             channels: rows,
             periodLabel: daysLabel(resolvedPeriod.days),
+            periodRange: periodRangeLabel(resolvedPeriod.from, resolvedPeriod.to),
           }),
         },
         labels: {

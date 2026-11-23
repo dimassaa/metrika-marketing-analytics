@@ -18,13 +18,13 @@ const MAX_BIGINT_CENTS = 9223372036854775807n;
  * non-breaking ones) are grouping, not decimals, so they are stripped before matching. Values with more than two
  * decimal places are rejected instead of rounded: silently changing a price is worse than asking for a correction.
  *
- * @param {string | number} input Amount in Belarusian roubles; a number is accepted for internal callers.
+ * @param {string | number} input Amount in BYN; a number is accepted for internal callers.
  * @returns {bigint} Amount in kopecks.
  * @throws {ValidationError} On negative, empty, non-numeric, over-precise or above-BIGINT input.
  */
 export function parseBynToCents(input) {
   if (input === null || input === undefined) {
-    throw new ValidationError('Укажите сумму в белорусских рублях');
+    throw new ValidationError('Укажите сумму в BYN');
   }
   if (typeof input === 'number' && !Number.isFinite(input)) {
     throw new ValidationError('Сумма должна быть числом');
@@ -36,7 +36,7 @@ export function parseBynToCents(input) {
   // Whitespace is a grouping separator in both `1 234,56` and a pasted `1 234,56 BYN`.
   const normalized = String(input).trim().replace(/[\s\u00a0]/g, '').replace(/BYN$/i, '');
   if (normalized === '') {
-    throw new ValidationError('Укажите сумму в белорусских рублях');
+    throw new ValidationError('Укажите сумму в BYN');
   }
   if (normalized.startsWith('-')) {
     throw new ValidationError('Сумма не может быть отрицательной');
@@ -47,7 +47,7 @@ export function parseBynToCents(input) {
     if (/^\d+[.,]\d{3,}$/.test(normalized)) {
       throw new ValidationError('Сумма указывается с точностью до копеек: не более двух знаков после запятой');
     }
-    throw new ValidationError('Введите сумму в белорусских рублях, например 1 234,56');
+    throw new ValidationError('Введите сумму в BYN, например 1 234,56');
   }
 
   const [, whole, fraction = ''] = match;

@@ -7,6 +7,8 @@ import { inclusiveDays } from '../../lib/periods.js';
 import { buildQueryString } from '../../lib/query.js';
 import { CHANNEL_SORT_FIELDS } from '../../lib/sort-rows.js';
 import {
+  ATTRIBUTION_COLUMN_LABELS,
+  buildAttributionChart,
   buildCacChart,
   buildCacLtvScatter,
   buildChannelSpendChart,
@@ -14,9 +16,9 @@ import {
   buildFunnelSteps,
   buildRomiChart,
   buildSpendRevenueChart,
-  channelsLabel,
   daysLabel,
   monthsLabel,
+  periodRangeLabel,
   weeksLabel,
 } from './chart-series.js';
 
@@ -50,6 +52,7 @@ import {
 export function buildDashboardScreen({ summary, channelIds = null }) {
   const periods = daysLabel(summary.period.days);
   const weeks = weeksLabel(summary.weeklySeries.length);
+  const periodRange = periodRangeLabel(summary.period.from, summary.period.to);
   const selected = channelIds ?? [];
   const selectedSet = new Set(selected);
   const { kpis } = summary;
@@ -115,13 +118,13 @@ export function buildDashboardScreen({ summary, channelIds = null }) {
     },
     verdict: { ...summary.verdict },
     charts: {
-      cac: buildCacChart({ weeklySeries: summary.weeklySeries, channelIds }),
-      romi: buildRomiChart({ weeklySeries: summary.weeklySeries, channelIds }),
-      spendRevenue: buildSpendRevenueChart({ weeklySeries: summary.weeklySeries, channelIds }),
+      cac: buildCacChart({ weeklySeries: summary.weeklySeries, channelIds, periodRange }),
+      romi: buildRomiChart({ weeklySeries: summary.weeklySeries, channelIds, periodRange }),
+      spendRevenue: buildSpendRevenueChart({ weeklySeries: summary.weeklySeries, channelIds, periodRange }),
       // The two per-channel charts read `health.rows` from the same summary, so the filter, the KPI and these cards
       // cannot disagree and the dashboard adds no query.
-      channelSpend: buildChannelSpendChart({ channels: summary.channels, channelIds }),
-      cacLtv: buildCacLtvScatter({ channels: summary.channels }),
+      channelSpend: buildChannelSpendChart({ channels: summary.channels, channelIds, periodRange }),
+      cacLtv: buildCacLtvScatter({ channels: summary.channels, periodRange }),
     },
     labels: {
       period: periods,
@@ -290,6 +293,7 @@ function buildPassportRetention(matrix) {
  */
 export function buildPassportScreen({ passport, matrix, funnelSteps = buildFunnelSteps(passport.funnel) }) {
   const periodLabel = daysLabel(passport.period.days);
+  const periodRange = periodRangeLabel(passport.period.from, passport.period.to);
   const channel = {
     id: passport.channel.id,
     code: passport.channel.code,
@@ -297,9 +301,6 @@ export function buildPassportScreen({ passport, matrix, funnelSteps = buildFunne
     kind: passport.channel.kind,
     kindLabel: CHANNEL_KIND_LABELS[passport.channel.kind] ?? passport.channel.kind,
     isActive: passport.isActive !== false,
-    // Deliberately not `statusLabel`: `health.statusLabel` is the metric verdict (`В норме`/`Мало данных`), while
-    // this one is the channel lifecycle. Two different meanings with one key in neighbouring objects invites bugs.
-    activityLabel: passport.isActive === false ? 'В архиве' : 'Активен',
     targetCacCents: passport.channel.targetCacCents,
     targetRomiPct: passport.channel.targetRomiPct,
   };
@@ -310,9 +311,9 @@ export function buildPassportScreen({ passport, matrix, funnelSteps = buildFunne
     period: { ...passport.period, label: periodLabel },
     health: passport.health,
     charts: {
-      cac: buildCacChart({ weeklySeries: passport.series }),
-      romi: buildRomiChart({ weeklySeries: passport.series }),
-      spendRevenue: buildSpendRevenueChart({ weeklySeries: passport.series }),
+      cac: buildCacChart({ weeklySeries: passport.series, periodRange }),
+      romi: buildRomiChart({ weeklySeries: passport.series, periodRange }),
+      spendRevenue: buildSpendRevenueChart({ weeklySeries: passport.series, periodRange }),
     },
     retention: buildPassportRetention(matrix),
     funnel: funnelSteps,
@@ -798,7 +799,7 @@ function buildCohortsTable({ cohorts, horizonMonths }) {
         numeric: true,
         monthOffset,
       })),
-      { key: 'ltv', label: `LTV${horizonMonths}`, numeric: true },
+      { key: 'ltv', label: `LTV${horizonMonths}, BYN`, numeric: true },
     ],
     rows: cohorts.map((cohort) => ({
       key: cohort.cohortMonth,
@@ -859,6 +860,10 @@ function toChannelLtvRow(row) {
 export function buildCohortsScreen({ matrix, curve }) {
   const horizonMonths = matrix.horizonMonths;
   const cohorts = matrix.cohorts.map(toCohortScreenRow);
+  const cohortRange =
+    cohorts.length === 0
+      ? ''
+      : `когорты ${periodRangeLabel(cohorts[0].cohortMonthDate, cohorts.at(-1).cohortMonthDate)}`;
   const excludedIncomplete = (matrix.excludedIncomplete ?? matrix.cohorts.filter((cohort) => !cohort.isComplete)).map(
     (cohort) => ({
       cohortMonth: cohort.cohortMonth,
@@ -888,97 +893,8 @@ export function buildCohortsScreen({ matrix, curve }) {
     cohorts,
     excludedIncomplete,
     channelLtv: (matrix.channelLtv ?? []).map(toChannelLtvRow),
-    charts: { ltv: buildCohortLtvChart({ curve, horizonMonths }) },
+    charts: { ltv: buildCohortLtvChart({ curve, horizonMonths, cohortRange }) },
     table: buildCohortsTable({ cohorts, horizonMonths }),
-  };
-}
-
-/**
- * Russian names of the three attribution models live in `metrics-labels.js`; only the column headers belong here.
- * @type {Readonly<Record<string, string>>}
- */
-const ATTRIBUTION_COLUMN_LABELS = Object.freeze({
-  last_touch: 'Последнее касание, BYN',
-  first_touch: 'Первое касание, BYN',
-  linear: 'Линейная, BYN',
-});
-
-/**
- * Converts a kopeck string into the number Recharts needs. A present amount above `Number.MAX_SAFE_INTEGER` would be
- * silently rounded by the chart, so it fails loudly instead of drawing a slightly wrong bar.
- *
- * @param {string} cents Integer kopeck string from the M3 report.
- * @param {string} label Field name for the error message.
- * @returns {number}
- * @throws {TypeError} When the value is not an exact integer kopeck string.
- */
-function chartCents(cents, label) {
-  if (typeof cents !== 'string' || !/^-?\d+$/.test(cents)) {
-    throw new TypeError(`${label} must be an integer kopeck string, got ${JSON.stringify(cents)}`);
-  }
-  const value = Number(cents);
-  if (!Number.isSafeInteger(value)) {
-    throw new TypeError(`${label} is outside the safe integer range`);
-  }
-  return value;
-}
-
-/**
- * Grouped bars for the three attribution models over the channel axis.
- *
- * All three models stay visible regardless of the selected one: hiding two of them would let the screen look like a
- * single-model report. The chart uses the comparison rows, which already carry all three columns and are the same
- * numbers as the delta table, so the picture and the table cannot disagree.
- *
- * @param {{ comparison: object[], periodRange: string }} input
- * @returns {object} Chart contract consumed by `ChartFrame` + `AttributionBars`.
- */
-function buildAttributionChart({ comparison, periodRange }) {
-  const series = comparison.map((row) => ({
-    channelId: row.channelId,
-    channelCode: row.channelCode,
-    channelName: row.channelName,
-    last_touch: chartCents(row.lastTouchCents, 'lastTouchCents'),
-    first_touch: chartCents(row.firstTouchCents, 'firstTouchCents'),
-    linear: chartCents(row.linearCents, 'linearCents'),
-  }));
-
-  // A zero comparison on every model is a measured "no attributed revenue": showing empty axes would suggest a broken
-  // chart, so the frame explains it instead.
-  const hasData = series.some(
-    (row) => row.last_touch !== 0 || row.first_touch !== 0 || row.linear !== 0,
-  );
-  const windowDays = METRICS_CONFIG.attribution.windowDays;
-  const detail = `${channelsLabel(series.length)} · ${periodRange}`;
-
-  return {
-    id: 'attribution-revenue',
-    title: 'Выручка по моделям атрибуции',
-    // The wording is fixed by the task: it states the period and the touch window, which the bars do not show.
-    caption: `Выручка по моделям атрибуции за период; окно касания — ${windowDays} дней · ${periodRange}`,
-    ariaLabel: `Выручка по моделям атрибуции по ${detail}`,
-    unit: 'BYN',
-    hasData,
-    series,
-    table: {
-      columns: [
-        { key: 'channel', label: 'Канал', numeric: false },
-        ...Object.entries(ATTRIBUTION_COLUMN_LABELS).map(([key, label]) => ({
-          key,
-          label,
-          numeric: true,
-        })),
-      ],
-      rows: comparison.map((row) => ({
-        key: row.channelId,
-        cells: {
-          channel: row.channelName,
-          last_touch: formatCentsToByn(row.lastTouchCents),
-          first_touch: formatCentsToByn(row.firstTouchCents),
-          linear: formatCentsToByn(row.linearCents),
-        },
-      })),
-    },
   };
 }
 
@@ -1042,7 +958,6 @@ function buildAttributionTable({ comparison }) {
  *
  * @param {{ query?: Record<string, unknown>, model: string }} input
  * @returns {{
- *   current: string,
  *   options: Array<{ value: string, label: string, href: string, selected: boolean, ariaCurrent: 'page' | null }>,
  * }}
  */
@@ -1050,7 +965,6 @@ function buildAttributionModelControl({ query = {}, model }) {
   const defaultModel = METRICS_CONFIG.attribution.defaultModel;
 
   return {
-    current: model,
     options: METRICS_CONFIG.attribution.models.map((value) => {
       const queryString = buildQueryString(query, { model: value === defaultModel ? null : value });
       const selected = value === model;
@@ -1111,7 +1025,7 @@ export function buildAttributionScreen({ report, model, period = null, query = {
   const to = period?.to ?? report.period.to;
   const days = period?.days ?? inclusiveDays(from, to);
   const periodLabel = daysLabel(days);
-  const periodRange = `${formatDateRu(from)} — ${formatDateRu(to)}`;
+  const periodRange = periodRangeLabel(from, to);
 
   const models = METRICS_CONFIG.attribution.models.map((key) => {
     const view = report.models[key];
@@ -1153,7 +1067,7 @@ export function buildAttributionScreen({ report, model, period = null, query = {
       romiLabel: selectedModel.romiLabel,
     },
     comparison: report.comparison,
-    charts: { revenue: buildAttributionChart({ comparison: report.comparison, periodRange }) },
+    charts: { revenue: buildAttributionChart({ comparison: report.comparison, periodRange, selectedModel: model }) },
     table: buildAttributionTable({ comparison: report.comparison }),
     selector: buildAttributionModelControl({ query, model }),
     unattributedNote,

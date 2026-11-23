@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { AttributionIsland } from '../../client/entries/attribution.jsx';
+import {
+  AttributionLegend,
+  attributionBarColor,
+} from '../../client/components/charts/AttributionBars.jsx';
+import { chartTheme } from '../../client/lib/chartTheme.js';
 import { buildAttributionScreen } from '../../src/services/metrics/screen-models.js';
 
 /**
@@ -122,6 +127,21 @@ describe('attribution island structure', () => {
     // The selected summary is the linear model's own total, not a sum of the comparison.
     expect(html).toContain('120,00');
     expect(html).toContain('+140,0%');
+  });
+
+  it('passes the selected model to the chart and colours only that series as primary', () => {
+    const screen = model({ model: 'linear' });
+
+    expect(screen.charts.revenue.selectedModel).toBe('linear');
+    expect(attributionBarColor('linear', 'linear')).toBe(chartTheme.seriesPrimary);
+    expect(attributionBarColor('last_touch', 'linear')).toBe(chartTheme.seriesMuted);
+    expect(attributionBarColor('first_touch', 'linear')).toBe(chartTheme.seriesStoneDark);
+
+    const html = renderToStaticMarkup(createElement(AttributionLegend, { selectedModel: 'linear' }));
+    expect((html.match(/chart-legend__swatch--primary/g) ?? []).length).toBe(1);
+    expect((html.match(/chart-legend__swatch--muted/g) ?? []).length).toBe(1);
+    expect((html.match(/chart-legend__swatch--stone/g) ?? []).length).toBe(1);
+    expect(html).toContain('Линейная');
   });
 
   it('shows the unattributed note from the selected model', () => {

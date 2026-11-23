@@ -82,7 +82,7 @@ export function scoreStackCaption({ series, best }) {
   if (series.length === 0 || !best) {
     return 'Ни один канал не получил оценку: не хватает метрик за период.';
   }
-  return `Лучший результат — ${best.name}, ${formatRatio(best.score, { decimals: 1 })} из 100. Сумма вкладов равна оценке; для CAC больше баллов у дешёвого канала.`;
+  return `Лучший результат — ${best.name}, ${formatRatio(best.score, { decimals: 1 })} из 100. Сумма вкладов равна оценке с точностью до 0,1 п.п.; для CAC больше баллов у дешёвого канала.`;
 }
 
 /**

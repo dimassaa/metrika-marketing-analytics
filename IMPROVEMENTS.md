@@ -716,9 +716,9 @@ Still open:
   a chart that adds a default legend later must repeat that formatter, and `tests/unit/client-guards.test.js` does not
   catch the visual regression — only the browser contrast sweep does.
 - **Other M2/M3 screens still use the word «рублях».** This task fixed the two M4 pages (`channels.ejs`,
-  `channel-detail.ejs`) because the currency rule is absolute for the interface. `campaigns.ejs`, `goals.ejs` and
-  `import.ejs` still say «в белорусских рублях»; the fix is a copy-only change but it sits outside this task's five
-  screens, so it is listed here instead of bundled in.
+  `channel-detail.ejs`) because the currency rule is absolute for the interface. **Resolved in the M4 final fix
+  wave:** `campaigns.ejs`, `goals.ejs`, `import.ejs` and the money parser now say BYN, and
+  `tests/unit/currency-copy.test.js` scans views and client strings for any «рубл» spelling.
 - **Zero spend is rendered as an empty state, not a flat zero line (product ruling).** `buildSpendRevenueChart` and
   `buildChannelSpendChart` now set `hasData` from actual values: an all-zero series means "no measured activity", so
   the frame explains the absence instead of drawing a line that a reader cannot tell apart from missing data. The zero
@@ -739,7 +739,7 @@ Still open:
 
 ## M4 Task 8 — final E2E and build provenance
 
-- **`public/assets` has no legacy bundle provenance.** The directory is gitignored and the Vite manifest records only
+- **`public/assets` has no legacy bundle provenance (M6).** The directory is gitignored and the Vite manifest records only
   content-hashed file names; it carries no git SHA, build time or source revision. A local stand that pulls a new
   commit and forgets `npm run build` keeps serving the previous hashed files — in development the optional reader
   reloads the old manifest, and in production a long-running process holds it until restart. The page cannot tell the
@@ -747,13 +747,13 @@ Still open:
   path, either stamp the manifest with `{ sha, builtAt }` behind a tiny Vite plugin or make `npm start` compare the
   manifest mtime with `src/`/`client/` and refuse a stale tree. This pass only documents the gap; it does not add a
   build step.
-- **The passport's M2 tables are scroll containers without a focusable wrapper at 390 px.** `.matrix-wrap` and the
+- **The passport's M2 tables are scroll containers without a focusable wrapper at 390 px (M5).** `.matrix-wrap` and the
   chart duplicate tables carry `role="region"` and `tabindex="0"`, so a keyboard user can pan them; the settings and
   campaign management tables keep the older `.table-wrap` markup with no tabindex. At 390 px they overflow internally
   (up to 613 px of content in a 322 px card) and a keyboard-only user cannot scroll the settings table at all because
   it contains no focusable child. The page itself does not overflow, so this is an accessibility gap, not a layout
   break; add the same `tabindex="0"`/`role="region"`/`aria-label` triple when the M2 table partial is next touched.
-- **The strict-manifest test temporarily renames the real build output.** `tests/integration/assets-strict.test.js`
+- **The strict-manifest test temporarily renames the real build output (M6).** `tests/integration/assets-strict.test.js`
   must prove refusal on the default path, and `createApp` exposes no manifest-path injection point, so the test moves
   `public/assets/.vite/manifest.json` aside for the child process and restores it in `finally`. Vitest runs integration
   files serially, so no other test observes the gap; a killed process between the rename and the restore leaves a

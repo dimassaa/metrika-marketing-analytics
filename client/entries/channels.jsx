@@ -8,6 +8,7 @@ import { ChartFrame } from '../components/charts/ChartFrame.jsx';
 import { RomiBars } from '../components/charts/RomiBars.jsx';
 import { ScoreStack, buildScoreStack, scoreStackCaption } from '../components/charts/ScoreStack.jsx';
 import { Sparkline } from '../components/charts/Sparkline.jsx';
+import { RANKING_CRITERION_LABELS } from '../../src/lib/contributions.js';
 import { formatCentsToByn, formatInteger, formatRatio } from '../../src/lib/format.js';
 
 /**
@@ -18,7 +19,6 @@ import { formatCentsToByn, formatInteger, formatRatio } from '../../src/lib/form
  *
  * @param {{
  *   page: 'channels',
- *   period: object,
  *   filters: object,
  *   weights: Record<string, number>,
  *   rows: object[],
@@ -30,16 +30,21 @@ import { formatCentsToByn, formatInteger, formatRatio } from '../../src/lib/form
  *     dir: 'asc' | 'desc' | null, ariaSort: string }>,
  * }} props Screen model.
  */
-export function ChannelsIsland({ period, filters, weights, rows, excluded, sparklines, chart, labels, sortLinks }) {
+export function ChannelsIsland({ filters, weights, rows, excluded, sparklines, chart, labels, sortLinks }) {
   if (!Array.isArray(rows)) return <Skeleton lines={4} />;
 
   const sortByField = Object.fromEntries((sortLinks ?? []).map((link) => [link.field, link]));
   const stack = buildScoreStack(rows);
   const stackCaption = scoreStackCaption(stack);
   const weightLabel = ['cac', 'romi', 'ltvCac', 'newCustomers']
-    .map((key) => `${WEIGHT_LABELS[key]} ${formatWeightPercent(weights[key])}%`)
+    .map((key) => `${RANKING_CRITERION_LABELS[key]} ${formatWeightPercent(weights[key])}%`)
     .join(' · ');
   const noDataCount = rows.filter((row) => row.status === 'no_data').length;
+  // The blended summary is always excluded from ranking; on an unfiltered page it is the only entry, and a card that
+  // says "nothing was excluded" would be noise. A real exclusion or an active filter keeps the explanation.
+  const showExcluded =
+    excluded.length > 0 &&
+    !(excluded.length === 1 && excluded[0].code === 'blended' && filters.active === false);
 
   return (
     <div className="stack stack--lg">
@@ -62,6 +67,9 @@ export function ChannelsIsland({ period, filters, weights, rows, excluded, spark
         ) : (
           <div className="table-wrap" role="region" aria-label="Рейтинг каналов" tabIndex={0}>
             <table className="table table--channels">
+              <caption className="u-visually-hidden">
+                Рейтинг каналов за {labels.period}; {filters.label}; {labels.channels}
+              </caption>
               <thead>
                 <tr>
                   <SortableTh field="rank" sorts={sortByField} numeric>
@@ -148,7 +156,7 @@ export function ChannelsIsland({ period, filters, weights, rows, excluded, spark
         </ChartFrame>
       </ChartErrorBoundary>
 
-      {excluded.length > 0 && (
+      {showExcluded && (
         <Card title="Кто не попал в рейтинг" meta="Ранжирование считается по всем каналам; здесь — причины исключения.">
           <ul className="excluded">
             {excluded.map((entry) => (
@@ -232,13 +240,6 @@ function ChannelTableRow({ row, sparkline }) {
 function formatWeightPercent(value) {
   return String(Number((value * 100).toFixed(3))).replace('.', ',');
 }
-
-const WEIGHT_LABELS = Object.freeze({
-  cac: 'CAC',
-  romi: 'ROMI',
-  ltvCac: 'LTV:CAC',
-  newCustomers: 'Клиенты',
-});
 
 /**
  * Sortable header. The link is a plain GET URL built by the server; the active column carries `aria-sort`, and the
