@@ -49,7 +49,7 @@ export function absoluteAssetPath(src) {
  * only way to reject a typo when the optional manifest is absent, because an absent manifest cannot name its entries.
  * When a manifest exists, the manifest itself is authoritative and this list is not consulted.
  */
-const KNOWN_ENTRIES = new Set(['dashboard']);
+const KNOWN_ENTRIES = new Set(['dashboard', 'channels']);
 
 /**
  * @param {string} entryName Short entry name from the controller (`dashboard`).

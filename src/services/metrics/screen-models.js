@@ -1,5 +1,6 @@
 import { METRICS_CONFIG } from '../../config/metrics.js';
 import { buildQueryString } from '../../lib/query.js';
+import { CHANNEL_SORT_FIELDS } from '../../lib/sort-rows.js';
 import {
   buildCacChart,
   buildCacLtvScatter,
@@ -161,6 +162,230 @@ export function buildPeriodControl({ query = {} } = {}) {
     })),
     preserve,
   };
+}
+
+/**
+ * Builds the channel table screen model from the channel list service result.
+ *
+ * The service owns the numbers and the order; this builder adds only presentation metadata: the period label, the
+ * sort links (with `aria-sort` state) and the filter description. The API returns this exact object, so a sort link
+ * or a label cannot exist on the page and be missing from JSON.
+ *
+ * @param {{ list: Awaited<ReturnType<import('./channel-list.service.js').createChannelListService['getChannelList']>>,
+ *   query?: Record<string, unknown> }} input `query` is the validated page query.
+ * @returns {object} Screen model used by `data-props` and `/api/v1/channels`.
+ */
+export function buildChannelsScreen({ list, query = {} }) {
+  const sort = typeof query.sort === 'string' ? query.sort : 'rank';
+  const dir = query.dir === 'asc' || query.dir === 'desc' ? query.dir : CHANNEL_SORT_FIELDS[sort].defaultDir;
+  const weightsCustom = query.weightsCustom === true;
+  const current = buildChannelsQueryState({ query, filters: list.filters, sort, dir, weights: list.weights, weightsCustom });
+
+  const withoutFilters = { ...current };
+  delete withoutFilters.status;
+  delete withoutFilters.kind;
+  const resetQuery = buildQueryString(withoutFilters);
+
+  const sortLinks = Object.entries(CHANNEL_SORT_FIELDS).map(([field, meta]) => {
+    const active = field === sort;
+    const nextDir = active ? (dir === 'asc' ? 'desc' : 'asc') : meta.defaultDir;
+    const queryString = buildQueryString(current, { sort: field, dir: nextDir });
+    return {
+      field,
+      label: meta.label,
+      href: queryString === '' ? '/app/channels' : `/app/channels?${queryString}`,
+      active,
+      dir: active ? dir : null,
+      ariaSort: active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none',
+    };
+  });
+
+  return {
+    page: 'channels',
+    period: { ...list.period, label: list.labels.period },
+    filters: {
+      ...list.filters,
+      active: list.filters.status !== 'all' || list.filters.kind !== 'all',
+      label: list.labels.filter,
+      resetHref: resetQuery === '' ? '/app/channels' : `/app/channels?${resetQuery}`,
+    },
+    weights: list.weights,
+    weightsBasisPoints: list.weightsBasisPoints,
+    rows: list.rows,
+    blended: list.blended,
+    excluded: list.excluded,
+    sparklines: list.sparklines,
+    chart: list.chart,
+    labels: list.labels,
+    sortLinks,
+  };
+}
+
+/**
+ * Page-only hidden fields and field models for the two GET forms of the channel screen.
+ *
+ * The filter form must not silently reset the period, the sort or custom weights; the weights form must not reset
+ * the M2 filters. Both are built from the same normalised query, so the two forms cannot disagree.
+ *
+ * @param {{
+ *   query?: Record<string, unknown>,
+ *   filters: { status: string, kind: string },
+ *   sort?: string,
+ *   dir?: string,
+ *   weights: Record<string, number>,
+ *   weightsCustom?: boolean,
+ * }} input
+ * @returns {{
+ *   action: string,
+ *   hiddenFields: Array<{ name: string, value: string }>,
+ *   resetHref: string,
+ * }}
+ */
+export function buildChannelsFilterControl({ query = {}, filters, sort = 'rank', dir, weights, weightsCustom = false }) {
+  const current = buildChannelsQueryState({ query, filters, sort, dir, weights, weightsCustom });
+  const hidden = [];
+  addPeriodFields(hidden, query);
+  if (current.sort !== undefined) hidden.push({ name: 'sort', value: current.sort });
+  if (current.dir !== undefined) hidden.push({ name: 'dir', value: current.dir });
+  addWeightFields(hidden, current);
+
+  const withoutFilters = { ...current };
+  delete withoutFilters.status;
+  delete withoutFilters.kind;
+  const resetQuery = buildQueryString(withoutFilters);
+
+  return {
+    action: '/app/channels',
+    hiddenFields: hidden,
+    resetHref: resetQuery === '' ? '/app/channels' : `/app/channels?${resetQuery}`,
+  };
+}
+
+/**
+ * Page-only model for the weights form. Values are percentages (0–100) because that is what a person types; the
+ * service converts them back to fractions through `parseWeightParams`.
+ *
+ * @param {{
+ *   query?: Record<string, unknown>,
+ *   filters: { status: string, kind: string },
+ *   sort?: string,
+ *   dir?: string,
+ *   weights: Record<string, number>,
+ * }} input
+ * @returns {{
+ *   action: string,
+ *   hiddenFields: Array<{ name: string, value: string }>,
+ *   fields: Array<{ name: string, label: string, value: string, hint: string }>,
+ *   resetHref: string,
+ * }}
+ */
+export function buildChannelsWeightsControl({ query = {}, filters, sort = 'rank', dir, weights }) {
+  const current = buildChannelsQueryState({ query, filters, sort, dir, weights, weightsCustom: true });
+
+  const hidden = [];
+  addPeriodFields(hidden, query);
+  if (filters.status !== 'all') hidden.push({ name: 'status', value: filters.status });
+  if (filters.kind !== 'all') hidden.push({ name: 'kind', value: filters.kind });
+  if (current.sort !== undefined) hidden.push({ name: 'sort', value: current.sort });
+  if (current.dir !== undefined) hidden.push({ name: 'dir', value: current.dir });
+
+  const withoutWeights = { ...current };
+  for (const name of ['wCac', 'wRomi', 'wLtvCac', 'wNewCustomers']) delete withoutWeights[name];
+  const resetQuery = buildQueryString(withoutWeights);
+
+  return {
+    action: '/app/channels',
+    hiddenFields: hidden,
+    fields: [
+      { name: 'wCac', label: 'CAC', value: percentOf(weights.cac), hint: 'Дешевле — больше баллов' },
+      { name: 'wRomi', label: 'ROMI', value: percentOf(weights.romi), hint: 'Возврат на маркетинг' },
+      { name: 'wLtvCac', label: 'LTV:CAC', value: percentOf(weights.ltvCac), hint: 'Окупаемость клиента' },
+      {
+        name: 'wNewCustomers',
+        label: 'Новые клиенты',
+        value: percentOf(weights.newCustomers),
+        hint: 'Объём привлечения',
+      },
+    ],
+    resetHref: resetQuery === '' ? '/app/channels' : `/app/channels?${resetQuery}`,
+  };
+}
+
+/**
+ * Normalises the URL state of the channel screen into the keys the sort links and the forms replay.
+ *
+ * Defaults are omitted, so an untouched page keeps a short URL, while every non-default filter survives a sort or a
+ * weight change. `channelIds` is not part of this screen, but `buildQueryString` still supports arrays for the
+ * filters of other use cases.
+ *
+ * @param {{
+ *   query?: Record<string, unknown>,
+ *   filters: { status: string, kind: string },
+ *   sort: string,
+ *   dir?: string,
+ *   weights: Record<string, number>,
+ *   weightsCustom?: boolean,
+ * }} input
+ * @returns {Record<string, unknown>}
+ */
+export function buildChannelsQueryState({ query = {}, filters, sort, dir, weights, weightsCustom = false }) {
+  const state = {};
+  addPeriodFields(state, query, true);
+  if (filters.status !== 'all') state.status = filters.status;
+  if (filters.kind !== 'all') state.kind = filters.kind;
+  const field = CHANNEL_SORT_FIELDS[sort];
+  if (sort !== 'rank') state.sort = sort;
+  const direction = dir ?? field.defaultDir;
+  // Replay `dir` whenever the order is not the untouched default: `sort=cac` + `dir=asc` must survive a status
+  // change even though `asc` happens to be CAC's default today.
+  if (sort !== 'rank' || direction !== field.defaultDir) state.dir = direction;
+  if (weightsCustom) {
+    state.wCac = percentOf(weights.cac);
+    state.wRomi = percentOf(weights.romi);
+    state.wLtvCac = percentOf(weights.ltvCac);
+    state.wNewCustomers = percentOf(weights.newCustomers);
+  }
+  return state;
+}
+
+/**
+ * @param {Array<{ name: string, value: string }> | Record<string, unknown>} target
+ * @param {Record<string, unknown>} query
+ * @param {boolean} [asObject] Push into an object instead of an array.
+ * @returns {void}
+ */
+function addPeriodFields(target, query, asObject = false) {
+  /** @param {string} name @param {unknown} value */
+  const put = (name, value) => {
+    if (asObject) target[name] = value;
+    else if (value !== undefined && value !== null && value !== '') target.push({ name, value: String(value) });
+  };
+
+  if (query.days !== undefined && query.days !== null && query.days !== '') {
+    put('days', query.days);
+    return;
+  }
+  if (query.from !== undefined && query.from !== null && query.from !== '') put('from', query.from);
+  if (query.to !== undefined && query.to !== null && query.to !== '') put('to', query.to);
+}
+
+/**
+ * @param {Array<{ name: string, value: string }>} fields
+ * @param {Record<string, unknown>} state
+ * @returns {void}
+ */
+function addWeightFields(fields, state) {
+  for (const name of ['wCac', 'wRomi', 'wLtvCac', 'wNewCustomers']) {
+    if (state[name] !== undefined) fields.push({ name, value: String(state[name]) });
+  }
+}
+
+/**
+ * @param {number} value Weight fraction in `[0, 1]`.
+ * @returns {string} Whole percent for a `step="1"` input.
+ */
+function percentOf(value) {
+  return String(Math.round(value * 100));
 }
 
 /**

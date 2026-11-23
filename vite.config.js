@@ -42,6 +42,7 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         input: {
           dashboard: fileURLToPath(new URL('./client/entries/dashboard.jsx', import.meta.url)),
+          channels: fileURLToPath(new URL('./client/entries/channels.jsx', import.meta.url)),
         },
         output: {
           entryFileNames: '[name]-[hash].js',

@@ -317,6 +317,62 @@ export function createMetricsRepository(db) {
     },
 
     /**
+     * Weekly spend and new customers for every channel, in one grouped statement.
+     *
+     * The channel list needs a 12-week CAC sparkline per row. Asking per channel would turn one screen into eight
+     * round trips, so both sources are grouped by `(channel, week)` here and the service computes CAC in memory.
+     * Only complete Monday–Sunday weeks inside `[from, to]` are returned, exactly like `listWeeklySeries`; a week
+     * without a row is filled with a null point by the service, not by SQL.
+     *
+     * @param {{ from: string, to: string }} period Inclusive Minsk calendar dates.
+     * @returns {Promise<Array<{
+     *   channelId: string, weekStart: string, spendCents: bigint, newCustomers: number,
+     * }>>} Sorted by channel and week.
+     */
+    async listChannelWeeklyCacInputs({ from, to }) {
+      const { rows } = await db.query(
+        `WITH spend AS (
+           SELECT cp.channel_id,
+                  date_trunc('week', ds.stat_date)::date AS week_start,
+                  coalesce(sum(ds.spend_cents), 0)::bigint::text AS spend_cents
+             FROM daily_stats ds
+             JOIN campaigns cp ON cp.id = ds.campaign_id
+            WHERE ds.stat_date BETWEEN $1::date AND $2::date
+            GROUP BY cp.channel_id, 2
+         ),
+         customer_counts AS (
+           SELECT cu.first_channel_id AS channel_id,
+                  date_trunc('week', (cu.first_order_at AT TIME ZONE 'Europe/Minsk')::date)::date AS week_start,
+                  count(*)::int AS new_customers
+             FROM customers cu
+            WHERE cu.first_order_at >= $3::timestamptz
+              AND cu.first_order_at < $4::timestamptz
+              AND cu.first_channel_id IS NOT NULL
+            GROUP BY 1, 2
+         )
+         SELECT (coalesce(s.channel_id, n.channel_id))::text AS channel_id,
+                (coalesce(s.week_start, n.week_start))::text AS week_start,
+                coalesce(s.spend_cents, '0') AS spend_cents,
+                coalesce(n.new_customers, 0) AS new_customers
+           FROM spend s
+           FULL JOIN customer_counts n
+             ON n.channel_id = s.channel_id
+            AND n.week_start = s.week_start
+          WHERE coalesce(s.week_start, n.week_start) >= $1::date
+            AND coalesce(s.week_start, n.week_start) + 6 <= $2::date
+          ORDER BY 1, 2`,
+        [from, to, minskDayStart(from), minskDayStart(addDays(to, 1))],
+      );
+
+      return rows.map((row) => ({
+        channelId: row.channel_id,
+        weekStart: row.week_start,
+        spendCents: spendFromRow(row.spend_cents),
+        newCustomers: countFromRow(row.new_customers, 'new_customers'),
+      }));
+    },
+
+    /**
      * Spend alone per channel, for ROMI and budget screens that do not need the customer count.
      *
      * @param {{ from: string, to: string }} period

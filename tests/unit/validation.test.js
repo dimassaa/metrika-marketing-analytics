@@ -4,7 +4,10 @@ import { ValidationError } from '../../src/lib/errors.js';
 import { parseQuery } from '../../src/lib/validation.js';
 import {
   dashboardQuerySchema,
+  channelsPageQuerySchema,
+  channelsQuerySchema,
   parseChannelIds,
+  parseWeightParams,
   periodQuerySchema,
 } from '../../src/validators/metrics.schema.js';
 
@@ -77,5 +80,56 @@ describe('channelIds', () => {
     expect(() => parseChannelIds('0')).toThrow(ValidationError);
     expect(() => parseChannelIds('99999999999999999999')).toThrow(ValidationError);
     expect(() => parseQuery(dashboardQuerySchema, { channelIds: '12x' })).toThrow(ValidationError);
+  });
+});
+
+describe('ranking weights in the query string', () => {
+  it('defaults when none of the four parameters is present', () => {
+    expect(parseWeightParams({})).toEqual({ cac: 0.3, romi: 0.3, ltvCac: 0.25, newCustomers: 0.15 });
+    expect(parseWeightParams()).toEqual({ cac: 0.3, romi: 0.3, ltvCac: 0.25, newCustomers: 0.15 });
+  });
+
+  it('converts percentages into fractions and accepts a zero-sum-free set', () => {
+    expect(parseWeightParams({ wCac: '0', wRomi: '100', wLtvCac: '0', wNewCustomers: '0' })).toEqual({
+      cac: 0,
+      romi: 1,
+      ltvCac: 0,
+      newCustomers: 0,
+    });
+    expect(parseWeightParams({ wCac: '10', wRomi: '20', wLtvCac: '30', wNewCustomers: '40' })).toEqual({
+      cac: 0.1,
+      romi: 0.2,
+      ltvCac: 0.3,
+      newCustomers: 0.4,
+    });
+  });
+
+  it('rejects a partial set, a non-numeric value and a zero total', () => {
+    expect(() => parseWeightParams({ wCac: '10' })).toThrow(/все четыре веса/);
+    expect(() => parseWeightParams({ wCac: 'abc', wRomi: '20', wLtvCac: '30', wNewCustomers: '40' })).toThrow(
+      /должен быть числом/,
+    );
+    expect(() => parseWeightParams({ wCac: '-1', wRomi: '20', wLtvCac: '30', wNewCustomers: '40' })).toThrow(
+      /от 0 до 100/,
+    );
+    expect(() => parseWeightParams({ wCac: '0', wRomi: '0', wLtvCac: '0', wNewCustomers: '0' })).toThrow(
+      /больше нуля/,
+    );
+  });
+
+  it('keeps the API strict and the page tolerant for stale status bookmarks', () => {
+    expect(() => parseQuery(channelsQuerySchema, { status: 'bogus' })).toThrow(ValidationError);
+    expect(parseQuery(channelsPageQuerySchema, { status: 'bogus' }).status).toBe('all');
+    expect(parseQuery(channelsPageQuerySchema, { sort: 'cac', dir: 'asc' })).toMatchObject({
+      sort: 'cac',
+      dir: 'asc',
+    });
+    expect(parseQuery(channelsQuerySchema, {})).toMatchObject({
+      status: 'all',
+      kind: 'all',
+      sort: 'rank',
+      dir: 'asc',
+      weightsCustom: false,
+    });
   });
 });

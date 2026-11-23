@@ -126,4 +126,4 @@ export function DashboardIsland({ kpis, verdict, charts, labels, filter }) {
   );
 }
 
-mountIsland(DashboardIsland, 'dashboard');
+mountIsland(DashboardIsland, 'dashboard', 'Дашборд');

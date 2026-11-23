@@ -10,6 +10,8 @@ import { createImportRateLimiter } from '../middleware/rateLimit.js';
  */
 export const METRICS_API_PERMISSIONS = Object.freeze({
   '/dashboard': 'dashboard:view',
+  '/channels': 'channels:view',
+  '/ranking': 'channels:view',
 });
 
 /**
@@ -31,7 +33,7 @@ export function createApiRouter({ importController, mediaController, metrics }) 
   const importLimiter = createImportRateLimiter();
 
   // Metrics GETs depend on the data anchor, which moves when an import commits; a cached JSON body would outlive it.
-  router.use('/dashboard', (req, res, next) => {
+  router.use(['/dashboard', '/channels', '/ranking'], (req, res, next) => {
     res.set('Cache-Control', 'no-store');
     next();
   });
@@ -40,6 +42,18 @@ export function createApiRouter({ importController, mediaController, metrics }) 
     requireAuth,
     requirePermission(METRICS_API_PERMISSIONS['/dashboard']),
     metrics.controllers.api.dashboard,
+  );
+  router.get(
+    '/channels',
+    requireAuth,
+    requirePermission(METRICS_API_PERMISSIONS['/channels']),
+    metrics.controllers.api.channels,
+  );
+  router.get(
+    '/ranking',
+    requireAuth,
+    requirePermission(METRICS_API_PERMISSIONS['/ranking']),
+    metrics.controllers.api.ranking,
   );
 
   // The limiter runs before multer: a client that burned its quota must not make the server parse a 2 MB body.

@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { addDays } from '../../src/lib/dates.js';
-import { buildChannelFilterControl, buildDashboardScreen, buildPeriodControl } from '../../src/services/metrics/screen-models.js';
+import {
+  buildChannelFilterControl,
+  buildChannelsFilterControl,
+  buildChannelsScreen,
+  buildChannelsWeightsControl,
+  buildDashboardScreen,
+  buildPeriodControl,
+} from '../../src/services/metrics/screen-models.js';
+import { buildRomiByChannelChart } from '../../src/services/metrics/chart-series.js';
 
 const LAST_WEEK = '2026-11-09';
 const FIRST_WEEK = addDays(LAST_WEEK, -7 * 11);
@@ -374,5 +382,176 @@ describe('channel filter control', () => {
 
     expect(control.periodFields).toEqual([]);
     expect(control.resetHref).toBe('/app/dashboard');
+  });
+});
+
+describe('channels screen model', () => {
+  /**
+   * @returns {object} A channel list service result with one ranked row, one excluded row and a blended summary.
+   */
+  function channelList() {
+    const rows = [
+      {
+        channelId: '1',
+        code: 'instagram',
+        name: 'Instagram',
+        kind: 'paid',
+        isActive: true,
+        kindLabel: 'Платный',
+        metaLabel: 'Платный',
+        rank: 1,
+        score: 70,
+        status: 'healthy',
+        statusLabel: 'В норме',
+        spendCents: '300000',
+        revenueCents: '600000',
+        newCustomers: 6,
+        cacCents: '50000',
+        ltv12Cents: '150000',
+        romiPct: 120,
+        romiLabel: '+120,0%',
+        paybackLabel: '4 мес.',
+        ratioLabel: '3,000',
+        contributions: [],
+        stack: [],
+        exclusion: null,
+      },
+      {
+        channelId: '2',
+        code: 'email',
+        name: 'Email',
+        kind: 'owned',
+        isActive: true,
+        kindLabel: 'Собственный',
+        metaLabel: 'Собственный',
+        rank: null,
+        score: null,
+        status: 'no_data',
+        statusLabel: 'Мало данных',
+        spendCents: '0',
+        revenueCents: '0',
+        newCustomers: 5,
+        cacCents: '0',
+        ltv12Cents: null,
+        romiPct: null,
+        romiLabel: '—',
+        paybackLabel: '—',
+        ratioLabel: '—',
+        contributions: [],
+        stack: [],
+        exclusion: { reason: 'no_data', reasonLabel: 'Мало данных' },
+      },
+    ];
+
+    return {
+      period: { from: '2026-10-23', to: '2026-11-21', days: 30 },
+      filters: { status: 'active', kind: 'paid' },
+      weights: { cac: 0.3, romi: 0.3, ltvCac: 0.25, newCustomers: 0.15 },
+      weightsBasisPoints: { cac: 300, romi: 300, ltvCac: 250, newCustomers: 150 },
+      rows,
+      blended: { code: 'blended', name: 'Все каналы' },
+      excluded: [
+        { channelId: '2', code: 'email', name: 'Email', reason: 'no_data', reasonLabel: 'Мало данных' },
+        { code: 'blended', name: 'Все каналы', reason: 'blended', reasonLabel: 'Сводная строка' },
+      ],
+      sparklines: { 1: [{ weekLabel: '03.11.2026', value: 1000 }] },
+      chart: { romi: buildRomiByChannelChart({ channels: rows, periodLabel: '30 дней' }) },
+      labels: { period: '30 дней', channels: '2 канала', filter: 'Активные · Платные', sort: 'Место' },
+    };
+  }
+
+  it('keeps the table and the excluded explanation consistent', () => {
+    const screen = buildChannelsScreen({ list: channelList(), query: { sort: 'rank', dir: 'desc' } });
+
+    expect(screen.page).toBe('channels');
+    expect(screen.rows).toHaveLength(2);
+    for (const entry of screen.excluded.filter((item) => item.code !== 'blended')) {
+      const row = screen.rows.find((item) => item.channelId === entry.channelId);
+      expect(row).toBeDefined();
+      expect(row.rank).toBeNull();
+    }
+    expect(screen.rows.map((row) => row.code)).not.toContain('blended');
+    expect(screen.excluded.at(-1)).toMatchObject({ code: 'blended', reason: 'blended' });
+  });
+
+  it('carries every channel with ROMI in the ROMI chart at the ranking scale', () => {
+    const list = channelList();
+    const screen = buildChannelsScreen({ list, query: { sort: 'rank', dir: 'desc' } });
+
+    expect(screen.chart.romi.series.map((row) => row.channelId)).toEqual(['1']);
+    expect(screen.chart.romi.table.rows).toHaveLength(1);
+    expect(screen.chart.romi.series[0].highlight).toBe(true);
+  });
+
+  it('marks the active sort and preserves period, filters and weights in every link', () => {
+    const screen = buildChannelsScreen({
+      list: channelList(),
+      query: { sort: 'cac', dir: 'asc', days: 90, weightsCustom: true },
+    });
+
+    const cac = screen.sortLinks.find((link) => link.field === 'cac');
+    expect(cac.active).toBe(true);
+    expect(cac.ariaSort).toBe('ascending');
+    expect(cac.href).toContain('days=90');
+    expect(cac.href).toContain('status=active');
+    expect(cac.href).toContain('kind=paid');
+    expect(cac.href).toContain('wCac=30');
+    expect(cac.href).toContain('sort=cac');
+    expect(screen.sortLinks.find((link) => link.field === 'rank').ariaSort).toBe('none');
+    expect(screen.filters.resetHref).toContain('days=90');
+    expect(screen.filters.resetHref).not.toContain('status=');
+  });
+
+  it('builds weight fields in percent and do not reset the list filters', () => {
+    const control = buildChannelsWeightsControl({
+      query: { days: 90 },
+      filters: { status: 'active', kind: 'paid' },
+      sort: 'cac',
+      dir: 'asc',
+      weights: { cac: 0.3, romi: 0.3, ltvCac: 0.25, newCustomers: 0.15 },
+    });
+
+    expect(control.fields.map((field) => [field.name, field.value])).toEqual([
+      ['wCac', '30'],
+      ['wRomi', '30'],
+      ['wLtvCac', '25'],
+      ['wNewCustomers', '15'],
+    ]);
+    expect(control.hiddenFields).toEqual([
+      { name: 'days', value: '90' },
+      { name: 'status', value: 'active' },
+      { name: 'kind', value: 'paid' },
+      { name: 'sort', value: 'cac' },
+      { name: 'dir', value: 'asc' },
+    ]);
+    expect(control.resetHref).toBe('/app/channels?days=90&status=active&kind=paid&sort=cac&dir=asc');
+  });
+
+  it('replays non-default sort and weights in the filter form', () => {
+    const control = buildChannelsFilterControl({
+      query: { days: 90 },
+      filters: { status: 'active', kind: 'all' },
+      sort: 'cac',
+      dir: 'asc',
+      weights: { cac: 0.1, romi: 0.4, ltvCac: 0.3, newCustomers: 0.2 },
+      weightsCustom: true,
+    });
+
+    expect(control.hiddenFields).toEqual([
+      { name: 'days', value: '90' },
+      { name: 'sort', value: 'cac' },
+      { name: 'dir', value: 'asc' },
+      { name: 'wCac', value: '10' },
+      { name: 'wRomi', value: '40' },
+      { name: 'wLtvCac', value: '30' },
+      { name: 'wNewCustomers', value: '20' },
+    ]);
+  });
+
+  it('serialises without a bigint, NaN or Infinity', () => {
+    const screen = buildChannelsScreen({ list: channelList(), query: { sort: 'rank', dir: 'desc' } });
+
+    expect(() => JSON.stringify(screen)).not.toThrow();
+    expect(JSON.stringify(screen)).not.toMatch(/NaN|Infinity/);
   });
 });

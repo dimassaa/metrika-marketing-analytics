@@ -5,10 +5,14 @@ import { CHANNELS } from '../../db/seed/data.js';
 import { closeTestPool, getTestPool, resetTestDatabase } from '../helpers/db.js';
 import { loginAs, makeApp } from '../helpers/app.js';
 import { getAppCsrf } from '../helpers/csrf.js';
+import { extractDataProps } from '../helpers/dataProps.js';
 import { AUDIT_ACTIONS } from '../../src/config/audit-actions.js';
 
 const ANALYST = 'analyst@metrika.by';
 const VIEWER = 'viewer@metrika.by';
+
+/** The M2 tests assert the frame, not the built island; a stub keeps them independent of `npm run build`. */
+const NO_ASSETS = { assets: { assets: () => ({ scripts: [], preloads: [] }) } };
 
 /** @type {import('pg').Pool} */
 let pool;
@@ -29,7 +33,7 @@ beforeEach(async () => {
   // A leftover cookie would make the next test depend on test order; the channel rows themselves are shared because
   // the archive toggle test deliberately reuses the channel created two tests earlier.
   await pool.query('DELETE FROM sessions');
-  app = makeApp();
+  app = makeApp(NO_ASSETS);
 });
 
 /**
@@ -59,19 +63,6 @@ async function channelRow(code) {
 }
 
 /**
- * Counts the data rows of the first table on a page. Used to bound the seeded list instead of only checking that
- * some names appear somewhere in the HTML.
- * @param {string} html
- * @returns {number}
- */
-function tableRowCount(html) {
-  const start = html.indexOf('<tbody');
-  const end = html.indexOf('</tbody>');
-  const body = start === -1 || end === -1 ? '' : html.slice(start, end);
-  return (body.match(/<tr\b/g) ?? []).length;
-}
-
-/**
  * @param {string} entityId
  * @returns {Promise<string[]>} Audit actions recorded for the channel, oldest first.
  */
@@ -84,19 +75,21 @@ async function auditActions(entityId) {
 }
 
 describe('channels list', () => {
-  it('shows the eight demo channels and BYN targets to a viewer without the manage form', async () => {
+  it('gives a viewer the eight demo channels as island props without the manage form', async () => {
     const agent = await signedIn(VIEWER);
 
     const res = await agent.get('/app/channels');
 
     expect(res.status).toBe(200);
-    expect(tableRowCount(res.text)).toBe(CHANNELS.length);
+    const props = extractDataProps(res.text, 'channels');
+    expect(props.rows).toHaveLength(CHANNELS.length);
     for (const channel of CHANNELS) {
-      expect(res.text).toContain(channel.name);
+      expect(props.rows.some((row) => row.name === channel.name)).toBe(true);
     }
-    // Instagram's 45 BYN target CAC proves the kopeck-to-BYN bridge and the glyph span.
-    expect(res.text).toContain('45,00');
-    expect(res.text).toContain('<span class="byn">BYN</span>');
+    // M2 filters and the CSV export stay in the frame; the create form is analyst-only.
+    expect(res.text).toContain('name="status"');
+    expect(res.text).toContain('name="kind"');
+    expect(res.text).toContain('action="/app/export/channels.csv"');
     expect(res.text).not.toContain('name="code"');
     expect(res.text).not.toContain('следующем этапе');
   });
@@ -214,7 +207,9 @@ describe('channel mutations', () => {
     expect(await auditActions(before.id)).toContain(AUDIT_ACTIONS.CHANNEL_UPDATE);
 
     const list = await agent.get('/app/channels');
-    expect(list.text).toContain('Viber Ads — Беларусь');
+    expect(extractDataProps(list.text, 'channels').rows.some((row) => row.name === 'Viber Ads — Беларусь')).toBe(
+      true,
+    );
   });
 
   it('forbids channel editing for a viewer with the styled 403 page', async () => {
@@ -413,8 +408,10 @@ describe('channel mutations', () => {
     expect(rows[0].name).toBe(name);
 
     const list = await agent.get('/app/channels');
+    const props = extractDataProps(list.text, 'channels');
 
-    expect(list.text).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+    // The raw name survives as JSON data, but it cannot appear as markup in the HTML attribute.
+    expect(props.rows.some((row) => row.name === name)).toBe(true);
     expect(list.text).not.toContain(name);
   });
 });

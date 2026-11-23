@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { METRICS_CONFIG } from '../config/metrics.js';
 import { ValidationError } from '../lib/errors.js';
 import { parseBigIntId } from '../lib/ids.js';
+import { CHANNEL_SORT_FIELDS } from '../lib/sort-rows.js';
 
 /**
  * Query schemas for the metrics API and pages.
@@ -104,3 +105,153 @@ export const dashboardQuerySchema = z
   .object({ ...periodShape, channelIds: channelIdsField })
   .refine(hasNoPeriodConflict, PERIOD_CONFLICT)
   .transform((value) => ({ ...value, channelIds: value.channelIds ?? null }));
+
+/**
+ * Query keys of the four ranking weights and their criterion codes. The form uses the `w*` spelling in the URL; the
+ * ranking service uses the criterion codes.
+ */
+const WEIGHT_PARAMS = Object.freeze({
+  wCac: 'cac',
+  wRomi: 'romi',
+  wLtvCac: 'ltvCac',
+  wNewCustomers: 'newCustomers',
+});
+
+const WEIGHT_LABELS = Object.freeze({
+  wCac: 'CAC',
+  wRomi: 'ROMI',
+  wLtvCac: 'LTV:CAC',
+  wNewCustomers: 'новые клиенты',
+});
+
+/** Four optional string fields: the schema validates the combination in one transform. */
+const weightShape = Object.freeze(
+  Object.fromEntries(
+    Object.keys(WEIGHT_PARAMS).map((name) => [
+      name,
+      z.string({ error: `Вес ${WEIGHT_LABELS[name]} указывается одним числом` }).optional(),
+    ]),
+  ),
+);
+
+/**
+ * @param {Record<string, unknown>} params Query object.
+ * @returns {boolean} True when at least one `w*` parameter is present.
+ */
+export function hasWeightParams(params) {
+  return Object.keys(WEIGHT_PARAMS).some((name) => params?.[name] !== undefined);
+}
+
+/**
+ * Turns the four percentage GET parameters into ranking weights.
+ *
+ * All four or none: a partial set is a person editing half of a bookmark, and silently mixing old defaults with one
+ * new value would score a model nobody asked for. Percentages need not sum to 100 — the ranking normalises them, and
+ * `0/100/0/0` is a legitimate "score by ROMI only" experiment — but a zero total is rejected before any division.
+ *
+ * @param {Record<string, unknown>} [params] Query object with `wCac`, `wRomi`, `wLtvCac`, `wNewCustomers`.
+ * @returns {{ cac: number, romi: number, ltvCac: number, newCustomers: number }} Weights as fractions.
+ * @throws {ValidationError} On a partial set, a non-numeric value, a value outside 0–100 or a zero total.
+ */
+export function parseWeightParams(params = {}) {
+  const present = Object.keys(WEIGHT_PARAMS).filter((name) => params?.[name] !== undefined);
+  if (present.length === 0) return { ...METRICS_CONFIG.ranking.weights };
+  if (present.length !== 4) {
+    throw new ValidationError('Укажите все четыре веса рейтинга или ни одного');
+  }
+
+  const raw = {};
+  for (const [name, criterion] of Object.entries(WEIGHT_PARAMS)) {
+    const value = params[name];
+    if (typeof value !== 'string' || !/^\d+(?:\.\d+)?$/.test(value.trim())) {
+      throw new ValidationError(`Вес ${WEIGHT_LABELS[name]} должен быть числом от 0 до 100`);
+    }
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric < 0 || numeric > 100) {
+      throw new ValidationError(`Вес ${WEIGHT_LABELS[name]} должен быть числом от 0 до 100`);
+    }
+    raw[criterion] = numeric;
+  }
+
+  const total = Object.values(raw).reduce((sum, value) => sum + value, 0);
+  if (!(total > 0)) {
+    throw new ValidationError('Сумма весов рейтинга должна быть больше нуля');
+  }
+
+  return Object.fromEntries(Object.entries(raw).map(([criterion, value]) => [criterion, value / 100]));
+}
+
+/**
+ * Adds the parsed weights to a validated query object.
+ * @param {Record<string, unknown>} value
+ * @param {{ addIssue: (issue: { code: 'custom', message: string }) => void }} ctx
+ * @returns {Record<string, unknown>}
+ */
+function withWeights(value, ctx) {
+  try {
+    return { ...value, weights: parseWeightParams(value), weightsCustom: hasWeightParams(value) };
+  } catch (error) {
+    if (!(error instanceof ValidationError)) throw error;
+    ctx.addIssue({ code: 'custom', message: error.message });
+    return z.NEVER;
+  }
+}
+
+const statusField = z.enum(['all', 'active', 'archived'], 'Статус канала: all, active или archived').default('all');
+const statusLenientField = z
+  .enum(['all', 'active', 'archived'])
+  .catch('all')
+  .default('all');
+const kindField = z.enum(['all', 'paid', 'owned', 'earned'], 'Тип канала: all, paid, owned или earned').default('all');
+const kindLenientField = z
+  .enum(['all', 'paid', 'owned', 'earned'])
+  .catch('all')
+  .default('all');
+
+const sortField = z
+  .enum(Object.keys(CHANNEL_SORT_FIELDS), 'Неизвестное поле сортировки каналов')
+  .optional();
+const dirField = z.enum(['asc', 'desc'], 'Направление сортировки: asc или desc').optional();
+
+/**
+ * Applies the default period-independent sort and its default direction.
+ * @param {Record<string, any>} value
+ * @returns {Record<string, any>}
+ */
+function settleSort(value) {
+  const sort = value.sort ?? 'rank';
+  return { ...value, sort, dir: value.dir ?? CHANNEL_SORT_FIELDS[sort].defaultDir };
+}
+
+/**
+ * Strict channel query for `/api/v1/channels`: an unknown status/kind is a 400, because an API client asking for a
+ * filter must not receive a silently wider report.
+ */
+export const channelsQuerySchema = z
+  .object({ ...periodShape, status: statusField, kind: kindField, sort: sortField, dir: dirField, ...weightShape })
+  .refine(hasNoPeriodConflict, PERIOD_CONFLICT)
+  .transform(settleSort)
+  .transform(withWeights);
+
+/**
+ * Tolerant channel query for `/app/channels`: stale bookmarks with `status=bogus` show «все» with a 200, while an
+ * invalid sort or weight set stays a 400 because the table order would otherwise not match what the caller sees.
+ */
+export const channelsPageQuerySchema = z
+  .object({
+    ...periodShape,
+    status: statusLenientField,
+    kind: kindLenientField,
+    sort: sortField,
+    dir: dirField,
+    ...weightShape,
+  })
+  .refine(hasNoPeriodConflict, PERIOD_CONFLICT)
+  .transform(settleSort)
+  .transform(withWeights);
+
+/** Raw M3 ranking report: period plus weights, no table filters or sort. */
+export const rankingQuerySchema = z
+  .object({ ...periodShape, ...weightShape })
+  .refine(hasNoPeriodConflict, PERIOD_CONFLICT)
+  .transform(withWeights);

@@ -148,3 +148,97 @@ describe('GET /api/v1/dashboard', () => {
     expect(oneChannel).toBe(allChannels);
   });
 });
+
+describe('GET /api/v1/channels', () => {
+  it('is guarded by channels:view and answers the same screen model as the page', async () => {
+    expect(METRICS_API_PERMISSIONS['/channels']).toBe('channels:view');
+
+    const agent = await signedIn();
+    const res = await agent.get('/api/v1/channels');
+
+    expect(res.status).toBe(200);
+    expect(res.type).toMatch(/application\/json/);
+    expect(res.headers['cache-control']).toBe('no-store');
+    expect(res.body.rows).toHaveLength(8);
+    expect(res.body.excluded.at(-1)).toMatchObject({ code: 'blended', reason: 'blended' });
+    expect(JSON.stringify(res.body)).not.toMatch(/NaN|Infinity/);
+  });
+
+  it('rejects an unknown filter and a malformed weight with 400', async () => {
+    const agent = await signedIn();
+
+    for (const query of ['status=bogus', 'sort=bogus', 'dir=sideways', 'wCac=abc', 'wCac=10&wRomi=20']) {
+      const res = await agent.get(`/api/v1/channels?${query}`);
+      expect(res.status, query).toBe(400);
+      expect(res.body.error.code, query).toBe('VALIDATION_ERROR');
+      expect(res.body.error.message).toMatch(/[А-Яа-яЁё]/);
+    }
+  });
+
+  it('changes the order when custom weights favour another criterion', async () => {
+    const agent = await signedIn();
+
+    const byDefault = await agent.get('/api/v1/channels');
+    const byRomi = await agent.get('/api/v1/channels?wCac=0&wRomi=100&wLtvCac=0&wNewCustomers=0');
+
+    expect(byRomi.status).toBe(200);
+    expect(byRomi.body.weights).toEqual({ cac: 0, romi: 1, ltvCac: 0, newCustomers: 0 });
+    expect(byRomi.body.weightsBasisPoints).toEqual({ cac: 0, romi: 1000, ltvCac: 0, newCustomers: 0 });
+    expect(byRomi.body.rows.filter((row) => row.rank !== null).map((row) => row.code)).not.toEqual(
+      byDefault.body.rows.filter((row) => row.rank !== null).map((row) => row.code),
+    );
+  });
+});
+
+describe('GET /api/v1/ranking', () => {
+  it('is guarded by channels:view and returns the raw M3 ranking report', async () => {
+    expect(METRICS_API_PERMISSIONS['/ranking']).toBe('channels:view');
+
+    const agent = await signedIn();
+    const res = await agent.get('/api/v1/ranking');
+
+    expect(res.status).toBe(200);
+    expect(res.type).toMatch(/application\/json/);
+    expect(res.body.ranked.length).toBeGreaterThan(0);
+    expect(res.body.excluded).toContainEqual({ code: 'blended', reason: 'blended', reasonLabel: 'Сводная строка' });
+    expect(Object.values(res.body.weightsBasisPoints).reduce((sum, value) => sum + value, 0)).toBe(1000);
+
+    for (const row of res.body.ranked) {
+      const sum = row.contributions.reduce((total, entry) => total + entry.contribution, 0);
+      expect(Math.abs(sum - row.score)).toBeLessThanOrEqual(0.05);
+    }
+  });
+
+  it('rejects a partial or non-numeric weight set with 400', async () => {
+    const agent = await signedIn();
+
+    for (const query of ['wCac=abc', 'wCac=10&wRomi=20', 'wCac=0&wRomi=0&wLtvCac=0&wNewCustomers=0']) {
+      const res = await agent.get(`/api/v1/ranking?${query}`);
+      expect(res.status, query).toBe(400);
+      expect(res.body.error.code, query).toBe('VALIDATION_ERROR');
+    }
+  });
+});
+
+describe('channel API query budgets', () => {
+  it('keeps the channels list within 14 reads and the ranking within 12', async () => {
+    const counter = wrapDb(pool);
+    const metrics = createMetricsModule({
+      db: counter.db,
+      referenceRepository: createReferenceRepository(counter.db),
+    });
+    const { rows: anchorRows } = await pool.query('SELECT max(stat_date)::text AS anchor FROM daily_stats');
+    const anchor = anchorRows[0].anchor;
+
+    counter.reset();
+    await metrics.services.channelList.getChannelList({ anchor });
+    const channels = counter.count();
+
+    counter.reset();
+    await metrics.services.ranking.getRankingReport({ anchor });
+    const ranking = counter.count();
+
+    expect(channels, `channels used ${channels} queries`).toBeLessThanOrEqual(14);
+    expect(ranking, `ranking used ${ranking} queries`).toBeLessThanOrEqual(12);
+  });
+});

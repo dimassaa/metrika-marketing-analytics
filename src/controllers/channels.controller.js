@@ -1,9 +1,17 @@
 import { buildShellLocals } from './app.controller.js';
 import { NotFoundError, ValidationError } from '../lib/errors.js';
+import { resolvePeriod } from '../lib/periods.js';
 import { buildSeo } from '../lib/seo.js';
+import { parseQuery } from '../lib/validation.js';
+import {
+  buildChannelsFilterControl,
+  buildChannelsQueryState,
+  buildChannelsWeightsControl,
+  buildPeriodControl,
+} from '../services/metrics/screen-models.js';
+import { channelsPageQuerySchema, channelsQuerySchema } from '../validators/metrics.schema.js';
 import {
   channelCreateSchema,
-  channelFiltersSchema,
   channelFormValues,
   channelUpdateSchema,
 } from '../validators/channels.schema.js';
@@ -53,14 +61,58 @@ function actorOf(req) {
 }
 
 /**
+ * Loads the channel list screen once for both the page and the JSON API.
+ *
+ * Sharing the loader is what keeps `data-props` and `/api/v1/channels` identical. The page tolerates a stale
+ * `status`/`kind` bookmark through `channelsPageQuerySchema`; the API uses a strict schema over the same service.
+ *
+ * @param {{
+ *   services: { channelList: { getChannelList: Function } },
+ *   screenModels: { channels: Function },
+ *   referenceRepository: ReturnType<typeof import('../repositories/reference.repo.js').createReferenceRepository>,
+ *   schema?: import('zod').ZodType<object>,
+ * }} deps `schema` selects the tolerant page query or the strict API query; the rest of the pipeline is shared.
+ * @returns {(req: import('express').Request) => Promise<{ query: object, anchor: string, screen: object }>}
+ * @throws {import('../lib/errors.js').ValidationError} When the period, sort or weights are invalid.
+ */
+export function createChannelsScreenLoader({
+  services,
+  screenModels,
+  referenceRepository,
+  schema = channelsPageQuerySchema,
+}) {
+  return async function load(req) {
+    const query = parseQuery(schema, req.query);
+    const anchor = await referenceRepository.getDataAnchor();
+    const period = resolvePeriod({ anchor, days: query.days, from: query.from, to: query.to });
+    const list = await services.channelList.getChannelList({
+      anchor,
+      from: period.from,
+      to: period.to,
+      status: query.status,
+      kind: query.kind,
+      sort: query.sort,
+      dir: query.dir,
+      weights: query.weights,
+    });
+    return { query, anchor, screen: screenModels.channels({ list, query }) };
+  };
+}
+
+/**
  * Channel screens. Handlers translate HTTP only: parse with Zod, call one service method, render or redirect.
  * @param {{
  *   channelsService: ReturnType<typeof import('../services/channels.service.js').createChannelsService>,
  *   campaignsService: ReturnType<typeof import('../services/campaigns.service.js').createCampaignsService>,
  *   referenceRepository: ReturnType<typeof import('../repositories/reference.repo.js').createReferenceRepository>,
+ *   metrics: {
+ *     services: object,
+ *     screenModels: object,
+ *     loaders: { channels: (req: import('express').Request) => Promise<object> },
+ *   },
  * }} deps
  */
-export function createChannelsController({ channelsService, campaignsService, referenceRepository }) {
+export function createChannelsController({ channelsService, campaignsService, referenceRepository, metrics }) {
   /**
    * @param {import('express').Response} res
    */
@@ -72,20 +124,49 @@ export function createChannelsController({ channelsService, campaignsService, re
     });
   }
 
+  const load = metrics.loaders.channels;
+
   /**
    * Renders the list, optionally with a rejected create form. A validation failure is a 400 page, not a redirect:
    * the person stays on the form with their values and the reason next to it.
    * @param {import('express').Request} req
    * @param {import('express').Response} res
-   * @param {{ status?: number, filters?: object, error?: string | null, values?: object }} [options]
+   * @param {{ status?: number, error?: string | null, values?: object }} [options]
    */
-  async function renderList(req, res, { status = 200, filters = {}, error = null, values } = {}) {
-    const dataAnchor = await referenceRepository.getDataAnchor();
-    const { filters: applied, channels } = await channelsService.listChannelsForView(filters);
+  async function renderList(req, res, { status = 200, error = null, values } = {}) {
+    const { query, anchor, screen } = await load(req);
+    const weightsCustom = query.weightsCustom === true;
+    const state = buildChannelsQueryState({
+      query,
+      filters: screen.filters,
+      sort: query.sort,
+      dir: query.dir,
+      weights: screen.weights,
+      weightsCustom,
+    });
+
     res.status(status).render('pages/channels', {
-      ...buildShellLocals(req, { title: 'Каналы', activeNav: 'channels', dataAnchor }),
-      filters: applied,
-      channels,
+      ...buildShellLocals(req, { title: 'Каналы', activeNav: 'channels', dataAnchor: anchor }),
+      model: screen,
+      islandEntries: ['channels'],
+      filters: screen.filters,
+      filterControl: buildChannelsFilterControl({
+        query,
+        filters: screen.filters,
+        sort: query.sort,
+        dir: query.dir,
+        weights: screen.weights,
+        weightsCustom,
+      }),
+      weightsControl: buildChannelsWeightsControl({
+        query,
+        filters: screen.filters,
+        sort: query.sort,
+        dir: query.dir,
+        weights: screen.weights,
+      }),
+      periodControl: buildPeriodControl({ query: state }),
+      currentPath: `${req.baseUrl}${req.path}`,
       createError: error,
       createValues: values ?? EMPTY_CREATE_FORM,
     });
@@ -119,7 +200,7 @@ export function createChannelsController({ channelsService, campaignsService, re
      * @type {import('express').RequestHandler}
      */
     async list(req, res) {
-      await renderList(req, res, { filters: channelFiltersSchema.parse(req.query) });
+      await renderList(req, res);
     },
 
     /**

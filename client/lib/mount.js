@@ -13,10 +13,11 @@ import { ChartErrorBoundary } from '../components/charts/ChartErrorBoundary.jsx'
  *
  * @param {import('react').ComponentType<object>} Component
  * @param {string} name Island name as written into `data-island`.
+ * @param {string} [title] Screen name for the top-level error boundary.
  * @returns {void}
  * @throws {Error} When the mount node is missing, duplicated, or its `data-props` is not valid JSON.
  */
-export function mountIsland(Component, name) {
+export function mountIsland(Component, name, title = 'Данные') {
   const nodes = document.querySelectorAll(`[data-island="${name}"]`);
   if (nodes.length !== 1) {
     throw new Error(`island "${name}" must have exactly one mount node, found ${nodes.length}`);
@@ -35,7 +36,7 @@ export function mountIsland(Component, name) {
   createRoot(node).render(
     createElement(
       ChartErrorBoundary,
-      { island: name, title: 'Дашборд' },
+      { island: name, title },
       createElement(Component, props),
     ),
   );

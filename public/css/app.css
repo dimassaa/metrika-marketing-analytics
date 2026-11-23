@@ -2271,3 +2271,118 @@ input[type='file'] {
     margin-left: auto;
   }
 }
+
+/* Channels table — many measures, so the wrapper scrolls instead of squeezing columns into an unreadable grid. */
+.table--channels {
+  min-width: 1080px;
+}
+
+.table--channels th,
+.table--channels td {
+  padding: var(--spacing-8) var(--spacing-12);
+}
+
+.table--channels tbody tr {
+  scroll-margin-top: var(--spacing-24);
+}
+
+.table__sort {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.table__sort:hover,
+.table__sort--active {
+  color: var(--color-ink-black);
+}
+
+.table__sort-arrow {
+  color: var(--color-cyan-edge);
+  font-variant-numeric: tabular-nums;
+}
+
+.table__rank {
+  display: block;
+  color: var(--color-ink-black);
+  font-weight: 500;
+}
+
+.table__score {
+  display: block;
+  color: var(--color-warm-gray);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.table__channel {
+  display: block;
+  color: var(--color-ink-black);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.table__channel:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.table__meta {
+  display: block;
+  color: var(--color-warm-gray);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.table__spark {
+  width: 88px;
+}
+
+/* Sparkline geometry is fixed in React; the cell only keeps it from wrapping the row. */
+.sparkline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 72px;
+}
+
+.sparkline--empty {
+  justify-content: center;
+  color: var(--color-ash-gray);
+}
+
+.sparkline svg {
+  display: block;
+}
+
+/* Excluded channels: a plain definition-like list, no coloured panel. */
+.excluded {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-8);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.excluded__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--spacing-8);
+  padding-bottom: var(--spacing-8);
+  border-bottom: 1px solid var(--color-stone-border);
+}
+
+.excluded__row:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.excluded__reason {
+  color: var(--color-warm-gray);
+  font-size: 13px;
+}

@@ -4,14 +4,17 @@ import { createChannelsRepository } from '../../repositories/channels.repo.js';
 import { createCohortsRepository } from '../../repositories/cohorts.repo.js';
 import { createMetricsRepository } from '../../repositories/metrics.repo.js';
 import { createMetricsApiController } from '../../controllers/api/metrics.controller.js';
+import { createChannelsScreenLoader } from '../../controllers/channels.controller.js';
 import { createDashboardController } from '../../controllers/dashboard.controller.js';
 import { createAttributionService } from './attribution.service.js';
 import { createCacService } from './cac.service.js';
+import { createChannelListService } from './channel-list.service.js';
 import { createDashboardService } from './dashboard.service.js';
 import { createLtvService } from './ltv.service.js';
 import { createRankingService } from './ranking.service.js';
 import { createChannelHealthService } from './romi.service.js';
-import { buildDashboardScreen } from './screen-models.js';
+import { buildChannelsScreen, buildDashboardScreen } from './screen-models.js';
+import { channelsQuerySchema } from '../../validators/metrics.schema.js';
 
 /**
  * Composition root for the metrics engine.
@@ -34,6 +37,7 @@ import { buildDashboardScreen } from './screen-models.js';
  *   services: Record<string, object>,
  *   controllers: Record<string, object>,
  *   screenModels: Record<string, Function>,
+ *   loaders: Record<string, Function>,
  * }}
  * @throws {TypeError} When the database or the data-anchor repository is missing.
  */
@@ -70,6 +74,11 @@ export function createMetricsModule({ db, referenceRepository = null } = {}) {
     attributionService,
   });
   const rankingService = createRankingService({ healthService: channelHealthService });
+  const channelListService = createChannelListService({
+    healthService: channelHealthService,
+    metricsRepository: repository,
+    channelsRepository,
+  });
 
   const services = {
     cac: cacService,
@@ -78,10 +87,25 @@ export function createMetricsModule({ db, referenceRepository = null } = {}) {
     channelHealth: channelHealthService,
     ranking: rankingService,
     dashboard: dashboardService,
+    channelList: channelListService,
   };
-  const screenModels = { dashboard: buildDashboardScreen };
+  const screenModels = { dashboard: buildDashboardScreen, channels: buildChannelsScreen };
+  const loaders = {
+    channels: createChannelsScreenLoader({ services, screenModels, referenceRepository }),
+    channelsApi: createChannelsScreenLoader({
+      services,
+      screenModels,
+      referenceRepository,
+      schema: channelsQuerySchema,
+    }),
+  };
   const dashboardController = createDashboardController({ services, screenModels, referenceRepository });
-  const apiController = createMetricsApiController({ dashboardController });
+  const apiController = createMetricsApiController({
+    dashboardController,
+    channelsScreenLoader: loaders.channelsApi,
+    rankingService,
+    referenceRepository,
+  });
 
   return {
     repository,
@@ -95,5 +119,6 @@ export function createMetricsModule({ db, referenceRepository = null } = {}) {
     services,
     controllers: { dashboard: dashboardController, api: apiController },
     screenModels,
+    loaders,
   };
 }

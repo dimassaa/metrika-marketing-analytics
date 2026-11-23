@@ -1,15 +1,28 @@
+<%#
+  Channels frame. The page owns the shell, the M2 create form, the list filters, the CSV export and the weights form;
+  the table, health badges, sparklines, score stack and ROMI bars are rendered by `client/entries/channels.jsx` from
+  `model` — the same object `/api/v1/channels` returns.
+
+  Every GET control replays the query parameters it does not change through hidden inputs. Changing the status must
+  not silently reset the period, the sort order or custom weights, and changing the weights must not reset the M2
+  filters. The export form is the exception: its schema knows only `status`/`kind`, so it sends exactly those.
+%>
 <section class="app-section">
   <div class="stack stack--lg">
     <div class="stack stack--sm">
       <h2>Каналы привлечения</h2>
       <p class="u-muted">
-        Целевые CAC и ROMI заданы в белорусских рублях и процентах. Архивный канал остаётся в истории и отчётах,
-        но новые кампании по нему создать нельзя.
+        Рейтинг складывается из CAC, ROMI, LTV:CAC и числа новых клиентов. Целевые CAC и ROMI заданы в белорусских
+        рублях и процентах. Архивный канал остаётся в истории и отчётах, но новые кампании по нему создать нельзя.
       </p>
     </div>
 
     <div class="toolbar">
-      <form class="filter-bar" method="get" action="/app/channels" aria-label="Фильтры каналов">
+      <form class="filter-bar" method="get" action="<%= filterControl.action %>" aria-label="Фильтры каналов">
+        <% for (const field of filterControl.hiddenFields) { %>
+        <input type="hidden" name="<%= field.name %>" value="<%= field.value %>">
+        <% } %>
+
         <label class="field">
           <span class="field__label">Статус</span>
           <select class="select" name="status">
@@ -30,6 +43,9 @@
         </label>
 
         <button class="btn btn--ghost btn--sm" type="submit">Показать</button>
+        <% if (filters.active) { %>
+        <a class="btn btn--ghost btn--sm" href="<%= filters.resetHref %>">Сбросить фильтры</a>
+        <% } %>
       </form>
 
       <% if (can('export')) { %>
@@ -40,6 +56,49 @@
       </form>
       <% } %>
     </div>
+
+    <% if (can('channels:view') && locals.weightsControl) { %>
+    <div class="card card--flat">
+      <div class="card__header">
+        <div>
+          <h3 class="card__title">Веса рейтинга</h3>
+          <p class="card__meta">
+            Четыре числа от 0 до 100. Сервер нормализует их к сумме 100, поэтому важны пропорции, а не абсолютные
+            значения. Рейтинг доступен всем ролям и меняется только в адресе страницы.
+          </p>
+        </div>
+      </div>
+
+      <form class="inline-form" method="get" action="<%= weightsControl.action %>" aria-label="Веса рейтинга каналов">
+        <% for (const field of weightsControl.hiddenFields) { %>
+        <input type="hidden" name="<%= field.name %>" value="<%= field.value %>">
+        <% } %>
+
+        <% for (const field of weightsControl.fields) { %>
+        <label class="field">
+          <span class="field__label"><%= field.label %></span>
+          <input
+            class="input"
+            type="number"
+            name="<%= field.name %>"
+            value="<%= field.value %>"
+            min="0"
+            max="100"
+            step="1"
+            inputmode="numeric"
+            required
+          >
+          <span class="field__hint"><%= field.hint %></span>
+        </label>
+        <% } %>
+
+        <div class="cluster">
+          <button class="btn btn--ghost" type="submit">Пересчитать рейтинг</button>
+          <a class="btn btn--ghost" href="<%= weightsControl.resetHref %>">Веса по умолчанию</a>
+        </div>
+      </form>
+    </div>
+    <% } %>
 
     <% if (can('channels:manage')) { %>
     <div class="card card--flat">
@@ -133,74 +192,6 @@
     </div>
     <% } %>
 
-    <% if (channels.length === 0) { %>
-    <div class="empty-state">
-      <p class="empty-state__title">По этому фильтру каналов нет</p>
-      <p class="empty-state__text">Измените статус или тип канала — или вернитесь к полному списку.</p>
-      <div class="empty-state__actions">
-        <a class="btn btn--ghost" href="/app/channels">Сбросить фильтры</a>
-      </div>
-    </div>
-    <% } else { %>
-    <div class="table-wrap">
-      <table class="table">
-        <thead>
-          <tr>
-            <th scope="col">Канал</th>
-            <th scope="col">Тип</th>
-            <th scope="col">Статус</th>
-            <th scope="col" class="u-right">Целевой CAC</th>
-            <th scope="col" class="u-right">Целевой ROMI</th>
-            <th scope="col" class="u-right">Кампании</th>
-            <th scope="col"><span class="u-visually-hidden">Действия</span></th>
-          </tr>
-        </thead>
-        <tbody>
-          <% channels.forEach((channel) => { %>
-          <tr>
-            <td>
-              <a href="/app/channels/<%= channel.id %>"><%= channel.name %></a>
-              <span class="u-muted u-nowrap">· <%= channel.code %></span>
-            </td>
-            <td><%= channel.kindLabel %></td>
-            <td>
-              <span class="badge <%= channel.isActive ? 'badge--healthy' : 'badge--neutral' %>">
-                <%= channel.statusLabel %>
-              </span>
-            </td>
-            <td class="u-right">
-              <% if (channel.targetCacLabel === null) { %>
-              <span class="u-muted">—</span>
-              <% } else { %>
-              <span class="u-nowrap"><%= channel.targetCacLabel %> <span class="byn">BYN</span></span>
-              <% } %>
-            </td>
-            <td class="u-right"><%= channel.targetRomiLabel %></td>
-            <td class="u-right u-nowrap" title="Активные из всех кампаний канала">
-              <%= channel.activeCampaignCount %> / <%= channel.campaignCount %>
-            </td>
-            <td>
-              <div class="row-actions">
-                <a class="btn btn--ghost btn--sm" href="/app/channels/<%= channel.id %>">Открыть</a>
-                <% if (can('channels:manage')) { %>
-                <form method="post" action="/app/channels/<%= channel.id %>/archive">
-                  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                  <button
-                    class="btn btn--ghost btn--sm"
-                    type="submit"
-                    aria-label="<%= channel.isActive ? 'Архивировать' : 'Вернуть из архива' %>: <%= channel.name %>"
-                  >
-                    <%= channel.isActive ? 'В архив' : 'Вернуть' %>
-                  </button>
-                </form>
-                <% } %>
-              </div>
-            </td>
-          </tr>
-          <% }) %>
-        </tbody>
-      </table>
-    </div>
-    <% } %>
+    <%- include('../partials/island', { name: 'channels', model }) %>
   </div>
 </section>

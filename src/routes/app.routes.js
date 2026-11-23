@@ -52,7 +52,12 @@ export function createAppRouter({
 }) {
   const appController = createAppController({ referenceRepository });
   const adminController = createAdminController({ usersService, auditService, referenceRepository, mediaRepository });
-  const channelsController = createChannelsController({ channelsService, campaignsService, referenceRepository });
+  const channelsController = createChannelsController({
+    channelsService,
+    campaignsService,
+    referenceRepository,
+    metrics,
+  });
   const campaignsController = createCampaignsController({ campaignsService, channelsService, referenceRepository });
   const goalsController = createGoalsController({ goalsService, channelsService, referenceRepository });
   const exportController = createExportController({ exportService, auditService });

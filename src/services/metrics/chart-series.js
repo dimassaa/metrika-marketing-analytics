@@ -8,6 +8,19 @@ import {
   toSpendRevenuePoints,
 } from '../../lib/series.js';
 
+/** Recharts needs a number for the sparkline; kopecks stay below `Number.MAX_SAFE_INTEGER` for any realistic stand. */
+function sparkValue(cents) {
+  if (cents === null || cents === undefined) return null;
+  if (typeof cents === 'string' && !/^-?\d+$/.test(cents)) {
+    throw new TypeError(`sparkline cacCents must be an integer, got ${JSON.stringify(cents)}`);
+  }
+  const value = Number(cents);
+  if (!Number.isSafeInteger(value)) {
+    throw new TypeError(`sparkline cacCents must be an integer, got ${JSON.stringify(cents)}`);
+  }
+  return value;
+}
+
 /**
  * Builds the chart half of a screen model: data, a factual caption and the duplicate table.
  *
@@ -300,6 +313,81 @@ export function buildCacLtvScatter({ channels }) {
           ltv: formatCentsToByn(point.ltv),
           customers: formatInteger(point.newCustomers),
         },
+      })),
+    },
+  };
+}
+
+/**
+ * Sparkline points for one channel: weekly CAC in kopecks, with `null` where the week had no customers.
+ *
+ * The component only draws the points; the window, the week labels and the CAC division already happened in the
+ * service. A `null` is kept instead of becoming `0`, so `connectNulls={false}` leaves a real gap.
+ *
+ * @param {Array<{ weekLabel: string, cacCents: string | null }>} weeklyCacRows One complete week per row.
+ * @returns {Array<{ weekLabel: string, value: number | null }>}
+ * @throws {TypeError} When a present CAC is not an integer kopeck string.
+ */
+export function toSparklinePoints(weeklyCacRows) {
+  if (!Array.isArray(weeklyCacRows)) return [];
+  return weeklyCacRows.map((row) => ({
+    weekLabel: row.weekLabel,
+    value: sparkValue(row.cacCents),
+  }));
+}
+
+/**
+ * Horizontal ROMI bars, one per channel that has a finite ROMI.
+ *
+ * Bars are ordered by ROMI descending because the chart answers "who returns the most", and only the leader gets the
+ * cyan accent. A channel without ROMI (zero spend or no customers) is not plotted but stays in the table of the
+ * screen, which is the honest "не измерено" state.
+ *
+ * @param {{ channels: object[], periodLabel?: string }} input JSON-safe health rows.
+ * @returns {object} Chart contract consumed by `ChartFrame` + `RomiBars`.
+ * @throws {TypeError} When a present ROMI is not a finite number.
+ */
+export function buildRomiByChannelChart({ channels, periodLabel = '' }) {
+  const points = [];
+  for (const channel of channels) {
+    if (channel.romiPct === null || channel.romiPct === undefined) continue;
+    if (!Number.isFinite(channel.romiPct)) {
+      throw new TypeError(`channel romiPct must be finite, got ${String(channel.romiPct)}`);
+    }
+    points.push({
+      channelId: channel.channelId,
+      name: channel.name,
+      romi: channel.romiPct,
+      romiLabel: formatRomi(channel.romiPct),
+    });
+  }
+  points.sort((left, right) => right.romi - left.romi || left.name.localeCompare(right.name, 'ru'));
+
+  const count = channelsLabel(points.length);
+  const leader = points[0] ?? null;
+  const conclusion =
+    leader === null ? 'нет каналов с измеренным ROMI' : `лидер ${leader.name}, ${leader.romiLabel}`;
+  const detail = `${count}${periodLabel === '' ? '' : ` · ${periodLabel}`} · ${conclusion}`;
+
+  return {
+    id: 'romi',
+    title: 'ROMI по каналам',
+    caption: captionOf('ROMI по каналам', detail),
+    ariaLabel: `ROMI по каналам: ${detail}`,
+    unit: '%',
+    hasData: points.length > 0,
+    series: points.map((point, index) => ({
+      ...point,
+      highlight: index === 0,
+    })),
+    table: {
+      columns: [
+        { key: 'channel', label: 'Канал', numeric: false },
+        { key: 'value', label: 'ROMI', numeric: true },
+      ],
+      rows: points.map((point) => ({
+        key: point.channelId,
+        cells: { channel: point.name, value: point.romiLabel },
       })),
     },
   };
