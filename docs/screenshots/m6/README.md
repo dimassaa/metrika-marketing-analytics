@@ -1,0 +1,277 @@
+# M6 — журнал доказательств
+
+Дата прогона: 24.11.2026. База: коммит `c6bfba7` (M5 закрыт, план M6 закоммичен); артефакты Task 1 в рабочем
+дереве на момент прогона — следующий коммит. Все команды выполнены на Linux (CachyOS), не в Windows и не в Docker
+Desktop.
+
+## Окружение
+
+| Компонент | Версия / значение |
+|---|---|
+| Node.js на хосте | `v26.13.0` |
+| npm | `12.2.1` |
+| Docker Engine | `29.9.2` (client и server) |
+| Docker Compose | `v5.8.0` (user-level плагин) |
+| Node.js в образе | `v24.22.3` (`node:24-bookworm-slim`) |
+| PostgreSQL | `18.7` (`postgres:18-alpine`; `psql`/`pg_dump` — `18.7-1.pgdg12+5`) |
+| Образ приложения | `metrika-app:latest`, ID `sha256:a6421a4fc082…` (финальная сборка, healthcheck timeout 15s) |
+| Порт | `127.0.0.1:3000` только loopback |
+
+## Docker
+
+### 1. Предусловие Compose
+
+Исходное состояние — плагина нет:
+
+```text
+$ docker compose version
+docker: unknown command: docker compose
+
+$ which docker-compose
+which: no docker-compose in (...)
+```
+
+Плагин установлен user-level, без `sudo`, pinned-версией v5.8.0:
+
+```bash
+mkdir -p ~/.docker/cli-plugins
+curl -fsSL -o ~/.docker/cli-plugins/docker-compose \
+  https://github.com/docker/compose/releases/download/v5.8.0/docker-compose-linux-x86_64
+chmod +x ~/.docker/cli-plugins/docker-compose
+docker compose version
+```
+
+```text
+Docker Compose version v5.8.0
+```
+
+### 2. `docker compose config` без `.env`
+
+`.env` временно убран, чтобы проверить дефолты:
+
+```text
+$ mv .env /tmp/metrika-env-backup
+$ docker compose config
+exit=0
+$ mv /tmp/metrika-env-backup .env
+```
+
+Разрешённые значения без `.env`: `DATABASE_URL=postgres://postgres:postgres@db:5432/metrika`,
+`POSTGRES_USER=postgres`, `POSTGRES_DB=metrika`. Проверенные свойства:
+
+```text
+name=metrika
+db.image=postgres:18-alpine
+db.health=["CMD-SHELL","pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+app.ports=[{"mode":"ingress","host_ip":"127.0.0.1","target":3000,"published":"3000","protocol":"tcp"}]
+app.health=["CMD","node","-e","fetch('http://127.0.0.1:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+app.read_only=true
+app.tmpfs=["/tmp:mode=1777,size=256m"]
+app.cap_drop=["ALL"]
+app.security_opt=["no-new-privileges:true"]
+volumes=app_data,backup_data,db_data
+```
+
+У сервиса `db` нет секции `ports`; PostgreSQL доступен только по внутренней сети Compose.
+
+### 3. Сборка и запуск
+
+```bash
+docker compose build
+docker compose up -d
+```
+
+```text
+Successfully built 7cefabb6a1d5
+Successfully tagged metrika-app:latest
+
+ Network metrika_default Creating
+ Volume metrika_backup_data Creating
+ Volume metrika_app_data Creating
+ Volume metrika_db_data Creating
+ Container metrika-db-1 Creating
+ Container metrika-db-1 Starting
+ Container metrika-db-1 Healthy
+ Container metrika-app-1 Starting
+ Container metrika-app-1 Started
+```
+
+```text
+$ docker compose ps
+NAME            IMAGE                SERVICE   STATUS                            PORTS
+metrika-app-1   metrika-app          app       Up 19 seconds (healthy)           127.0.0.1:3000->3000/tcp
+metrika-db-1    postgres:18-alpine   db        Up 24 seconds (healthy)           5432/tcp
+```
+
+### 4. Миграции, автосид и `/health`
+
+```text
+app-1 | {"msg":"applied 001_init.sql"}
+app-1 | {"msg":"applied 002_m2_data.sql"}
+app-1 | {"msg":"applied 003_media_mime_check.sql"}
+app-1 | {"msg":"applied 004_m3_metrics_indexes.sql"}
+app-1 | {"msg":"applied 005_drop_redundant_customer_index.sql"}
+app-1 | {"msg":"applied 006_decisions.sql"}
+app-1 | {"msg":"demo stand was empty: seeded users, channels and daily stats"}
+app-1 | {"port":3000,"nodeEnv":"production","msg":"server listening"}
+```
+
+```text
+$ curl -fsS http://127.0.0.1:3000/health
+{"status":"ok","db":"up","version":"0.1.0"}
+```
+
+Asset-пути из отданного HTML отвечают 200, включая `/img/og-cover.svg` и `/css/app.css`:
+
+```text
+/assets/chunks/ChartTooltip-aqaNQ0-l.js -> 200
+/assets/chunks/HealthBadge-oo31xU77.js -> 200
+/img/og-cover.svg -> 200
+/css/app.css -> 200
+```
+
+### 5. Вход и счётчики
+
+```text
+$ curl -sS -c cookies -b cookies -X POST http://127.0.0.1:3000/login \
+    --data-urlencode "_csrf=$TOKEN" \
+    --data-urlencode "email=admin@metrika.by" \
+    --data-urlencode "password=Metrika2026!"
+HTTP/1.1 302 Found
+$ curl -sS -b cookies http://127.0.0.1:3000/app/dashboard
+<title>Дашборд — Метрика
+
+$ docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc \
+    "select count(*) from users; select count(*) from channels; select count(*) from daily_stats"'
+3
+8
+12723
+```
+
+### 6. Non-root, read-only rootfs, права файлов
+
+```text
+$ docker compose exec -T app id
+uid=1000(node) gid=1000(node) groups=1000(node)
+
+$ docker compose exec -T app touch /app/data/probe
+-rw-r--r-- 1 node node 0 … /app/data/probe
+
+$ docker compose exec -T app touch /app/should-fail
+touch: cannot touch '/app/should-fail': Read-only file system
+
+$ docker compose exec -T app stat -c '%a %U %n' /app/data/session-secret /app/data/tmp
+600 node /app/data/session-secret
+700 node /app/data/tmp
+```
+
+### 7. Рестарт и повторный `up` сохраняют сессию и данные
+
+```text
+$ docker compose restart
+$ curl -sS -b cookies http://127.0.0.1:3000/app/dashboard
+status=200
+<title>Дашборд — Метрика
+app-1 | {"msg":"database is up to date, nothing to apply"}
+app-1 | {"msg":"demo stand already has data (users=3, channels=8, daily_stats=12723); seeding skipped"}
+
+$ docker compose down && docker compose up -d
+$ curl -sS -b cookies http://127.0.0.1:3000/app/dashboard
+status=200
+$ docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select count(*) from users"'
+3
+```
+
+### 8. Health-контракт: БД упала → 503 и `unhealthy`
+
+```text
+$ docker compose stop db
+$ curl -sS -o /tmp/health-down.json -w '%{http_code}' http://127.0.0.1:3000/health
+503
+{"status":"error","db":"down","version":"0.1.0"}
+
+$ docker inspect --format '{{.State.Health.Status}}' metrika-app-1
+unhealthy
+
+$ docker inspect --format '{{range .State.Health.Log}}{{.ExitCode}} {{end}}' metrika-app-1
+1 1 1 1 1
+```
+
+Код выхода `1` (а не только таймаут процесса) подтверждает, что healthcheck проверяет `r.ok`: ответ 503 считается
+провалом. После `docker compose start db`:
+
+```text
+$ docker compose start db
+$ docker inspect --format '{{.State.Health.Status}}' metrika-app-1
+healthy
+$ curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/health
+200
+```
+
+### 9. `down -v` сбрасывает стенд
+
+```text
+$ docker compose down -v
+ Volume metrika_app_data Removed
+ Volume metrika_backup_data Removed
+ Volume metrika_db_data Removed
+
+$ docker compose up -d
+ Container metrika-db-1 Healthy
+ Container metrika-app-1 Started
+app-1 | {"msg":"applied 001_init.sql"} … {"msg":"applied 006_decisions.sql"}
+app-1 | {"msg":"demo stand was empty: seeded users, channels and daily stats"}
+
+$ docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc \
+    "select count(*) from users; select count(*) from channels; select count(*) from daily_stats"'
+3
+8
+12723
+```
+
+После сброса стенд оставлен запущенным и `healthy`.
+
+### 10. Контракт образа
+
+```text
+$ docker image inspect metrika-app:latest --format 'user={{.Config.User}} entrypoint={{json .Config.Entrypoint}} cmd={{json .Config.Cmd}}'
+user=node entrypoint=["/usr/local/bin/entrypoint.sh"] cmd=["node","src/server.js"]
+```
+
+Runtime-стадия получает фронтенд одной строкой `COPY --from=client-build /app/public ./public`; исходный
+`public/` и собранные `public/assets` проверены запросами выше. В образ не попадают `tests/`, `docs/`, `.env`,
+`.git`, `public/assets` из хоста, `backups` и `.superpowers`.
+
+## Тесты
+
+```bash
+npx vitest run tests/integration/container-contract.test.js tests/unit/seed-demo.test.js tests/unit/config-env.test.js
+```
+
+```text
+✓ tests/integration/container-contract.test.js (33 tests)
+✓ tests/unit/config-env.test.js (36 tests)
+✓ tests/unit/seed-demo.test.js (6 tests)
+
+Test Files  3 passed (3)
+Tests       75 passed (75)
+```
+
+Полный прогон:
+
+```text
+Test Files  94 passed (94)
+Tests       1132 passed (1132)
+Duration    87.42s
+```
+
+## Не проверено здесь — закрывает владелец
+
+- **Windows 10** и **Docker Desktop**: у агента нет Windows-машины; Linux-прогон их не заменяет.
+- **Firefox**: доступен только Chromium через `agent-browser`; кросс-браузерная матрица — прогон владельца.
+- **TLS**: публичный HTTPS-стенд за reverse proxy в этой задаче не поднимался.
+
+## Verdict
+
+Compose установлен и проверен реальным выводом `docker compose config/up`; Docker-путь Task 1 **закрыт**.
+Ограничения выше относятся к T6/T8 и не выдаются за выполненные.

@@ -1,0 +1,79 @@
+# Zero-edit demo stand: `docker compose up --build` with no `.env` starts PostgreSQL 18 and the app on
+# http://127.0.0.1:3000. The interpolation defaults below are suitable for local demonstration only.
+name: metrika
+
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-metrika}
+    volumes:
+      # PostgreSQL 18 stores its cluster under /var/lib/postgresql/18/docker; mounting the parent is the supported
+      # path and differs from the pre-18 `/var/lib/postgresql/data` convention.
+      - db_data:/var/lib/postgresql
+    healthcheck:
+      # `$$` is escaped for Compose and becomes `$POSTGRES_USER`/`$POSTGRES_DB` inside the container, so the probe
+      # checks the user and database the image actually created instead of a host value or an empty string.
+      test: ["CMD-SHELL", 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      # Loopback-only: the demo exception in env.js is valid only for a loopback APP_URL, and a public stand must
+      # terminate TLS in front of the app and use COOKIE_SECURE=true.
+      - 127.0.0.1:${APP_PORT:-3000}:3000
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-metrika}
+      APP_URL: http://localhost:${APP_PORT:-3000}
+      COOKIE_SECURE: "false"
+      DEMO_INSECURE_COOKIES: "true"
+      TRUST_PROXY: "false"
+      AUTO_SEED_DEMO: "true"
+      RUN_MIGRATIONS: "true"
+      # Secrets and backup material live in the app_data volume, never in the Compose environment.
+      SESSION_SECRET_FILE: /app/data/session-secret
+      BACKUP_KEY_FILE: /app/data/backup.key
+      BACKUP_DIR: /backup
+      RESTORE_TMP_DIR: /app/data/tmp
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - app_data:/app/data
+      - backup_data:/backup
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=256m
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      # `r.ok` (not "the request answered") is deliberate: a 503 from /health means the database is unreachable, and
+      # the container must then report unhealthy instead of looking green because Node is still alive.
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 10s
+      timeout: 15s
+      retries: 6
+      start_period: 60s
+    restart: unless-stopped
+
+volumes:
+  db_data:
+  app_data:
+  backup_data:

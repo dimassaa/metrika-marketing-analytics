@@ -897,3 +897,23 @@ Still open:
   channels, campaigns, `daily_stats` and orders; there is no `scenarios.csv` or `alerts.csv`. The owner's M5 ruling
   keeps the existing datasets only, so an export of either decision screen (with its filters or snapshot JSON) is a
   separate feature rather than a missing button in this milestone.
+
+## M6 Task 1 — Docker image and compose stand
+
+- **The runtime image is 527 MB and keeps build-only tools.** `postgresql-client-18` from PGDG pulls `perl` and
+  `libperl`; the image also keeps `curl` and `gnupg` used only to add the PGDG key. A later pass can purge
+  `curl`/`gnupg` after the install and use a multi-stage copy of the client, but Task 1 prioritises a verified,
+  readable image over size. Not a correctness issue: no compiler or npm dev tree ships.
+- **`POSTGRES_PASSWORD` is interpolated into `DATABASE_URL` without URL-encoding.** The zero-edit demo uses the
+  literal `postgres`, so it works; a password containing `@`, `:`, `/` or `?` would need percent-encoding. Fixing this
+  properly means either URL-encoding in Compose (not possible portably in interpolation) or passing the parts as
+  `PGHOST`/`PGUSER`/… and letting `pg` assemble the connection. Recorded rather than changed because the container
+  contract and Task 2 both name `DATABASE_URL`.
+- **`/health` waits for the pool's TCP timeout when PostgreSQL is stopped.** With the database container stopped,
+  `SELECT 1` took about 7.5 s before returning 503 because the shared pool has no `connectionTimeoutMillis`. The
+  Compose healthcheck timeout was raised to 15 s so it observes the honest 503 and exits 1 instead of being killed by
+  the probe timeout. A faster, bounded health path (short-lived client with `connectionTimeoutMillis`) is a product
+  change for the performance/security task, not a Docker wrapper fix.
+- **The local builder is the classic Docker builder, so `COPY --chmod` is unavailable.** The Dockerfile uses a plain
+  `COPY` plus `chmod` in a later `RUN`; this works on both builders. If the owner's environment has BuildKit enabled,
+  the explicit `chmod` can be folded back into `COPY --chmod=0755` without changing the contract.

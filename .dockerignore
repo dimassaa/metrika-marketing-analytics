@@ -1,0 +1,9 @@
+.env
+.git
+tests/
+docs/
+node_modules
+public/assets
+backups
+coverage
+.superpowers
