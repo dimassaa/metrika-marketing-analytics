@@ -12,7 +12,7 @@ import { resolveWeekRange } from '../metrics/weekly-series.js';
  * in the candidate are a storage trail for `NUMERIC(14,4)`, never the input of a comparison.
  */
 
-/** `alerts.value` and `alerts.threshold` are widened to `NUMERIC(14,4)` by migration 006. */
+/** Four decimals match the `NUMERIC(14,4)` target for `alerts.value`/`threshold`; migration 006 lands in Task 5. */
 const ALERT_DECIMALS = 4;
 
 /** Alert threshold from metrics spec §7; deliberately separate from the health `watch` limit, which may move. */

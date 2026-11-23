@@ -102,6 +102,50 @@ describe('evaluateChannelAlerts cac_spike', () => {
       { rule: 'cac_spike', severity: 'critical', value: '1.5010', threshold: '1.5000' },
     ]);
   });
+
+  it('compares CAC, not raw spend: 1500/8 against 1000/10 is 1.875× and critical', () => {
+    const candidates = evaluateChannelAlerts({
+      now: window({ spendCents: 1500n, newCustomers: 8 }),
+      prev: window({ spendCents: 1000n, newCustomers: 10 }),
+    });
+
+    // A spend-only rule would see exactly 1.5× and stop at a warning.
+    expect(candidates).toEqual([
+      { rule: 'cac_spike', severity: 'critical', value: '1.8750', threshold: '1.5000' },
+    ]);
+  });
+
+  it('compares CAC, not raw spend: 1080/8 against 1000/10 is 1.35× and a warning', () => {
+    const candidates = evaluateChannelAlerts({
+      now: window({ spendCents: 1080n, newCustomers: 8 }),
+      prev: window({ spendCents: 1000n, newCustomers: 10 }),
+    });
+
+    // Raw spend grew by only 8%, so a spend-only rule would stay silent.
+    expect(candidates).toEqual([
+      { rule: 'cac_spike', severity: 'warning', value: '1.3500', threshold: '1.2000' },
+    ]);
+  });
+
+  it('computes the 1.2× threshold from the previous CAC, not from the current value', () => {
+    // 120.2 / 100.1 = 1.20079…; the threshold is 1.2 × 1.001 BYN = 1.2012 BYN.
+    expect(
+      evaluateChannelAlerts({
+        now: window({ spendCents: 1202n, newCustomers: 10 }),
+        prev: window({ spendCents: 1001n, newCustomers: 10 }),
+      }),
+    ).toEqual([
+      { rule: 'cac_spike', severity: 'warning', value: '1.2020', threshold: '1.2012' },
+    ]);
+
+    // 120.1 / 100.1 = 1.1998…, just below the boundary.
+    expect(
+      evaluateChannelAlerts({
+        now: window({ spendCents: 1201n, newCustomers: 10 }),
+        prev: window({ spendCents: 1001n, newCustomers: 10 }),
+      }),
+    ).toEqual([]);
+  });
 });
 
 describe('evaluateChannelAlerts romi rules', () => {
@@ -168,6 +212,16 @@ describe('evaluateChannelAlerts romi rules', () => {
     expect(candidates).toEqual([
       { rule: 'romi_below_target', severity: 'warning', value: '19.9900', threshold: '20.0000' },
     ]);
+  });
+
+  it('rejects a negative target instead of silently skipping the rule', () => {
+    expect(() =>
+      evaluateChannelAlerts({
+        now: window({ spendCents: 10_000n, newCustomers: 10, revenueCents: 10_500n }),
+        prev: PREV,
+        targetRomiPct: '-5.00',
+      }),
+    ).toThrow(TypeError);
   });
 });
 
