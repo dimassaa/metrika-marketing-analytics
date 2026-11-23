@@ -209,6 +209,7 @@ export function ChannelIsland({
           unit={charts.spendRevenue.unit}
           ariaLabel={charts.spendRevenue.ariaLabel}
           empty={!charts.spendRevenue.hasData}
+          emptyText="За период не было ни расхода, ни атрибутированной выручки. Нулевая линия читалась бы как измеренный ноль, поэтому здесь пустое состояние; недели и значения — в таблице."
           table={charts.spendRevenue.table}
           height="md"
         >

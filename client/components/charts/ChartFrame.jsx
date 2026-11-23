@@ -44,17 +44,6 @@ export function ChartFrame({
   const titleId = useId();
   const tableRef = useRef(null);
 
-  /**
-   * Opens the already-rendered duplicate table. There is no fetch and no second data source: the collapse is a
-   * visual choice, so the action only has to reveal what is already in the DOM and move focus to its control.
-   */
-  function revealTable() {
-    const details = tableRef.current;
-    if (!details) return;
-    details.open = true;
-    details.querySelector('summary')?.focus();
-  }
-
   const hasTable = Array.isArray(table?.columns) && table.columns.length > 0;
 
   return (
@@ -75,8 +64,12 @@ export function ChartFrame({
         <EmptyState
           action={
             hasTable ? (
-              <button className="btn btn--ghost btn--sm" type="button" onClick={revealTable}>
-                Показать таблицу
+              <button
+                className="btn btn--ghost btn--sm"
+                type="button"
+                onClick={() => revealDetails(tableRef.current)}
+              >
+                Открыть таблицу данных
               </button>
             ) : null
           }
@@ -85,7 +78,16 @@ export function ChartFrame({
         </EmptyState>
       ) : (
         <div className={`chart__plot chart__plot--${height}`} role="img" aria-label={ariaLabel}>
-          {children}
+          {/*
+            `inert` is what actually removes Chromium's phantom tab stops. Recharts renders its z-index layers as
+            bare <g> elements that Chrome still puts in the sequential focus order even with
+            `accessibilityLayer={false}` and an explicit `tabindex="-1"`; an inert subtree cannot receive focus at
+            all. The plot is a static picture: its data lives in the duplicate table beside it, so hiding the SVG
+            from the pointer and the accessibility tree costs no information.
+          */}
+          <div className="chart__plot-canvas" inert>
+            {children}
+          </div>
         </div>
       )}
 
@@ -96,6 +98,21 @@ export function ChartFrame({
       />
     </figure>
   );
+}
+
+/**
+ * Opens the already-rendered duplicate table and moves focus to its disclosure control.
+ *
+ * Exported because a server render cannot run the click handler; the test drives this function with a minimal
+ * `<details>` stand-in and proves both the open state and the focus move.
+ *
+ * @param {HTMLDetailsElement | null | undefined} details
+ * @returns {void}
+ */
+export function revealDetails(details) {
+  if (!details) return;
+  details.open = true;
+  details.querySelector('summary')?.focus();
 }
 
 /**

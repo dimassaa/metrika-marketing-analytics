@@ -59,7 +59,9 @@ export function ChartFallback({ title, table, onRetry }) {
       <div className="chart__head">
         <h3 className="chart__title">{title}</h3>
         <p className="chart__empty">
-          График не построился. Данные не потеряны: те же числа остались в таблице ниже.
+          {hasTable
+            ? 'График не построился. Данные не потеряны: те же числа остались в таблице ниже.'
+            : 'График не построился, и таблица для него не пришла: обновите страницу, чтобы получить данные заново.'}
         </p>
       </div>
 
@@ -72,9 +74,7 @@ export function ChartFallback({ title, table, onRetry }) {
       {hasTable ? (
         <ChartTable table={table} caption={`${title}: таблица данных`} />
       ) : (
-        <p className="chart__empty">
-          Таблица недоступна: обновите страницу, чтобы получить данные заново.
-        </p>
+        <p className="chart__empty">Таблица для этого графика не пришла.</p>
       )}
     </section>
   );

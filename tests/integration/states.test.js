@@ -6,16 +6,16 @@ import { loginAs, makeApp } from '../helpers/app.js';
 import { countIslands, extractDataProps } from '../helpers/dataProps.js';
 
 /**
- * Cross-screen contract for the five analytics screens: one mount node, a skeleton, a `<noscript>` fallback, a
- * JSON-safe model and a skip link into `<main>`.
+ * Cross-screen contract for the five analytics screens: one mount node, a busy skeleton, a `<noscript>` fallback, a
+ * JSON-safe model, a skip link into `<main>`, and the same empty-state rule on every chart.
  *
- * The database is seeded only for identities and the channel dimension, then every measured table is truncated. That
- * is the state a fresh stand is in before the first import, and it is the only state where an empty chart is the
- * truthful answer. It also keeps the test independent of the seed's own numbers.
+ * The file runs twice against one database. First the seeded stand proves that charts with activity are not empty.
+ * Then the measured tables are truncated and every data-driven chart must say `hasData: false`; only the KPI totals
+ * keep their measured zeros, because a total of zero is a fact while a flat zero line is indistinguishable from "we
+ * have no data". That ruling is the product decision from the review, not an accident of the seed.
  *
- * One exception is asserted explicitly rather than hidden: spend and revenue series are *measured zeros*, not
- * missing data, so `hasData` stays true for those charts (see `buildSpendRevenueChart`). The empty state there would
- * claim nothing was measured, which is false.
+ * The empty-state action itself is client-rendered and covered by `tests/unit/shared-ui.test.js` (render + open
+ * behaviour) and the browser pass; SSR cannot contain it by definition.
  */
 const VIEWER = 'viewer@metrika.by';
 const NO_ASSETS = { assets: { assets: () => ({ scripts: [], preloads: [] }) } };
@@ -38,9 +38,6 @@ beforeAll(async () => {
   await resetTestDatabase();
   await seed();
   pool = getTestPool();
-  // Keep users, channels and campaigns: identity, the channel dimension and the passport route need them. Every
-  // table that holds a measurement loses its rows.
-  await pool.query('TRUNCATE daily_stats, touchpoints, orders, customers RESTART IDENTITY CASCADE');
   app = makeApp(NO_ASSETS);
 });
 
@@ -63,17 +60,6 @@ async function signedIn() {
 }
 
 /**
- * @param {unknown} value
- * @returns {boolean} True when a `bigint` sits anywhere in the value.
- */
-function hasBigInt(value) {
-  if (typeof value === 'bigint') return true;
-  if (Array.isArray(value)) return value.some(hasBigInt);
-  if (value !== null && typeof value === 'object') return Object.values(value).some(hasBigInt);
-  return false;
-}
-
-/**
  * @param {object} charts Screen model chart map.
  * @returns {object[]} Every chart object that carries a `hasData` flag.
  */
@@ -84,7 +70,7 @@ function chartList(charts) {
 }
 
 describe('shared screen states', () => {
-  it.each(PAGES)('$path renders one island, a skeleton, a noscript fallback and a skip link', async (page) => {
+  it.each(PAGES)('$path renders one island, a busy skeleton, a noscript fallback and a skip link', async (page) => {
     const agent = await signedIn();
 
     const res = await agent.get(page.path);
@@ -92,27 +78,76 @@ describe('shared screen states', () => {
     expect(res.status).toBe(200);
     expect(countIslands(res.text, page.island)).toBe(1);
     expect(res.text).toContain('skeleton--chart');
+    expect(res.text).toContain('aria-busy="true"');
+    expect(res.text).toContain('Загрузка данных');
     expect(res.text).toContain('<noscript>');
     expect(res.text).toContain('<a class="skip-link" href="#main">Перейти к содержанию</a>');
     expect(res.text).toContain('<main id="main" class="app-content" tabindex="-1">');
     expect(res.text).toMatch(/<h1 class="app-topbar__title">[^<]+<\/h1>/);
   });
 
-  it.each(PAGES)('$path exposes a JSON-safe data-props model', async (page) => {
+  it.each(PAGES)('$path exposes a model that the browser can parse as JSON', async (page) => {
     const agent = await signedIn();
 
     const res = await agent.get(page.path);
     const props = extractDataProps(res.text, page.island);
 
+    // `extractDataProps` already runs JSON.parse on the attribute, which is the real guard: a bigint would have
+    // thrown in `serializeDataProps` on the server and produced a 500 instead of this page.
     expect(props).toBeTypeOf('object');
-    expect(hasBigInt(props)).toBe(false);
-    // The browser must be able to parse exactly what the server wrote; a non-serialisable value would throw here.
-    expect(() => JSON.stringify(props)).not.toThrow();
+    expect(Object.keys(props).length).toBeGreaterThan(0);
     expect(res.text).not.toContain('NaN');
     expect(res.text).not.toContain('Infinity');
   });
 
-  it('dashboard shows the no_data verdict and honest empty charts on an empty stand', async () => {
+  it('keeps a boolean hasData and a duplicate table on every chart of every screen', async () => {
+    const agent = await signedIn();
+
+    for (const page of PAGES) {
+      const res = await agent.get(page.path);
+      const props = extractDataProps(res.text, page.island);
+      const charts = chartList(props.charts ?? props.chart);
+
+      expect(charts.length, page.path).toBeGreaterThan(0);
+      for (const chart of charts) {
+        expect(typeof chart.hasData, `${page.path}: ${chart.title}`).toBe('boolean');
+        expect(Array.isArray(chart.table?.columns), `${page.path}: ${chart.title} table`).toBe(true);
+      }
+    }
+  });
+});
+
+describe('charts on the seeded stand', () => {
+  it('dashboard draws every chart because the seed has spend, revenue and customers', async () => {
+    const agent = await signedIn();
+
+    const res = await agent.get('/app/dashboard');
+    const props = extractDataProps(res.text, 'dashboard');
+
+    for (const [key, chart] of Object.entries(props.charts)) {
+      expect(chart.hasData, `dashboard chart ${key}`).toBe(true);
+    }
+  });
+
+  it('passport and attribution draw their money charts on the seeded stand', async () => {
+    const agent = await signedIn();
+
+    const passport = extractDataProps((await agent.get('/app/channels/1')).text, 'channel');
+    const attribution = extractDataProps((await agent.get('/app/attribution')).text, 'attribution');
+
+    expect(passport.charts.spendRevenue.hasData).toBe(true);
+    expect(attribution.charts.revenue.hasData).toBe(true);
+  });
+});
+
+describe('empty stand', () => {
+  beforeAll(async () => {
+    // Keep users, channels and campaigns: identity, the channel dimension and the passport route need them. Every
+    // table that holds a measurement loses its rows.
+    await pool.query('TRUNCATE daily_stats, touchpoints, orders, customers RESTART IDENTITY CASCADE');
+  });
+
+  it('dashboard shows the no_data verdict and an empty state on every chart', async () => {
     const agent = await signedIn();
 
     const res = await agent.get('/app/dashboard');
@@ -122,11 +157,13 @@ describe('shared screen states', () => {
     expect(props.charts.cac.hasData).toBe(false);
     expect(props.charts.romi.hasData).toBe(false);
     expect(props.charts.cacLtv.hasData).toBe(false);
-    // Measured zeros, not missing weeks: the weekly series exists and every value is zero.
-    expect(props.charts.spendRevenue.hasData).toBe(true);
+    // The product ruling: an all-zero series is "no measured activity", so it shows the empty state instead of a
+    // flat zero line. The zero values stay in the duplicate table, and the KPI tiles keep their measured zeros.
+    expect(props.charts.spendRevenue.hasData).toBe(false);
     expect(props.charts.spendRevenue.series.every((row) => row.spend === 0 && row.revenue === 0)).toBe(true);
-    expect(props.charts.channelSpend.hasData).toBe(true);
+    expect(props.charts.channelSpend.hasData).toBe(false);
     expect(props.charts.channelSpend.series.every((row) => row.spend === 0)).toBe(true);
+    expect(props.kpis.spendLabel).toBe('0,00');
   });
 
   it('channels shows no measured ROMI and no ranked rows, while keeping the channel dimension', async () => {
@@ -140,7 +177,7 @@ describe('shared screen states', () => {
     expect(props.rows.length).toBeGreaterThan(0);
   });
 
-  it('passport shows empty CAC and ROMI charts for a channel without measurements', async () => {
+  it('passport shows empty CAC, ROMI and spend charts for a channel without measurements', async () => {
     const agent = await signedIn();
 
     const res = await agent.get('/app/channels/1');
@@ -148,7 +185,7 @@ describe('shared screen states', () => {
 
     expect(props.charts.cac.hasData).toBe(false);
     expect(props.charts.romi.hasData).toBe(false);
-    expect(props.charts.spendRevenue.hasData).toBe(true);
+    expect(props.charts.spendRevenue.hasData).toBe(false);
     expect(props.charts.spendRevenue.series.every((row) => row.spend === 0 && row.revenue === 0)).toBe(true);
     // The retention matrix has no cohorts, and the island must say so rather than paint zeroes.
     expect(props.retention.hasData).toBe(false);
@@ -174,21 +211,5 @@ describe('shared screen states', () => {
     expect(props.charts.revenue.hasData).toBe(false);
     expect(props.models).toHaveLength(3);
     expect(props.models.every((model) => model.totalAttributedLabel === '0,00')).toBe(true);
-  });
-
-  it('keeps a boolean hasData on every chart of every screen', async () => {
-    const agent = await signedIn();
-
-    for (const page of PAGES) {
-      const res = await agent.get(page.path);
-      const props = extractDataProps(res.text, page.island);
-      const charts = chartList(props.charts ?? props.chart);
-
-      expect(charts.length, page.path).toBeGreaterThan(0);
-      for (const chart of charts) {
-        expect(typeof chart.hasData, `${page.path}: ${chart.title}`).toBe('boolean');
-        expect(Array.isArray(chart.table?.columns), `${page.path}: ${chart.title} table`).toBe(true);
-      }
-    }
   });
 });

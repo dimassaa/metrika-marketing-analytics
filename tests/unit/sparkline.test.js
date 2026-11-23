@@ -20,6 +20,8 @@ describe('Sparkline', () => {
     expect(html).toContain('recharts-wrapper');
     expect(html).toContain('width:72px');
     expect(html).toContain('height:20px');
+    // Chromium puts Recharts' <g> layers in the tab order; the inert wrapper is the only thing that removes them.
+    expect(html).toContain('class="sparkline" aria-hidden="true" title="CAC по неделям" inert=""');
   });
 
   it('shows a dash when fewer than two weeks are measured', () => {

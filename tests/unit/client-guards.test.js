@@ -45,7 +45,9 @@ describe('client source guards', () => {
 
   it('never fetches from an island: the server model is the only source of numbers', () => {
     for (const file of clientFiles) {
-      expect(readFileSync(file, 'utf8'), file).not.toMatch(/(?<![.\w])fetch\s*\(/);
+      // Also catches `window.fetch(` and `globalThis.fetch(`: the negative lookbehind this guard used to have let a
+      // member call through while claiming to forbid fetching.
+      expect(readFileSync(file, 'utf8'), file).not.toMatch(/\bfetch\s*\(/);
     }
   });
 

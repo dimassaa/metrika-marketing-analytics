@@ -718,7 +718,17 @@ Still open:
   `channel-detail.ejs`) because the currency rule is absolute for the interface. `campaigns.ejs`, `goals.ejs` and
   `import.ejs` still say «в белорусских рублях»; the fix is a copy-only change but it sits outside this task's five
   screens, so it is listed here instead of bundled in.
-- **An empty chart card shows two controls that open the same table.** The empty-state action “Показать таблицу” and
-  the `<summary>` below it both reveal the duplicate table. Both are honest and keyboard reachable; hiding one when
-  the other exists would need a state flag (`emptyAction` vs. the details) or a different empty layout. Deferred as
-  cosmetic.
+- **Zero spend is rendered as an empty state, not a flat zero line (product ruling).** `buildSpendRevenueChart` and
+  `buildChannelSpendChart` now set `hasData` from actual values: an all-zero series means "no measured activity", so
+  the frame explains the absence instead of drawing a line that a reader cannot tell apart from missing data. The zero
+  weeks and per-channel zeros remain in the duplicate table, and KPI totals keep their measured zeros, because a total
+  of `0,00` is a fact while a zero-shaped plot is ambiguous. Reverting this requires a product decision, not a test
+  edit: `states.test.js` pins both directions.
+- **The plot canvas is `inert`, so chart tooltips are gone.** Chromium puts Recharts' bare `<g>` z-index layers in
+  the sequential focus order even with `accessibilityLayer={false}` and an explicit `tabindex="-1"`; only an inert
+  subtree removes them. The plot is a static picture and every value is in the duplicate table, so the loss is a
+  hover nicety, not information. A future interactive chart needs a keyboard-first design, not just removing `inert`.
+- **The empty-state action is named «Открыть таблицу данных», not «Показать таблицу».** The disclosure `<summary>`
+  already uses the latter; two controls with the same accessible name opened the same table. The names are now unique
+  and the action is covered by a behaviour test (`revealDetails`) plus the browser pass, because a server render cannot
+  click it.

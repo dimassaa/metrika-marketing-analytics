@@ -2133,6 +2133,11 @@ input[type='file'] {
   min-height: 180px;
 }
 
+/* Recharts sizes its surface from the parent box; the inert wrapper must keep the height the plot measured. */
+.chart__plot-canvas {
+  height: 100%;
+}
+
 /* Recharts paints the default legend text in the series colour, which is a 2.5:1 contrast on white for both the
    cyan and the stone series. The formatter wraps the label so the text keeps the body colour while the icon keeps the
    series colour. */
@@ -2213,12 +2218,22 @@ input[type='file'] {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background-color: var(--color-ash-gray);
+  background-color: var(--color-warm-gray);
 }
 
+/* Dots mirror the series colours, and every one is at least 3:1 on white so the swatch itself is perceivable. */
 .chart__tooltip-dot--revenue,
-.chart__tooltip-dot--value {
-  background-color: var(--color-cyan-signal);
+.chart__tooltip-dot--value,
+.chart__tooltip-dot--last_touch {
+  background-color: var(--color-cyan-edge);
+}
+
+.chart__tooltip-dot--first_touch {
+  background-color: var(--color-warm-gray);
+}
+
+.chart__tooltip-dot--linear {
+  background-color: var(--color-soot);
 }
 
 .chart__tooltip-name {
@@ -2923,13 +2938,13 @@ input[type='file'] {
 }
 
 .chart-legend__swatch--last_touch {
-  background-color: var(--color-cyan-signal);
+  background-color: var(--color-cyan-edge);
 }
 
 .chart-legend__swatch--first_touch {
-  background-color: var(--color-ash-gray);
+  background-color: var(--color-warm-gray);
 }
 
 .chart-legend__swatch--linear {
-  background-color: var(--color-warm-gray);
+  background-color: var(--color-soot);
 }

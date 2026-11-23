@@ -145,7 +145,7 @@ describe('dashboard screen model', () => {
     ]);
   });
 
-  it('keeps CAC and ROMI empty while a measured zero spend/revenue series still counts as data', () => {
+  it('treats an all-zero spend/revenue series as no measured activity', () => {
     const weeklySeries = Array.from({ length: 12 }, (_, index) => ({
       weekStart: addDays(FIRST_WEEK, index * 7),
       weekLabel: `неделя ${index}`,
@@ -162,13 +162,15 @@ describe('dashboard screen model', () => {
 
     expect(screen.charts.cac.hasData).toBe(false);
     expect(screen.charts.romi.hasData).toBe(false);
-    // A zero is a measurement: the bars must render at zero instead of claiming there was no data.
-    expect(screen.charts.spendRevenue.hasData).toBe(true);
+    // A flat zero line cannot be told apart from "nothing was measured", so the frame shows its empty state. The
+    // weeks and their zero values stay in the duplicate table.
+    expect(screen.charts.spendRevenue.hasData).toBe(false);
+    expect(screen.charts.spendRevenue.series).toHaveLength(12);
     expect(screen.charts.cac.series.every((point) => point.value === null)).toBe(true);
     expect(screen.charts.cac.caption).toContain('последняя —');
   });
 
-  it('marks spend/revenue empty only when the period has no weeks at all', () => {
+  it('marks spend/revenue empty when the period has no weeks at all', () => {
     const screen = buildDashboardScreen({ summary: summaryWith({ weeklySeries: [] }) });
 
     expect(screen.charts.spendRevenue.hasData).toBe(false);
@@ -265,8 +267,18 @@ describe('dashboard screen model', () => {
     expect(screen.charts.cacLtv.caption).toContain('нет каналов с CAC и LTV12');
     expect(screen.charts.cacLtv.table.rows).toHaveLength(3);
     expect(screen.charts.cacLtv.table.rows.every((row) => row.cells.cac === '—')).toBe(true);
-    // Spend is still measured, so its bars are not empty merely because the scatter is.
+    // Spend is nonzero on this fixture, so its bars are not empty merely because the scatter is.
     expect(screen.charts.channelSpend.hasData).toBe(true);
+  });
+
+  it('treats all-zero channel spend as no measured activity', () => {
+    const channels = summaryWith().channels.map((channel) => ({ ...channel, spendCents: '0' }));
+    const screen = buildDashboardScreen({ summary: summaryWith({ channels }) });
+
+    expect(screen.charts.channelSpend.hasData).toBe(false);
+    expect(screen.charts.channelSpend.series.every((row) => row.spend === 0)).toBe(true);
+    // The table still names every channel and its zero, so the empty state is not hiding the dimension.
+    expect(screen.charts.channelSpend.table.rows.length).toBe(channels.length);
   });
 
   it('carries the channel filter and the full option list', () => {

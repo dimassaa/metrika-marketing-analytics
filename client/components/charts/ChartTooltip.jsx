@@ -24,9 +24,13 @@ export function ChartTooltip({ active, payload, label, unit, names = {} }) {
       <ul className="chart__tooltip-list">
         {payload.map((entry) => (
           <li className="chart__tooltip-row" key={entry.dataKey}>
-            <span className={`chart__tooltip-dot chart__tooltip-dot--${entry.dataKey}`} aria-hidden="true" />
+            <span
+              className={`chart__tooltip-dot chart__tooltip-dot--${entry.dataKey}`}
+              aria-hidden="true"
+            />
             <span className="chart__tooltip-name">{names[entry.dataKey] ?? entry.name}</span>
-            <strong className="chart__tooltip-value">{formatValue(entry.value, unit)}</strong>          </li>
+            <strong className="chart__tooltip-value">{formatValue(entry.value, unit)}</strong>
+          </li>
         ))}
       </ul>
     </div>

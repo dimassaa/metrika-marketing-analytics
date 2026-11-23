@@ -35,7 +35,7 @@ describe('chart theme', () => {
   });
 
   it('pins the primary series colour and the axis font size to the design tokens', () => {
-    expect(chartTheme.seriesPrimary).toBe('#3ba6f1');
+    expect(chartTheme.seriesPrimary).toBe('#3398e1');
     expect(chartTheme.fontSize).toBe(12);
     expect(chartTheme.strokeWidth).toBe(2);
   });

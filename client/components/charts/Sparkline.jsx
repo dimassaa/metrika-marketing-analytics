@@ -7,7 +7,9 @@ import { chartTheme } from '../../lib/chartTheme.js';
  * Fixed geometry is the point: a responsive chart would measure its cell on every row and could push the table
  * layout around while it mounts. There are no axes, grid lines, dots, tooltip or animation; `null` points are left
  * as gaps, because a week without customers is not a week with zero CAC. The trend is a companion to the formatted
- * CAC column, so the cell hides the decorative SVG from assistive technology and keeps the number readable.
+ * CAC column, so the cell hides the decorative SVG from assistive technology and keeps the number readable. The
+ * wrapper is `inert` as well: Chromium puts Recharts' bare `<g>` layers into the tab order, and a decorative trend
+ * must not steal focus from the channel link.
  *
  * @param {{ values: Array<{ weekLabel: string, value: number | null }> }} props Weekly CAC in kopecks.
  */
@@ -23,7 +25,7 @@ export function Sparkline({ values }) {
   }
 
   return (
-    <div className="sparkline" aria-hidden="true" title="CAC по неделям">
+    <div className="sparkline" aria-hidden="true" title="CAC по неделям" inert>
       <LineChart accessibilityLayer={false} data={values} width={72} height={20} margin={{ top: 2, right: 1, bottom: 2, left: 1 }}>
         <Line
           type="monotone"

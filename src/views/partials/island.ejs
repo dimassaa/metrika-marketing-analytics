@@ -6,7 +6,12 @@
   stable until the module executes; `<noscript>` explains the screen when it cannot.
 %>
 <div class="island" data-island="<%= name %>" data-props="<%= dataProps(model, name) %>">
-  <div class="skeleton skeleton--chart" aria-hidden="true"></div>
+  <%# The busy wrapper is a child of the mount node: React replaces it, so `aria-busy` cannot stay true after the
+       island renders. The hidden text gives a screen reader the same loading state a sighted reader sees. %>
+  <div aria-busy="true">
+    <div class="skeleton skeleton--chart" aria-hidden="true"></div>
+    <span class="u-visually-hidden">Загрузка данных</span>
+  </div>
   <noscript>
     <p class="empty-state__text">
       Для интерактивных графиков нужен JavaScript. Числа остаются доступны в JSON API.

@@ -305,11 +305,12 @@ describe('dashboard on an empty stand', () => {
     expect(props.verdict.status).toBe('no_data');
     expect(props.charts.cac.hasData).toBe(false);
     expect(props.charts.romi.hasData).toBe(false);
-    // Twelve weeks of measured zero spend/revenue: the arrows are flat at zero, not "no data". The empty-state copy
-    // would claim nothing was measured, which is false on this stand.
-    expect(props.charts.spendRevenue.hasData).toBe(true);
-    // Spend-by-channel is measured zero on every channel: bars at zero are honest data, not an empty state.
-    expect(props.charts.channelSpend.hasData).toBe(true);
+    // Product ruling: an all-zero spend/revenue series is "no measured activity" and shows the empty state. The
+    // twelve requested weeks with their zeros stay in the duplicate table; the KPI spend tile still reads 0,00.
+    expect(props.charts.spendRevenue.hasData).toBe(false);
+    expect(props.charts.spendRevenue.series).toHaveLength(12);
+    expect(props.charts.spendRevenue.series.every((row) => row.spend === 0 && row.revenue === 0)).toBe(true);
+    expect(props.charts.channelSpend.hasData).toBe(false);
     expect(props.charts.channelSpend.series.every((row) => row.spend === 0)).toBe(true);
     // No channel has both CAC and LTV12, so the scatter says so and keeps a dash per channel.
     expect(props.charts.cacLtv.hasData).toBe(false);

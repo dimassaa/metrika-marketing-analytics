@@ -193,10 +193,13 @@ export function buildRomiChart({ weeklySeries, channelIds = null }) {
  */
 export function buildSpendRevenueChart({ weeklySeries, channelIds = null }) {
   const points = toSpendRevenuePoints(weeklySeries);
-  // Spend and attributed revenue are always measured (a string, including `0`), so a non-empty series is data even
-  // when every value is zero. Treating a measured zero as "no data" would hide the honest answer: the period spent
-  // nothing. Only a series with no weeks at all is empty.
-  const hasData = weeklySeries.length > 0;
+  // Product rule: a flat zero line means "nothing was measured", not "the period spent zero". When every week has
+  // zero spend and zero attributed revenue the frame shows its empty state; the zero values stay in the duplicate
+  // table, which is where a reader can still see the requested weeks. KPI tiles keep their measured zeros — that is
+  // a monthly total, a different statement from a shape that suggests a trend.
+  const hasData = weeklySeries.some(
+    (bucket) => String(bucket.spendCents) !== '0' || String(bucket.attributedCents) !== '0',
+  );
   const weeks = weeksLabel(weeklySeries.length);
   const last = weeklySeries.at(-1);
   const lastLabel = last === undefined ? '—' : last.weekLabel;
@@ -269,9 +272,9 @@ export function buildChannelSpendChart({ channels, channelIds = null }) {
     caption: captionOf('Расход по каналам', detail),
     ariaLabel: `Расход по каналам: ${detail}`,
     unit: 'BYN',
-    // A channel is a measured zero until its spend row says otherwise: only a filter with no matching channel has
-    // nothing to draw. This mirrors the weekly spend/revenue decision.
-    hasData: rows.length > 0,
+    // The product rule from the weekly bars applies here too: columns of zero height would read as a flat trend,
+    // not as "no spend was measured". The channel rows and their zeros stay in the duplicate table.
+    hasData: rows.some((row) => row.spend > 0),
     series: rows.map((row, index) => ({
       ...row,
       highlight: selected === null ? index === 0 : selected.has(row.channelId),

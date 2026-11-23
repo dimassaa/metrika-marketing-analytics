@@ -82,6 +82,7 @@ export function DashboardIsland({ kpis, verdict, charts, labels, filter }) {
             unit={charts.spendRevenue.unit}
             ariaLabel={charts.spendRevenue.ariaLabel}
             empty={!charts.spendRevenue.hasData}
+            emptyText="За период не было ни расхода, ни атрибутированной выручки. Нулевая линия читалась бы как измеренный ноль, поэтому здесь пустое состояние; недели и значения — в таблице."
             table={charts.spendRevenue.table}
             height="md"
           >
@@ -100,6 +101,7 @@ export function DashboardIsland({ kpis, verdict, charts, labels, filter }) {
             unit={charts.channelSpend.unit}
             ariaLabel={charts.channelSpend.ariaLabel}
             empty={!charts.channelSpend.hasData}
+            emptyText="Ни один канал не потратил за период. Столбцы нулевой высоты выглядели бы как измеренный ноль, поэтому здесь пустое состояние; значения по каналам — в таблице."
             table={charts.channelSpend.table}
             height="md"
           >

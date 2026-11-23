@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { ChartFrame } from '../../client/components/charts/ChartFrame.jsx';
+import { ChartFrame, revealDetails } from '../../client/components/charts/ChartFrame.jsx';
 import { ChartFallback } from '../../client/components/charts/ChartErrorBoundary.jsx';
 import { DashboardIsland } from '../../client/entries/dashboard.jsx';
 import { ChannelsIsland } from '../../client/entries/channels.jsx';
@@ -55,6 +55,17 @@ describe('chart frame accessibility', () => {
     expect(html).toContain('<span class="byn">BYN</span>');
   });
 
+  it('wraps the plot in an inert canvas so portal layers cannot become tab stops', () => {
+    const html = renderToStaticMarkup(
+      createElement(ChartFrame, frameProps(), createElement('span', null, 'plot')),
+    );
+
+    // Chromium puts Recharts' bare <g> layers in the sequential focus order even without tabindex; only `inert`
+    // removes the whole subtree from focus. The plot is a static picture, so nothing interactive is lost.
+    expect(html).toContain('<div class="chart__plot-canvas" inert="">');
+    expect(html.indexOf('chart__plot-canvas')).toBeLessThan(html.indexOf('<span>plot</span>'));
+  });
+
   it('makes the duplicate table a labelled scroll region with a keyboard entry point', () => {
     const html = renderToStaticMarkup(
       createElement(ChartFrame, frameProps(), createElement('span', null, 'plot')),
@@ -72,8 +83,10 @@ describe('chart frame accessibility', () => {
 
     expect(html).toContain('За период нет недель.');
     expect(html).not.toContain('role="img"');
-    // The action is real: it opens the already-rendered table instead of inventing a fetch.
-    expect(html).toContain('Показать таблицу');
+    // The action and the disclosure must not share a name: "Открыть таблицу данных" is the button, while
+    // "Показать таблицу" stays the one <summary>.
+    expect(html).toContain('Открыть таблицу данных');
+    expect((html.match(/Показать таблицу/g) ?? []).length).toBe(1);
     expect(html).toContain('<details class="chart__table"');
   });
 
@@ -99,8 +112,33 @@ describe('chart error fallback', () => {
   it('explains a missing table instead of leaving an empty collapsed control', () => {
     const html = renderToStaticMarkup(createElement(ChartFallback, { title: 'CAC по неделям' }));
 
-    expect(html).toContain('Таблица недоступна');
+    expect(html).toContain('таблица для него не пришла');
+    expect(html).toContain('Таблица для этого графика не пришла.');
+    // The fallback must not claim the data is preserved when there is no table to preserve it in.
+    expect(html).not.toContain('Данные не потеряны');
     expect(html).not.toContain('<details');
+  });
+});
+
+describe('empty chart action', () => {
+  it('opens the duplicate table and moves focus to its summary', () => {
+    let focused = false;
+    const details = {
+      open: false,
+      querySelector() {
+        return {
+          focus() {
+            focused = true;
+          },
+        };
+      },
+    };
+
+    revealDetails(details);
+
+    expect(details.open).toBe(true);
+    expect(focused).toBe(true);
+    expect(() => revealDetails(null)).not.toThrow();
   });
 });
 

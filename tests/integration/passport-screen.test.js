@@ -171,6 +171,7 @@ describe('channel passport screen', () => {
     expect(props.funnel.stages.every((stage) => stage.meterMax >= 1)).toBe(true);
     expect(props.funnel.meterMax).toBe(1);
     expect(props.charts.cac.hasData).toBe(false);
+    expect(props.charts.spendRevenue.hasData).toBe(false);
     expect(props.retention.hasData).toBe(false);
     // The inserted channel has both targets but no statistics: the plan must stay visible and the status must say
     // "no data to compare", not "no target".
