@@ -1,5 +1,6 @@
 import { useId, useRef } from 'react';
 import { EmptyState } from '../ui/EmptyState.jsx';
+import { usePlotFocusGuard } from '../../lib/plot-focus.js';
 
 /**
  * Accessible frame shared by every chart.
@@ -11,7 +12,8 @@ import { EmptyState } from '../ui/EmptyState.jsx';
  *
  * Every chart passes `accessibilityLayer={false}` to Recharts. The frame already supplies one accessible image and
  * one table; Recharts' own layer would add a second `tabindex="0"` control inside the image, announcing the same
- * values twice.
+ * values twice. The frame also owns a plot ref that removes Recharts' portal `<g>` layers from the Tab order — see
+ * `client/lib/plot-focus.js`; pointer events stay enabled, so hover tooltips still work.
  *
  * An empty chart renders an explanation instead of an axis with a zero line, because a zero line at "no spend" and
  * a zero line at "spend measured as zero" are indistinguishable. Its action opens the duplicate table, the one real
@@ -43,6 +45,7 @@ export function ChartFrame({
 }) {
   const titleId = useId();
   const tableRef = useRef(null);
+  const plotRef = usePlotFocusGuard();
 
   const hasTable = Array.isArray(table?.columns) && table.columns.length > 0;
 
@@ -77,17 +80,13 @@ export function ChartFrame({
           {emptyText}
         </EmptyState>
       ) : (
-        <div className={`chart__plot chart__plot--${height}`} role="img" aria-label={ariaLabel}>
-          {/*
-            `inert` is what actually removes Chromium's phantom tab stops. Recharts renders its z-index layers as
-            bare <g> elements that Chrome still puts in the sequential focus order even with
-            `accessibilityLayer={false}` and an explicit `tabindex="-1"`; an inert subtree cannot receive focus at
-            all. The plot is a static picture: its data lives in the duplicate table beside it, so hiding the SVG
-            from the pointer and the accessibility tree costs no information.
-          */}
-          <div className="chart__plot-canvas" inert>
-            {children}
-          </div>
+        <div
+          ref={plotRef}
+          className={`chart__plot chart__plot--${height}`}
+          role="img"
+          aria-label={ariaLabel}
+        >
+          {children}
         </div>
       )}
 

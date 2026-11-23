@@ -2133,11 +2133,6 @@ input[type='file'] {
   min-height: 180px;
 }
 
-/* Recharts sizes its surface from the parent box; the inert wrapper must keep the height the plot measured. */
-.chart__plot-canvas {
-  height: 100%;
-}
-
 /* Recharts paints the default legend text in the series colour, which is a 2.5:1 contrast on white for both the
    cyan and the stone series. The formatter wraps the label so the text keeps the body colour while the icon keeps the
    series colour. */

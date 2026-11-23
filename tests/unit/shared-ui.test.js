@@ -55,15 +55,15 @@ describe('chart frame accessibility', () => {
     expect(html).toContain('<span class="byn">BYN</span>');
   });
 
-  it('wraps the plot in an inert canvas so portal layers cannot become tab stops', () => {
+  it('keeps the plot interactive so hover tooltips keep working', () => {
     const html = renderToStaticMarkup(
       createElement(ChartFrame, frameProps(), createElement('span', null, 'plot')),
     );
 
-    // Chromium puts Recharts' bare <g> layers in the sequential focus order even without tabindex; only `inert`
-    // removes the whole subtree from focus. The plot is a static picture, so nothing interactive is lost.
-    expect(html).toContain('<div class="chart__plot-canvas" inert="">');
-    expect(html.indexOf('chart__plot-canvas')).toBeLessThan(html.indexOf('<span>plot</span>'));
+    // Tab stops are removed with `tabindex="-1"` on Recharts' portal layers (client/lib/plot-focus.js), not with
+    // `inert`: an inert plot would also disable pointer events and lose every tooltip.
+    expect(html).toContain('<div class="chart__plot chart__plot--sm" role="img"');
+    expect(html).not.toContain('inert');
   });
 
   it('makes the duplicate table a labelled scroll region with a keyboard entry point', () => {

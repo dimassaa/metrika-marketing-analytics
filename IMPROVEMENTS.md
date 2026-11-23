@@ -724,10 +724,13 @@ Still open:
   weeks and per-channel zeros remain in the duplicate table, and KPI totals keep their measured zeros, because a total
   of `0,00` is a fact while a zero-shaped plot is ambiguous. Reverting this requires a product decision, not a test
   edit: `states.test.js` pins both directions.
-- **The plot canvas is `inert`, so chart tooltips are gone.** Chromium puts Recharts' bare `<g>` z-index layers in
-  the sequential focus order even with `accessibilityLayer={false}` and an explicit `tabindex="-1"`; only an inert
-  subtree removes them. The plot is a static picture and every value is in the duplicate table, so the loss is a
-  hover nicety, not information. A future interactive chart needs a keyboard-first design, not just removing `inert`.
+- **Recharts portal layers need a post-mount focus guard, not `inert`.** In this Chromium a portal `<g>` becomes
+  sequentially focusable because React attaches its delegated `focusin`/`focusout` listeners to the portal container;
+  `accessibilityLayer={false}` alone leaves about five phantom Tab stops per chart and sparkline. `client/lib/plot-focus.js`
+  sets `tabindex="-1"` on `g[class^="recharts-zIndex-layer"]` and re-applies it with a MutationObserver, because
+  Recharts re-creates those layers on resize. Do not replace it with `inert`: that also disables pointer events and
+  kills the hover tooltips, which are core analytics UX. A future interactive chart should keep this guard and add
+  keyboard interaction deliberately.
 - **The empty-state action is named «Открыть таблицу данных», not «Показать таблицу».** The disclosure `<summary>`
   already uses the latter; two controls with the same accessible name opened the same table. The names are now unique
   and the action is covered by a behaviour test (`revealDetails`) plus the browser pass, because a server render cannot

@@ -20,8 +20,9 @@ describe('Sparkline', () => {
     expect(html).toContain('recharts-wrapper');
     expect(html).toContain('width:72px');
     expect(html).toContain('height:20px');
-    // Chromium puts Recharts' <g> layers in the tab order; the inert wrapper is the only thing that removes them.
-    expect(html).toContain('class="sparkline" aria-hidden="true" title="CAC по неделям" inert=""');
+    // The wrapper stays interactive; the plot focus guard marks portal layers non-tabbable after mount.
+    expect(html).toContain('class="sparkline" aria-hidden="true" title="CAC по неделям"');
+    expect(html).not.toContain('inert');
   });
 
   it('shows a dash when fewer than two weeks are measured', () => {
