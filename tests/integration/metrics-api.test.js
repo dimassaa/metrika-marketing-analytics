@@ -315,6 +315,8 @@ describe('GET /api/v1/cohorts', () => {
     expect(res.status).toBe(200);
     expect(res.body.channelLtv).toHaveLength(1);
     expect(res.body.channelLtv[0].channelId).toBe(id);
+    expect(res.body.channelFilter).toMatchObject({ id });
+    expect(res.body.channelFilter.label).toMatch(/^Показан канал /);
     expect(res.body.cohorts.length).toBeGreaterThan(0);
   });
 });

@@ -1,4 +1,5 @@
 import { formatCentsToByn, formatInteger, formatPercent, formatRomi } from '../../lib/format.js';
+import { cohortsLabel } from '../../lib/metrics-labels.js';
 import { centsToApi, roundNumber } from '../../lib/metrics-math.js';
 import {
   hasPlottableData,
@@ -71,16 +72,6 @@ export function channelsLabel(count) {
   if (last === 1) return `${count} канал`;
   if (last >= 2 && last <= 4) return `${count} канала`;
   return `${count} каналов`;
-}
-
-/** @param {number} count */
-export function cohortsLabel(count) {
-  const tail = count % 100;
-  const last = count % 10;
-  if (tail >= 11 && tail <= 14) return `${count} когорт`;
-  if (last === 1) return `${count} когорта`;
-  if (last >= 2 && last <= 4) return `${count} когорты`;
-  return `${count} когорт`;
 }
 
 /** @param {number} count */
@@ -392,8 +383,10 @@ function cumulativeCentsFromCell(value, context) {
  * to the numerator but keeps its `cohortSize` in the denominator: that is a measured aggregate zero, not a missing
  * observation. The result is `null` only when no completed cohort can be observed at the offset at all.
  *
- * Keeping the numerator as bigint kopecks means the view-model never rounds a cohort twice: the per-cohort LTV rows
- * and this curve are two different aggregations of the same margins.
+ * The source cells are already per-customer kopecks rounded half-up by the M3 matrix, so weighting them multiplies
+ * an already rounded value back by the cohort size before the final division. The curve can therefore differ from a
+ * single raw-margin division by at most one kopeck per cohort per offset — the bound of the published matrix's
+ * accumulated rounding — while still describing the same completed cohorts and the same margin totals.
  *
  * @param {{
  *   cohorts: Array<{
@@ -509,7 +502,7 @@ export function buildCohortLtvChart({ curve, horizonMonths }) {
     table: {
       columns: [
         { key: 'month', label: 'Смещение, мес.', numeric: true },
-        { key: 'value', label: `Средний LTV${horizonMonths}, BYN`, numeric: true },
+        { key: 'value', label: 'Средний накопленный LTV, BYN', numeric: true },
       ],
       rows: curve.map((point) => ({
         key: String(point.monthOffset),

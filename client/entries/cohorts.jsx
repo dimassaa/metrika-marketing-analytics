@@ -5,6 +5,8 @@ import { Skeleton } from '../components/ui/Skeleton.jsx';
 import { ChartErrorBoundary } from '../components/charts/ChartErrorBoundary.jsx';
 import { ChartFrame } from '../components/charts/ChartFrame.jsx';
 import { CohortCurve } from '../components/charts/CohortCurve.jsx';
+import { cohortsLabel } from '../../src/lib/metrics-labels.js';
+import { HEAT_BUCKETS } from '../../src/lib/heat-scale.js';
 
 /**
  * Cohorts island: retention heatmap, incomplete-cohort note and the weighted cumulative LTV curve.
@@ -17,7 +19,7 @@ import { CohortCurve } from '../components/charts/CohortCurve.jsx';
  *   horizonMonths: number,
  *   anchor: string,
  *   hasData: boolean,
- *   incompleteCount: number,
+ *   channelFilter: { id: string, code: string, name: string, label: string } | null,
  *   cohorts: object[],
  *   excludedIncomplete: Array<object>,
  *   channelLtv: object[],
@@ -33,11 +35,14 @@ import { CohortCurve } from '../components/charts/CohortCurve.jsx';
  *   },
  * }} props Screen model shared with `/api/v1/cohorts`.
  */
-export function CohortsIsland({ horizonMonths, hasData, excludedIncomplete, charts, table }) {
+export function CohortsIsland({ horizonMonths, hasData, channelFilter, excludedIncomplete, charts, table }) {
   // Defensive loading state for a stale page that mounts without a model; the EJS skeleton covers the first paint.
   if (!table?.columns || !charts?.ltv) return <Skeleton lines={4} />;
 
   const monthColumns = table.columns.filter((column) => typeof column.monthOffset === 'number');
+  const emptyCurveText = hasData
+    ? 'У этих когорт ещё не прошёл весь горизонт: средний LTV по завершённым когортам считать не по чему. Неполные когорты остаются в таблице удержания.'
+    : 'Когорт пока нет: кривая появится после первых клиентов с заказом и полным горизонтом наблюдения.';
 
   return (
     <div className="stack stack--lg">
@@ -45,6 +50,8 @@ export function CohortsIsland({ horizonMonths, hasData, excludedIncomplete, char
         title="Удержание по когортам"
         meta={`Когорты по месяцу первого заказа · горизонт ${horizonMonths} мес. · значения — доля вернувшихся клиентов`}
       >
+        {channelFilter && <p className="matrix__filter">{channelFilter.label}</p>}
+
         {hasData ? (
           <div className="matrix-wrap">
             <table className="matrix">
@@ -53,8 +60,13 @@ export function CohortsIsland({ horizonMonths, hasData, excludedIncomplete, char
                 <tr>
                   {table.columns.map((column) =>
                     typeof column.monthOffset === 'number' ? (
-                      <th scope="col" className="matrix__month" key={column.key}>
-                        <span title={`${column.monthOffset} мес. после первого заказа`}>{column.label}</span>
+                      <th
+                        scope="col"
+                        className="matrix__month"
+                        key={column.key}
+                        aria-label={`${column.monthOffset} мес. после первого заказа`}
+                      >
+                        <span aria-hidden="true">{column.label}</span>
                       </th>
                     ) : (
                       <th scope="col" className={column.numeric ? 'u-right' : undefined} key={column.key}>
@@ -94,11 +106,15 @@ export function CohortsIsland({ horizonMonths, hasData, excludedIncomplete, char
           </EmptyState>
         )}
 
-        <p className="matrix__note">
-          Пунктиром отмечены неполные когорты: у них ещё не прошёл весь горизонт. Пустая ячейка «—» означает, что месяц
-          ещё не наступил, а не нулевое удержание.
-        </p>
-        <MatrixLegend monthCount={monthColumns.length} />
+        {hasData && (
+          <>
+            <p className="matrix__note">
+              Пунктиром отмечены неполные когорты: у них ещё не прошёл весь горизонт. Пустая ячейка «—» означает, что
+              месяц ещё не наступил, а не нулевое удержание.
+            </p>
+            <MatrixLegend monthCount={monthColumns.length} />
+          </>
+        )}
       </Card>
 
       <ChartErrorBoundary island="cohorts" title={charts.ltv.title} table={charts.ltv.table}>
@@ -108,7 +124,7 @@ export function CohortsIsland({ horizonMonths, hasData, excludedIncomplete, char
           unit={charts.ltv.unit}
           ariaLabel={charts.ltv.ariaLabel}
           empty={!charts.ltv.hasData}
-          emptyText="Ни одна когорта ещё не прошла горизонт полностью: средний LTV считать не по чему. Неполные когорты остаются в таблице удержания."
+          emptyText={emptyCurveText}
           table={charts.ltv.table}
           height="md"
         >
@@ -119,7 +135,7 @@ export function CohortsIsland({ horizonMonths, hasData, excludedIncomplete, char
       {excludedIncomplete.length > 0 && (
         <Card
           title="Когорты вне кривой"
-          meta={`${excludedIncomplete.length} неполных когорт: горизонт ${horizonMonths} мес. ещё не прошёл`}
+          meta={`${cohortsLabel(excludedIncomplete.length)}: горизонт ${horizonMonths} мес. ещё не прошёл`}
         >
           <p className="matrix__note">
             Неполные когорты не вошли в кривую: их горизонт не закончился, поэтому средний LTV по ним был бы
@@ -142,15 +158,15 @@ export function CohortsIsland({ horizonMonths, hasData, excludedIncomplete, char
 }
 
 /**
- * The five-bucket heat legend plus the two non-measured states. The swatches reuse the same `.heat-*` classes as the
- * cells, so a legend cannot drift from the matrix.
+ * The five-bucket heat legend plus the two non-measured states. Buckets and labels come from `heat-scale.js`, so the
+ * legend cannot drift from the matrix; only the swatch colours live in the stylesheet.
  *
  * @param {{ monthCount: number }} props
  */
 function MatrixLegend({ monthCount }) {
   return (
     <ul className="matrix-legend" aria-label="Обозначения матрицы удержания">
-      {HEAT_LEGEND.map((entry) => (
+      {HEAT_BUCKETS.map((entry) => (
         <li className="matrix-legend__item" key={entry.className}>
           <span className={`matrix-legend__swatch ${entry.className}`} aria-hidden="true" />
           {entry.label}
@@ -167,14 +183,6 @@ function MatrixLegend({ monthCount }) {
     </ul>
   );
 }
-
-const HEAT_LEGEND = Object.freeze([
-  { className: 'heat-0', label: '0–19%' },
-  { className: 'heat-1', label: '20–39%' },
-  { className: 'heat-2', label: '40–59%' },
-  { className: 'heat-3', label: '60–79%' },
-  { className: 'heat-4', label: '80–100%' },
-]);
 
 // The entry is also imported by the SSR structure test, where there is no DOM to mount into.
 if (typeof document !== 'undefined') {

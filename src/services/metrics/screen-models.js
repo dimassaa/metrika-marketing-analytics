@@ -847,7 +847,7 @@ function toChannelLtvRow(row) {
  *   horizonMonths: number,
  *   anchor: string,
  *   hasData: boolean,
- *   incompleteCount: number,
+ *   channelFilter: { id: string, code: string, name: string, label: string } | null,
  *   cohorts: object[],
  *   excludedIncomplete: object[],
  *   channelLtv: object[],
@@ -876,7 +876,14 @@ export function buildCohortsScreen({ matrix, curve }) {
     horizonMonths,
     anchor: matrix.anchor,
     hasData: cohorts.length > 0,
-    incompleteCount: excludedIncomplete.length,
+    channelFilter: matrix.channel
+      ? {
+          id: matrix.channel.id,
+          code: matrix.channel.code,
+          name: matrix.channel.name,
+          label: `Показан канал ${matrix.channel.name}`,
+        }
+      : null,
     cohorts,
     excludedIncomplete,
     channelLtv: (matrix.channelLtv ?? []).map(toChannelLtvRow),

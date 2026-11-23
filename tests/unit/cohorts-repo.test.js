@@ -43,7 +43,7 @@ function createPoolDouble(respond) {
  */
 function respond(sql) {
   if (sql.includes('FROM channels')) {
-    return { rows: [{ channel_id: '1', channel_code: 'instagram', is_active: true }] };
+    return { rows: [{ channel_id: '1', channel_code: 'instagram', channel_name: 'Instagram', is_active: true }] };
   }
   if (sql.includes('AS cohort_size')) {
     return { rows: [{ cohort_month: '2026-01-01', channel_id: '1', channel_code: 'instagram', cohort_size: 120 }] };
@@ -98,7 +98,9 @@ describe('createCohortsRepository', () => {
         activeCustomers: 120,
       },
     ]);
-    expect(result.channels).toEqual([{ channelId: '1', channelCode: 'instagram', isActive: true }]);
+    expect(result.channels).toEqual([
+      { channelId: '1', channelCode: 'instagram', channelName: 'Instagram', isActive: true },
+    ]);
   });
 
   it('rolls the snapshot back and releases the client when a read fails', async () => {

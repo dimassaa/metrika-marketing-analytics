@@ -2628,6 +2628,13 @@ input[type='file'] {
   line-height: 1.5;
 }
 
+.matrix__filter {
+  margin: 0;
+  color: var(--color-soot);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 /* Cohorts: horizon switch and the heatmap legend. The active segment is a pale sky wash, not a second filled CTA;
    the page keeps exactly one cyan-filled action. */
 .segmented {
@@ -2759,7 +2766,8 @@ input[type='file'] {
 
 .matrix__cell.is-empty {
   background-color: var(--color-stone-canvas);
-  color: var(--color-ash-gray);
+  /* Warm gray keeps the dash readable on the stone wash; the cell still means "not observed", not 0%. */
+  color: var(--color-warm-gray);
 }
 
 @media (max-width: 768px) {

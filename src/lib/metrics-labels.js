@@ -26,3 +26,16 @@ export const RANKING_REASON_LABELS = Object.freeze({
   missing_criterion: 'Не хватает метрики',
   blended: 'Сводная строка',
 });
+
+/**
+ * @param {number} count
+ * @returns {string} Russian noun form for a cohort count (`1 когорта`, `2 когорты`, `5 когорт`).
+ */
+export function cohortsLabel(count) {
+  const tail = count % 100;
+  const last = count % 10;
+  if (tail >= 11 && tail <= 14) return `${count} когорт`;
+  if (last === 1) return `${count} когорта`;
+  if (last >= 2 && last <= 4) return `${count} когорты`;
+  return `${count} когорт`;
+}

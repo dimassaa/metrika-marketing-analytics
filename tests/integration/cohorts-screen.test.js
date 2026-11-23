@@ -154,6 +154,15 @@ describe('cohorts screen', () => {
     expect(res.text).not.toContain('app-topbar__period');
   });
 
+  it('rejects an unsupported horizon on the page with 400, not a silently different matrix', async () => {
+    const agent = await signedIn();
+
+    const res = await agent.get('/app/cohorts?horizon=7');
+
+    expect(res.status).toBe(400);
+    expect(res.text).not.toContain('data-island="cohorts"');
+  });
+
   it('marks the active horizon with aria-current and preserves channelId and days in the links', async () => {
     const agent = await signedIn();
     const id = await channelWithCustomers();
@@ -185,6 +194,9 @@ describe('cohorts screen', () => {
     expect(sumOf(filtered)).toBeLessThan(sumOf(all));
     expect(filtered.channelLtv).toHaveLength(1);
     expect(filtered.channelLtv[0].channelId).toBe(id);
+    expect(filtered.channelFilter).toMatchObject({ id });
+    expect(filtered.channelFilter.label).toMatch(/^Показан канал /);
+    expect(all.channelFilter).toBeNull();
     expect(all.channelLtv.length).toBeGreaterThan(1);
   });
 

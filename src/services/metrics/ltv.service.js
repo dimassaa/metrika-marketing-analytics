@@ -425,7 +425,7 @@ export function createLtvService({ cohortsRepository }) {
    *     channelCode: string,
    *     marginsByOffset: Map<number, { activeCustomers: number, marginCents: bigint }>,
    *   }>,
-   *   channels: Array<{ channelId: string, channelCode: string, isActive: boolean }>,
+   *   channels: Array<{ channelId: string, channelCode: string, channelName: string, isActive: boolean }>,
    * }>}
    */
   async function loadReport(filters) {
@@ -531,6 +531,7 @@ export function createLtvService({ cohortsRepository }) {
      * @returns {Promise<{
      *   horizonMonths: number,
      *   anchor: string,
+     *   channel: { id: string, code: string, name: string } | null,
      *   cohorts: object[],
      *   channelLtv: object[],
      *   excludedIncomplete: object[],
@@ -555,9 +556,21 @@ export function createLtvService({ cohortsRepository }) {
           monthsObserved,
         }));
 
+      // The screen needs a name for the "Показан канал …" line, and the repository already read the dimension inside
+      // the same snapshot. Returning it here adds no query; `channelLtv` keeps its documented per-channel row shape.
+      const channel =
+        filters.channelId === null || channels.length === 0
+          ? null
+          : {
+              id: channels[0].channelId,
+              code: channels[0].channelCode,
+              name: channels[0].channelName ?? channels[0].channelCode,
+            };
+
       return {
         horizonMonths,
         anchor,
+        channel,
         cohorts,
         channelLtv: buildChannelLtv(entries, channels, options).rows,
         excludedIncomplete,

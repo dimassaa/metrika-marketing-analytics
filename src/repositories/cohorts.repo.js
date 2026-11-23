@@ -209,13 +209,14 @@ export function createCohortsRepository(db) {
      * CAC rows instead of silently dropping a channel that has spend but no customers yet.
      *
      * @param {{ channelId?: string | null }} [filters]
-     * @returns {Promise<Array<{ channelId: string, channelCode: string, isActive: boolean }>>}
+     * @returns {Promise<Array<{ channelId: string, channelCode: string, channelName: string, isActive: boolean }>>}
      * @throws {ValidationError} When the channel filter is malformed.
      */
     async listChannels({ channelId = null } = {}) {
       const { rows } = await db.query(
         `SELECT c.id::text AS channel_id,
                 c.code AS channel_code,
+                c.name AS channel_name,
                 c.is_active
            FROM channels c
           WHERE ($1::bigint IS NULL OR c.id = $1::bigint)
@@ -226,6 +227,7 @@ export function createCohortsRepository(db) {
       return rows.map((row) => ({
         channelId: row.channel_id,
         channelCode: row.channel_code,
+        channelName: row.channel_name,
         isActive: Boolean(row.is_active),
       }));
     },

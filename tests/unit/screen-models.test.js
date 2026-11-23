@@ -1073,7 +1073,26 @@ describe('cohorts screen model', () => {
     expect(chart.caption).toContain('Средний накопленный LTV по завершённым когортам, 1 когорта');
     expect(chart.caption).toContain('Когорта без наблюдаемой маржи входит нулём');
     expect(chart.table.rows).toHaveLength(3);
+    expect(chart.table.columns[1].label).toBe('Средний накопленный LTV, BYN');
     expect(chart.table.rows[2].cells.value).toBe('93,39');
+  });
+
+  it('exposes the selected channel for the visible filter line', () => {
+    const matrix = matrixWith();
+    matrix.channel = { id: '1', code: 'instagram', name: 'Instagram' };
+    const screen = buildCohortsScreen({
+      matrix,
+      curve: buildCumulativeLtvCurve({ cohorts: matrix.cohorts, horizonMonths: matrix.horizonMonths }),
+    });
+
+    expect(screen.channelFilter).toEqual({
+      id: '1',
+      code: 'instagram',
+      name: 'Instagram',
+      label: 'Показан канал Instagram',
+    });
+    expect(screen).not.toHaveProperty('incompleteCount');
+    expect(screenWith().channelFilter).toBeNull();
   });
 
   it('keeps the curve null when no cohort is complete, while the heatmap still shows partial rows', () => {
