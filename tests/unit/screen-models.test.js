@@ -1597,6 +1597,46 @@ describe('scenario screen model and charts', () => {
     expect(screen.list.prevHref).toBeNull();
   });
 
+  it('exposes real bounds and preserves a numeric entered budget instead of clamping it', () => {
+    const baselineScenario = {
+      channels: [
+        { model: 'saturation', current: { spendCents: '100000' } },
+        { model: 'saturation', current: { spendCents: '100000' } },
+      ],
+    };
+    const screen = buildScenariosErrorScreen({
+      anchor: '2026-11-20',
+      channels: [
+        { id: '1', code: 'instagram', name: 'Instagram' },
+        { id: '2', code: 'google', name: 'Google Ads' },
+      ],
+      query: { budgetByn: '8082.01', channelIds: ['1', '2'] },
+      baselineScenario,
+      error: 'Бюджет больше 3× базы оптимизации в BYN',
+    });
+
+    expect(screen.controls.budgetMinInput).toBe('0.02');
+    expect(screen.controls.budgetMaxInput).toBe('8082.01');
+    expect(screen.controls.budgetEntry).toBe('8082.01');
+    expect(screen.controls.budgetInputType).toBe('number');
+  });
+
+  it('keeps a non-numeric entry in a text field so it stays visible and editable', () => {
+    const screen = buildScenariosErrorScreen({
+      anchor: '2026-11-20',
+      channels: [{ id: '1', code: 'instagram', name: 'Instagram' }],
+      query: { budgetByn: 'abc', channelIds: ['1'] },
+      baselineScenario: {
+        channels: [{ model: 'saturation', current: { spendCents: '100000' } }],
+      },
+      error: 'Введите сумму в BYN',
+    });
+
+    expect(screen.controls.budgetEntry).toBe('abc');
+    expect(screen.controls.budgetInputType).toBe('text');
+    expect(screen.controls.budgetMaxInput).toBe('3000.00');
+  });
+
   it('renders a rejected calculation as a builder error that preserves the entered values', () => {
     const screen = buildScenariosErrorScreen({
       anchor: '2026-11-20',

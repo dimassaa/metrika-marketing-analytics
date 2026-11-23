@@ -204,11 +204,24 @@ export function createScenariosController({
               'расходом и новыми клиентами.',
           });
         } else {
+          // A rejected budget or channel set still needs the feasible slider bounds. A successful default-budget
+          // build gives the optimizable baseline and channel count without trusting the rejected value; when it also
+          // fails (zero baseline, unknown channel), the model falls back to the one-kopeck floor.
+          let baselineScenario = null;
+          try {
+            baselineScenario = await services.scenarios.buildScenario({
+              anchor,
+              channelIds: query.channelIds ?? null,
+            });
+          } catch (baselineError) {
+            if (!(baselineError instanceof ValidationError)) throw baselineError;
+          }
           screen = screenModels.scenariosError({
             anchor,
             list,
             channels,
             query,
+            baselineScenario,
             error: failure.message,
           });
         }

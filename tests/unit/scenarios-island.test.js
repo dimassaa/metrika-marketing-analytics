@@ -181,10 +181,10 @@ describe('scenarios frame contract', () => {
     const view = readFileSync('src/views/pages/scenarios.ejs', 'utf8');
 
     expect(view).toContain('type="range"');
-    expect(view).toContain('min="<%= model.budget ? model.budget.minInput : model.controls.budgetMinInput %>"');
+    expect(view).toContain('min="<%= model.budget.minInput %>"');
     expect(view).toContain('step="0.01"');
     expect(view).toContain('max="<%= model.budget.capInput %>"');
-    expect(view).toContain('aria-valuetext');
+    expect(view).not.toContain('aria-valuetext');
     expect(view).toContain('Недельный бюджет');
     expect(view).toContain('за 12 месяцев ×<%= model.budget.weeksPerYear %>');
     expect(view).toContain('база оптимизации');
@@ -192,18 +192,22 @@ describe('scenarios frame contract', () => {
     expect(view).toContain('<%= model.budget.maxMultiplier %>× базы оптимизации');
     expect(view).not.toContain('×52');
     expect(view).not.toContain('3× текущего бюджета');
+    expect(view).not.toContain('model.budget.isAboveWarn');
     expect(view).toContain('model.controls.presets');
     expect(view).toContain('name="_csrf"');
     expect(view).toContain('name="channelIds"');
   });
 
-  it('renders a styled error card with the parameter form instead of a bare-text 400', () => {
+  it('renders a styled error card with an editable budget instead of a clamping range', () => {
     const view = readFileSync('src/views/pages/scenarios.ejs', 'utf8');
 
     expect(view).toContain('model.builderError');
     expect(view).toContain('alert alert--error');
     expect(view).toContain('Расчёт не выполнен');
     expect(view).toContain('model.controls.budgetEntry');
+    expect(view).toContain('type="<%= model.controls.budgetInputType %>"');
+    expect(view).toContain('value="<%= model.controls.budgetEntry %>"');
+    expect(view).toContain('max="<%= model.controls.budgetMaxInput %>"');
     expect(view).toContain('Параметры расчёта');
   });
 

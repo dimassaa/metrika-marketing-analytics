@@ -10,6 +10,7 @@ import {
   formatRatio,
 } from '../../lib/format.js';
 import { centsToApi, roundHalfUp, roundNumber } from '../../lib/metrics-math.js';
+import { parseBynToCents } from '../../lib/money.js';
 import { buildQueryString } from '../../lib/query.js';
 import { resolveWeekRange } from '../metrics/weekly-series.js';
 import { buildScenarioCharts } from './scenario-charts.js';
@@ -272,7 +273,8 @@ function customersLabel(value) {
 
 /**
  * @param {bigint} cents
- * @returns {string} Dot-decimal input value for `<input type="number">`.
+ * @returns {string} Dot-decimal BYN value accepted by both the range and the error-state number input (the form
+ *   submits decimal BYN, never kopecks).
  */
 function centsToInput(cents) {
   return `${cents / 100n}.${String(cents % 100n).padStart(2, '0')}`;
@@ -674,8 +676,9 @@ export function buildScenariosUnavailableScreen({
  *   list?: { rows: object[], page: number, total: number, hasMore: boolean },
  *   channels?: object[],
  *   query?: object,
+ *   baselineScenario?: object | null,
  *   error?: string,
- * }} input
+ * }} input `baselineScenario` is a successful default-budget build used only to derive the feasible min/cap bounds.
  * @returns {object} Builder-shaped model with `builderError: true`.
  */
 export function buildScenariosErrorScreen({
@@ -683,6 +686,7 @@ export function buildScenariosErrorScreen({
   list = { rows: [], page: 1, total: 0, hasMore: false },
   channels = [],
   query = {},
+  baselineScenario = null,
   error = 'Не удалось рассчитать сценарий с этими параметрами.',
 }) {
   const requestedIds = query.channelIds ?? null;
@@ -701,9 +705,32 @@ export function buildScenariosErrorScreen({
   const rawBudget = query.budgetByn === null || query.budgetByn === undefined
     ? ''
     : String(query.budgetByn).trim();
-  // A range input only accepts a plain non-negative number; the raw entry is kept separately for the error card so
-  // an invalid value such as `abc` is still shown back to the person.
-  const rangeBudget = /^\d+(?:[.,]\d+)?$/.test(rawBudget) ? rawBudget.replace(',', '.') : '';
+  const enteredCents = rawBudget === ''
+    ? null
+    : (() => {
+        try {
+          return parseBynToCents(rawBudget);
+        } catch {
+          return null;
+        }
+      })();
+
+  const baselineCents = baselineScenario ? optimizableBaselineCents(baselineScenario.channels) : 0n;
+  const optimizableCount = baselineScenario
+    ? optimizableChannelCount(baselineScenario.channels)
+    : 0;
+  const minCents = BigInt(Math.max(1, optimizableCount));
+  const capCents = baselineScenario
+    ? baselineCents * BigInt(METRICS_CONFIG.scenarios.maxBudgetMultiplier)
+    : 0n;
+  // The error form must show the value it rejected: a browser would clamp a range at its default 100 when `max` is
+  // absent, and an empty/`abc` value has no numeric bound at all. The max therefore covers both the cap and the
+  // entered amount; a non-numeric entry becomes a text input below so it stays visible and editable.
+  const maxCents = [enteredCents ?? 0n, capCents, minCents].reduce(
+    (largest, value) => (value > largest ? value : largest),
+    0n,
+  );
+  const numericEntry = /^\d+(?:[.,]\d+)?$/.test(rawBudget);
 
   return {
     page: 'scenarios',
@@ -715,11 +742,15 @@ export function buildScenariosErrorScreen({
     budget: null,
     controls: {
       budgetPeriod: 'week',
-      budgetInput: rangeBudget,
+      budgetInput: numericEntry ? rawBudget.replace(',', '.') : '',
       budgetEntry: rawBudget,
+      budgetInputType: numericEntry ? 'number' : 'text',
+      budgetMinInput: centsToInput(minCents),
+      budgetMinLabel: formatCentsToByn(minCents),
+      budgetMaxInput: centsToInput(maxCents),
+      budgetMaxLabel: formatCentsToByn(maxCents),
       budgetValue: null,
       budgetLabel: '—',
-      budgetMinInput: centsToInput(1n),
       curveChannelId: requestedCurve,
       curveChannelName: null,
       curveNote: null,

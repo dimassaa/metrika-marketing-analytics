@@ -349,7 +349,7 @@ export function createScenariosService({
     const warnAboveCents = baselineCents * BigInt(METRICS_CONFIG.scenarios.warnBudgetMultiplier);
     if (budgetCents > warnAboveCents) {
       warnings.push(
-        `Бюджет больше фактического более чем в ${METRICS_CONFIG.scenarios.warnBudgetMultiplier} раза — ` +
+        `Бюджет больше базы оптимизации более чем в ${METRICS_CONFIG.scenarios.warnBudgetMultiplier} раза — ` +
           'прогноз за пределами наблюдённых расходов (экстраполяция)',
       );
     }

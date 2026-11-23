@@ -100,7 +100,7 @@ describe('scenarios builder screen', () => {
   it('rejects a malformed, zero, negative or oversized budget on both paths with BYN wording', async () => {
     const agent = await signedIn(VIEWER);
     const base = extractDataProps((await agent.get('/app/scenarios')).text, 'scenarios');
-    const oversized = bynFromCents(BigInt(base.budget.capCents) + 100n);
+    const oversized = bynFromCents(BigInt(base.budget.capCents) + 1n);
 
     for (const budget of ['abc', '-1', '0', oversized]) {
       const page = await agent.get(`/app/scenarios?budgetByn=${encodeURIComponent(budget)}`);
@@ -115,6 +115,19 @@ describe('scenarios builder screen', () => {
       expect(page.text, budget).toMatch(/BYN/i);
       expect(api.body.error.message, budget).toMatch(/BYN/i);
       expect(api.body.error.message, budget).not.toMatch(/NaN|undefined/i);
+
+      if (budget === oversized) {
+        // The rejected amount must be rendered exactly: a range without `max` clamps it to its default 100.
+        expect(page.text).toContain('type="number"');
+        expect(page.text).toContain(`value="${oversized}"`);
+        expect(page.text).toContain(`max="${oversized}"`);
+        expect(page.text).toContain(`min="${base.budget.minInput}"`);
+      }
+      if (budget === 'abc') {
+        // A number input would sanitise `abc` to an empty value; the text fallback keeps it editable.
+        expect(page.text).toContain('type="text"');
+        expect(page.text).toContain('value="abc"');
+      }
     }
   });
 

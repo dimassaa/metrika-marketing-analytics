@@ -837,10 +837,12 @@ Still open:
 - **The scenario `curveChannelId` is a presentation choice, defaulting to the first fitted channel.** No channel is
   labelled "problem" for scenarios; the alerts screen owns that heuristic. The curve selector only changes which
   stored `K`/`S`/`observed` row is drawn; the plan and totals never depend on it.
-- **The native range input announces a raw float value to assistive technology.** `type="range"` with
-  `min="0.01"` and a multi-thousand-BYN `max` stored `2705.7099609375` internally; Chrome submitted `2705.71`, but
-  `aria-valuenow` exposed the unrounded float. **Resolved in the final M5 fix wave:** the input now carries
-  `aria-valuetext` with the formatted weekly amount, and the minimum is the feasible one (see the Task 8 note below).
+- **The native range input announces a raw float value to assistive technology.** `type="range"` with a
+  multi-thousand-BYN `max` stores `2705.7099609375` internally; Chrome submits `2705.71`, but `aria-valuenow` exposes
+  the unrounded float. **Decision after the final M5 review:** the range keeps its native announcement and the static
+  `aria-valuetext` was removed — it did not update while the slider moved and announced a stale amount. If formatted
+  BYN announcements become a requirement, mirror the slider value into a live island string instead of a fixed
+  server-rendered attribute.
 
 ## M5 Task 8 — final E2E and evidence follow-ups
 
@@ -849,9 +851,10 @@ Still open:
   1 копейку каждому каналу», while `0.06` was the first accepted value. **Resolved in the final M5 fix wave:** the
   screen model derives `budget.minInput` from the optimizable channel count, so `Home` lands on `0.06`.
 - **The raw-float `aria-valuenow` was confirmed in a real browser, not just inferred.** On `/app/scenarios` the
-  accessibility tree reported `0.009999999776482582` after `Home`. **Resolved in the final M5 fix wave:** the slider
-  now pairs it with `aria-valuetext` («2 694,00 BYN в неделю») and the minimum is feasible; `aria-valuenow` itself
-  stays native.
+  accessibility tree reported `0.009999999776482582` after `Home`. **Decision after the final M5 review:** the
+  native range announcement stays; the static `aria-valuetext` was removed because it did not follow the thumb and
+  could announce a stale amount. The minimum is now feasible (see the slider note above), so `Home` no longer lands
+  on a rejected value. A formatted live announcement needs an island mirror, not a server-rendered constant.
 - **Scenario validation errors lost the page and the entered budget.** `GET /app/scenarios?budgetByn=8082.01`
   returned a plain-text 400, not the styled builder with an error card. **Resolved in the final M5 fix wave:** the
   page catches builder `ValidationError`s (including schema errors) and renders the parameter form with a styled error

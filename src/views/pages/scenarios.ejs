@@ -66,20 +66,39 @@
       <form class="inline-form" method="get" action="/app/scenarios" aria-label="Параметры сценария">
         <div class="field">
           <label class="field__label" for="budgetByn">Недельный бюджет</label>
+          <% if (model.builderError) { %>
+          <input
+            class="input"
+            id="budgetByn"
+            type="<%= model.controls.budgetInputType %>"
+            inputmode="decimal"
+            name="budgetByn"
+            value="<%= model.controls.budgetEntry %>"
+            min="<%= model.controls.budgetMinInput %>"
+            max="<%= model.controls.budgetMaxInput %>"
+            step="0.01"
+            aria-describedby="budget-hint"
+            required
+          >
+          <span class="field__hint" id="budget-hint">
+            Допустимый недельный бюджет: от <span class="u-numeric"><%= model.controls.budgetMinLabel %></span>
+            <span class="byn">BYN</span> до <span class="u-numeric"><%= model.controls.budgetMaxLabel %></span>
+            <span class="byn">BYN</span>. Введённое значение не подменяется — исправьте его или выберите пресет
+            ниже.
+          </span>
+          <% } else { %>
           <input
             class="range"
             id="budgetByn"
             type="range"
             name="budgetByn"
             value="<%= model.controls.budgetInput %>"
-            min="<%= model.budget ? model.budget.minInput : model.controls.budgetMinInput %>"
-            <% if (model.budget) { %>max="<%= model.budget.capInput %>"<% } %>
+            min="<%= model.budget.minInput %>"
+            max="<%= model.budget.capInput %>"
             step="0.01"
             aria-describedby="budget-hint"
-            aria-valuetext="<%= model.budget ? `${model.budget.weeklyLabel} BYN в неделю` : 'Бюджет не рассчитан' %>"
             required
           >
-          <% if (model.budget) { %>
           <span class="field__hint" id="budget-hint">
             <strong class="u-numeric"><%= model.budget.weeklyLabel %> <span class="byn">BYN</span></strong>
             · за 12 месяцев ×<%= model.budget.weeksPerYear %>: <strong class="u-numeric"><%= model.budget.forecast12mLabel %> <span class="byn">BYN</span></strong>
@@ -88,11 +107,6 @@
             (по 1 копейке на канал с кривой)
             · максимум: <strong class="u-numeric"><%= model.budget.capLabel %></strong> <span class="byn">BYN</span>
             — <%= model.budget.maxMultiplier %>× базы оптимизации
-          </span>
-          <% } else { %>
-          <span class="field__hint" id="budget-hint">
-            Минимальный бюджет — по 1 копейке на каждый канал с кривой. Слишком маленькая или некорректная сумма
-            останется здесь, и форма покажет ошибку без перехода на отдельную страницу.
           </span>
           <% } %>
           <div class="cluster" aria-label="Пресеты недельного бюджета">
@@ -134,13 +148,6 @@
           <a class="btn btn--ghost" href="/app/scenarios">Сбросить</a>
         </div>
       </form>
-
-      <% if (model.budget && model.budget.isAboveWarn) { %>
-      <p class="alert alert--warning" role="status">
-        Бюджет больше базы оптимизации более чем в <%= model.budget.warnMultiplier %> раза — прогноз за пределами
-        наблюдённых расходов.
-      </p>
-      <% } %>
     </div>
 
     <% if (!model.builderError) { %>
