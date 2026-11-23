@@ -96,6 +96,81 @@ export function createMetricsRepository(db) {
     },
 
     /**
+     * Spend and new customers per channel for two adjacent alert windows, in one grouped statement.
+     *
+     * The alert rules need both windows for every channel at once. Querying per channel (or per window) would turn
+     * one recalculation into 2 × channel-count round trips, so both windows are described by a `bounds` CTE and one
+     * pass over `daily_stats`/`customers` produces every row.
+     *
+     * Every channel is returned for both windows, with zeros when it had no activity. The zero is a measured value —
+     * the rule guard decides "not enough data", and a missing row would otherwise be indistinguishable from a SQL
+     * bug. Spend and customers are aggregated in separate CTEs and joined afterwards: joining the two fact tables
+     * directly would multiply every spend row by every customer row of the same window.
+     *
+     * @param {{ nowFrom: string, nowTo: string, prevFrom: string, prevTo: string }} windows Inclusive calendar dates.
+     * @returns {Promise<Array<{
+     *   window: 'now' | 'prev',
+     *   channelId: string,
+     *   spendCents: bigint,
+     *   newCustomers: number,
+     * }>>} Two rows per channel, ordered by channel id and window.
+     */
+    async listChannelWindowTotals({ nowFrom, nowTo, prevFrom, prevTo }) {
+      const { rows } = await db.query(
+        `WITH bounds (win, from_date, to_date, from_ts, to_ts) AS (
+           VALUES ('prev', $1::date, $2::date, $5::timestamptz, $6::timestamptz),
+                  ('now', $3::date, $4::date, $7::timestamptz, $8::timestamptz)
+         ),
+         spend AS (
+           SELECT b.win,
+                  cp.channel_id,
+                  sum(ds.spend_cents)::bigint::text AS spend_cents
+             FROM bounds b
+             JOIN daily_stats ds ON ds.stat_date BETWEEN b.from_date AND b.to_date
+             JOIN campaigns cp ON cp.id = ds.campaign_id
+            GROUP BY b.win, cp.channel_id
+         ),
+         customer_counts AS (
+           SELECT b.win,
+                  cu.first_channel_id AS channel_id,
+                  count(*)::int AS new_customers
+             FROM bounds b
+             JOIN customers cu
+               ON cu.first_order_at >= b.from_ts
+              AND cu.first_order_at < b.to_ts
+            WHERE cu.first_channel_id IS NOT NULL
+            GROUP BY b.win, cu.first_channel_id
+         )
+         SELECT b.win,
+                c.id::text AS channel_id,
+                coalesce(s.spend_cents, '0') AS spend_cents,
+                coalesce(n.new_customers, 0) AS new_customers
+           FROM bounds b
+           CROSS JOIN channels c
+           LEFT JOIN spend s ON s.win = b.win AND s.channel_id = c.id
+           LEFT JOIN customer_counts n ON n.win = b.win AND n.channel_id = c.id
+          ORDER BY c.id, b.win`,
+        [
+          prevFrom,
+          prevTo,
+          nowFrom,
+          nowTo,
+          minskDayStart(prevFrom),
+          minskDayStart(addDays(prevTo, 1)),
+          minskDayStart(nowFrom),
+          minskDayStart(addDays(nowTo, 1)),
+        ],
+      );
+
+      return rows.map((row) => ({
+        window: row.win,
+        channelId: row.channel_id,
+        spendCents: spendFromRow(row.spend_cents),
+        newCustomers: countFromRow(row.new_customers, 'new_customers'),
+      }));
+    },
+
+    /**
      * Campaign inputs, optionally limited to one channel and/or one campaign. New customers are grouped by
      * `first_campaign_id`, so a campaign never borrows customers attributed to a different campaign or channel.
      *
