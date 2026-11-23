@@ -6,7 +6,7 @@ import { Skeleton } from '../components/ui/Skeleton.jsx';
 import { ChartErrorBoundary } from '../components/charts/ChartErrorBoundary.jsx';
 import { ChartFrame } from '../components/charts/ChartFrame.jsx';
 import { RomiBars } from '../components/charts/RomiBars.jsx';
-import { ScoreStack, buildScoreStack } from '../components/charts/ScoreStack.jsx';
+import { ScoreStack, buildScoreStack, scoreStackCaption } from '../components/charts/ScoreStack.jsx';
 import { Sparkline } from '../components/charts/Sparkline.jsx';
 import { formatCentsToByn, formatInteger, formatRatio } from '../../src/lib/format.js';
 
@@ -35,11 +35,7 @@ export function ChannelsIsland({ period, filters, weights, rows, excluded, spark
 
   const sortByField = Object.fromEntries((sortLinks ?? []).map((link) => [link.field, link]));
   const stack = buildScoreStack(rows);
-  const best = rows.find((row) => row.rank === 1) ?? null;
-  const stackCaption =
-    best === null
-      ? 'Ни один канал не получил оценку: не хватает метрик за период.'
-      : `Лучший результат — ${best.name}, ${formatRatio(best.score, { decimals: 1 })} из 100. Сумма вкладов равна оценке; для CAC больше баллов у дешёвого канала.`;
+  const stackCaption = scoreStackCaption(stack);
   const weightLabel = ['cac', 'romi', 'ltvCac', 'newCustomers']
     .map((key) => `${WEIGHT_LABELS[key]} ${Math.round(weights[key] * 100)}%`)
     .join(' · ');
@@ -105,46 +101,7 @@ export function ChannelsIsland({ period, filters, weights, rows, excluded, spark
               </thead>
               <tbody>
                 {rows.map((row) => (
-                  <tr key={row.channelId}>
-                    <td className="u-right">
-                      <span className="table__rank">{row.rank === null ? '—' : row.rank}</span>
-                      {row.score !== null && (
-                        <span className="table__score">
-                          {formatRatio(row.score, { decimals: 1 })}
-                        </span>
-                      )}
-                    </td>
-                    <td>
-                      <a className="table__channel" href={`/app/channels/${row.channelId}`}>
-                        {row.name}
-                      </a>
-                      <span className="table__meta">
-                        {row.metaLabel ?? 'Канал'} <span className="u-muted">· {row.code}</span>
-                      </span>
-                    </td>
-                    <td className="u-right">
-                      <Money value={row.spendCents} />
-                    </td>
-                    <td className="u-right">
-                      <Money value={row.revenueCents} />
-                    </td>
-                    <td className="u-right">{formatInteger(row.newCustomers)}</td>
-                    <td className="u-right">
-                      <Money value={row.cacCents} />
-                    </td>
-                    <td className="u-right">
-                      <Money value={row.ltv12Cents} />
-                    </td>
-                    <td className="u-right">{row.romiLabel}</td>
-                    <td className="u-right">{row.paybackLabel}</td>
-                    <td className="u-right">{row.ratioLabel}</td>
-                    <td>
-                      <HealthBadge status={row.status} label={row.statusLabel} />
-                    </td>
-                    <td className="table__spark">
-                      <Sparkline values={sparklines[row.channelId] ?? []} />
-                    </td>
-                  </tr>
+                  <ChannelTableRow key={row.channelId} row={row} sparkline={sparklines[row.channelId] ?? []} />
                 ))}
               </tbody>
             </table>
@@ -204,6 +161,68 @@ export function ChannelsIsland({ period, filters, weights, rows, excluded, spark
   );
 }
 
+/**
+ * One channel row. The whole row is a click target; the name stays a real link so middle-click, keyboard and assistive
+ * technology still have a semantic destination, and Enter/Space on the focused row open the passport as well.
+ *
+ * @param {{ row: object, sparkline: Array<{ weekLabel: string, value: number | null }> }} props
+ */
+function ChannelTableRow({ row, sparkline }) {
+  const href = `/app/channels/${row.channelId}`;
+  const open = () => {
+    window.location.assign(href);
+  };
+
+  return (
+    <tr
+      className="table__row--clickable"
+      tabIndex={0}
+      onClick={open}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          open();
+        }
+      }}
+    >
+      <td className="u-right">
+        <span className="table__rank">{row.rank === null ? '—' : row.rank}</span>
+        {row.score !== null && <span className="table__score">{formatRatio(row.score, { decimals: 1 })}</span>}
+      </td>
+      <td>
+        <a className="table__channel" href={href} onClick={(event) => event.stopPropagation()}>
+          {row.name}
+        </a>
+        <span className="table__meta">
+          {row.metaLabel ?? 'Канал'} <span className="u-muted">· {row.code}</span>
+        </span>
+      </td>
+      <td className="u-right">
+        <Money value={row.spendCents} />
+      </td>
+      <td className="u-right">
+        <Money value={row.revenueCents} />
+      </td>
+      <td className="u-right">{formatInteger(row.newCustomers)}</td>
+      <td className="u-right">
+        <Money value={row.cacCents} />
+      </td>
+      <td className="u-right">
+        <Money value={row.ltv12Cents} />
+      </td>
+      <td className="u-right">{row.romiLabel}</td>
+      <td className="u-right">{row.paybackLabel}</td>
+      <td className="u-right">{row.ratioLabel}</td>
+      <td>
+        <HealthBadge status={row.status} label={row.statusLabel} />
+      </td>
+      <td className="table__spark">
+        <Sparkline values={sparkline} />
+      </td>
+    </tr>
+  );
+}
+
 const WEIGHT_LABELS = Object.freeze({
   cac: 'CAC',
   romi: 'ROMI',
@@ -252,4 +271,8 @@ function Money({ value }) {
   );
 }
 
-mountIsland(ChannelsIsland, 'channels', 'Каналы');
+// The entry is also imported by the SSR structure test, where there is no DOM to mount into. The browser always has
+// one, and the guard is the smallest way to keep the component importable without a second entry.
+if (typeof document !== 'undefined') {
+  mountIsland(ChannelsIsland, 'channels', 'Каналы');
+}

@@ -316,6 +316,23 @@ describe('period control', () => {
 
     expect(control.preserve).toEqual([]);
   });
+
+  it('labels an explicit range instead of pretending it is the default 30 days', () => {
+    const control = buildPeriodControl({
+      query: { from: '2026-10-01', to: '2026-10-31' },
+      period: { from: '2026-10-01', to: '2026-10-31', days: 31 },
+    });
+
+    expect(control.customRange).toMatchObject({
+      from: '2026-10-01',
+      to: '2026-10-31',
+      label: '01.10.2026 — 31.10.2026',
+    });
+    expect(control.customRange.href).toContain('days=30');
+    expect(control.customRange.href).not.toContain('from=');
+    expect(control.customRange.href).not.toContain('to=');
+    expect(buildPeriodControl({ query: { days: 90 } }).customRange).toBeNull();
+  });
 });
 
 describe('channel filter control', () => {
@@ -546,6 +563,41 @@ describe('channels screen model', () => {
       { name: 'wLtvCac', value: '30' },
       { name: 'wNewCustomers', value: '20' },
     ]);
+  });
+
+  it('replays decimal weights exactly instead of rounding them to whole percent', () => {
+    const screen = buildChannelsScreen({
+      list: channelList(),
+      query: {
+        sort: 'rank',
+        dir: 'asc',
+        weightsCustom: true,
+        wCac: '33.3',
+        wRomi: '33.3',
+        wLtvCac: '33.3',
+        wNewCustomers: '0.1',
+      },
+    });
+    const rank = screen.sortLinks.find((link) => link.field === 'rank');
+
+    expect(rank.href).toContain('wCac=33.3');
+    expect(rank.href).toContain('wRomi=33.3');
+    expect(rank.href).toContain('wLtvCac=33.3');
+    expect(rank.href).toContain('wNewCustomers=0.1');
+
+    const control = buildChannelsWeightsControl({
+      query: {
+        wCac: '33.3',
+        wRomi: '33.3',
+        wLtvCac: '33.3',
+        wNewCustomers: '0.1',
+      },
+      filters: { status: 'all', kind: 'all' },
+      sort: 'rank',
+      dir: 'asc',
+      weights: { cac: 0.333, romi: 0.333, ltvCac: 0.333, newCustomers: 0.001 },
+    });
+    expect(control.fields.map((field) => field.value)).toEqual(['33.3', '33.3', '33.3', '0.1']);
   });
 
   it('serialises without a bigint, NaN or Infinity', () => {

@@ -2,7 +2,7 @@ import { METRICS_CONFIG } from '../../config/metrics.js';
 import { toStackSegments } from '../../lib/contributions.js';
 import { addDays, formatDateRu } from '../../lib/dates.js';
 import { ValidationError } from '../../lib/errors.js';
-import { RANKING_REASON_LABELS } from '../../lib/metrics-labels.js';
+import { CHANNEL_KIND_LABELS, RANKING_REASON_LABELS } from '../../lib/metrics-labels.js';
 import { centsToApi } from '../../lib/metrics-math.js';
 import { CHANNEL_SORT_FIELDS, sortChannelRows } from '../../lib/sort-rows.js';
 import { buildRomiByChannelChart, channelsLabel, daysLabel, toSparklinePoints } from './chart-series.js';
@@ -14,7 +14,6 @@ import { resolveWeekRange } from './weekly-series.js';
 const STATUSES = Object.freeze(['all', 'active', 'archived']);
 const CHANNEL_KINDS = Object.freeze(['all', 'paid', 'owned', 'earned']);
 
-const KIND_LABELS = Object.freeze({ paid: 'Платный', owned: 'Собственный', earned: 'Заработанный' });
 
 /**
  * @param {string} status `all | active | archived`.
@@ -26,7 +25,7 @@ function filterLabel(status, kind) {
   const parts = [];
   if (status === 'active') parts.push('Активные');
   if (status === 'archived') parts.push('В архиве');
-  if (kind !== 'all') parts.push(KIND_LABELS[kind] ?? kind);
+  if (kind !== 'all') parts.push(CHANNEL_KIND_LABELS[kind] ?? kind);
   return parts.join(' · ');
 }
 
@@ -40,7 +39,7 @@ function filterLabel(status, kind) {
 function decorateRow(row, meta, ranked, exclusion) {
   const kind = meta?.kind ?? null;
   const isActive = meta?.isActive ?? null;
-  const kindLabel = kind === null ? null : KIND_LABELS[kind] ?? kind;
+  const kindLabel = kind === null ? null : CHANNEL_KIND_LABELS[kind] ?? kind;
 
   return {
     ...row,

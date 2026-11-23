@@ -106,16 +106,6 @@ export const channelUpdateSchema = z
   })
   .transform((data) => ({ name: data.name, kind: data.kind, ...toServiceTargets(data) }));
 
-
-/**
- * Query-string filters. Unknown values fall back to `all` instead of erroring: a stale bookmarked URL should show
- * the full list, not a 400 page.
- */
-export const channelFiltersSchema = z.object({
-  status: z.enum(['all', 'active', 'archived']).catch('all'),
-  kind: z.enum(['all', ...CHANNEL_KINDS]).catch('all'),
-});
-
 /**
  * Keeps a rejected form usable: only strings of a sane length reach the template, and the kind select always has a
  * valid option. Values are still escaped by EJS; this only prevents arrays and megabyte strings from being echoed.

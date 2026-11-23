@@ -2,9 +2,7 @@ import { AUDIT_ACTIONS } from '../config/audit-actions.js';
 import { formatDateRu } from '../lib/dates.js';
 import { NotFoundError, ValidationError } from '../lib/errors.js';
 import { formatCentsToByn, formatPercent } from '../lib/format.js';
-
-/** Russian labels for the schema vocabulary; the codes stay English everywhere else. */
-const KIND_LABELS = Object.freeze({ paid: 'Платный', owned: 'Собственный', earned: 'Заработанный' });
+import { CHANNEL_KIND_LABELS } from '../lib/metrics-labels.js';
 
 const DUPLICATE_CODE = 'Канал с таким кодом уже существует';
 const ACTIVE_CAMPAIGNS_GUARD =
@@ -18,7 +16,7 @@ const ACTIVE_CAMPAIGNS_GUARD =
 function toView(channel) {
   return {
     ...channel,
-    kindLabel: KIND_LABELS[channel.kind] ?? channel.kind,
+    kindLabel: CHANNEL_KIND_LABELS[channel.kind] ?? channel.kind,
     statusLabel: channel.isActive ? 'Активен' : 'В архиве',
     targetCacLabel: channel.targetCacCents === null ? null : formatCentsToByn(channel.targetCacCents),
     targetRomiLabel: formatPercent(channel.targetRomiPct),

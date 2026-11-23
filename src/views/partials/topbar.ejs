@@ -12,7 +12,13 @@
         Plain GET form, no inline handler: the CSP forbids script attributes. `preserve` replays every other query
         key (channel filter, sort) so switching the period cannot silently reset the screen.
       %>
-      <% if (locals.periodControl) { %>
+      <% if (locals.periodControl && periodControl.customRange) { %>
+      <%# An explicit from/to range has no matching select option; label the real window instead of a false "30 дней". %>
+      <p class="app-topbar__range">
+        Период: <strong><%= periodControl.customRange.label %></strong>
+        <a class="app-topbar__range-reset" href="<%= periodControl.customRange.href %>">30 дней</a>
+      </p>
+      <% } else if (locals.periodControl) { %>
       <form class="app-topbar__period" method="get" action="<%= locals.currentPath || '/app/dashboard' %>">
         <% for (const item of periodControl.preserve) { %>
         <input type="hidden" name="<%= item.name %>" value="<%= item.value %>">

@@ -1,13 +1,7 @@
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { RANKING_CRITERIA } from '../../../src/lib/contributions.js';
 import { formatRatio } from '../../../src/lib/format.js';
 import { chartTheme } from '../../lib/chartTheme.js';
-
-const CRITERIA = [
-  { key: 'cac', label: 'CAC' },
-  { key: 'romi', label: 'ROMI' },
-  { key: 'ltvCac', label: 'LTV:CAC' },
-  { key: 'newCustomers', label: 'Новые клиенты' },
-];
 
 /**
  * Turns ranked rows into one stacked-bar series and its duplicate table.
@@ -21,6 +15,7 @@ const CRITERIA = [
  *     ltvCac: number, newCustomers: number, largest: string }>,
  *   table: { columns: Array<{ key: string, label: string, numeric: boolean }>,
  *     rows: Array<{ key: string, cells: Record<string, string> }> },
+ *   best: { channelId: string, name: string, score: number } | null,
  * }}
  */
 export function buildScoreStack(rows) {
@@ -44,12 +39,22 @@ export function buildScoreStack(rows) {
     };
   });
 
+  const best = series.reduce(
+    (current, entry) => (current === null || entry.score > current.score ? entry : current),
+    null,
+  );
+
   return {
+    best,
     series,
     table: {
       columns: [
         { key: 'channel', label: 'Канал', numeric: false },
-        ...CRITERIA.map((criterion) => ({ key: criterion.key, label: criterion.label, numeric: true })),
+        ...RANKING_CRITERIA.map((criterion) => ({
+          key: criterion.criterion,
+          label: criterion.label,
+          numeric: true,
+        })),
         { key: 'score', label: 'Оценка', numeric: true },
       ],
       rows: ranked.map((row) => {
@@ -61,6 +66,23 @@ export function buildScoreStack(rows) {
       }),
     },
   };
+}
+
+/**
+ * Caption for the score-stack card.
+ *
+ * The best row is derived from the rows the chart actually draws, never from a separate `rank === 1` lookup: when
+ * the top-ranked channel is filtered out, the remaining bars still need a truthful summary. An empty series is the
+ * only state that says "no scores".
+ *
+ * @param {ReturnType<typeof buildScoreStack>} stack Drawn bars and their best entry.
+ * @returns {string}
+ */
+export function scoreStackCaption({ series, best }) {
+  if (series.length === 0 || !best) {
+    return 'Ни один канал не получил оценку: не хватает метрик за период.';
+  }
+  return `Лучший результат — ${best.name}, ${formatRatio(best.score, { decimals: 1 })} из 100. Сумма вкладов равна оценке; для CAC больше баллов у дешёвого канала.`;
 }
 
 /**
@@ -93,10 +115,10 @@ export function ScoreStack({ series }) {
           axisLine={false}
         />
         <Tooltip content={<ScoreStackTooltip />} cursor={{ fill: chartTheme.canvas }} />
-        {CRITERIA.map((criterion) => (
+        {RANKING_CRITERIA.map((criterion) => (
           <Bar
-            key={criterion.key}
-            dataKey={criterion.key}
+            key={criterion.criterion}
+            dataKey={criterion.criterion}
             name={criterion.label}
             stackId="score"
             isAnimationActive={false}
@@ -107,7 +129,7 @@ export function ScoreStack({ series }) {
             {series.map((entry) => (
               <Cell
                 key={entry.channelId}
-                fill={entry.largest === criterion.key ? chartTheme.seriesPrimary : chartTheme.seriesMuted}
+                fill={entry.largest === criterion.criterion ? chartTheme.seriesPrimary : chartTheme.seriesMuted}
               />
             ))}
           </Bar>

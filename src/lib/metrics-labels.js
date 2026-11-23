@@ -13,6 +13,13 @@ export const HEALTH_STATUS_LABELS = Object.freeze({
   no_data: 'Мало данных',
 });
 
+/** Russian names of the M2 channel kinds; the database and query string keep the English codes. */
+export const CHANNEL_KIND_LABELS = Object.freeze({
+  paid: 'Платный',
+  owned: 'Собственный',
+  earned: 'Заработанный',
+});
+
 /** One label per reason a channel is left out of the ranking. */
 export const RANKING_REASON_LABELS = Object.freeze({
   no_data: HEALTH_STATUS_LABELS.no_data,

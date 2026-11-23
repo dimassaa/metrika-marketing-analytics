@@ -1,4 +1,5 @@
 import { METRICS_CONFIG } from '../../config/metrics.js';
+import { formatDateRu } from '../../lib/dates.js';
 import { buildQueryString } from '../../lib/query.js';
 import { CHANNEL_SORT_FIELDS } from '../../lib/sort-rows.js';
 import {
@@ -132,14 +133,22 @@ export function buildDashboardScreen({ summary, channelIds = null }) {
  * range together with `days`, so replaying an old range would make the generated form return a 400.
  * A page without a daily window (cohorts) passes `period: null` and renders no select at all.
  *
- * @param {{ query?: Record<string, unknown> }} [input] Validated query object.
+ * A request with an explicit `from`/`to` range has no matching option in the days select. Pretending it is the
+ * default 30 days would mislabel a bookmarked October range; the control then reports the real range and offers one
+ * link back to the default window instead of a select with a false value.
+ *
+ * @param {{
+ *   query?: Record<string, unknown>,
+ *   period?: { from: string, to: string, days: number } | null,
+ * }} [input] Validated query object and, when available, the resolved period.
  * @returns {{
  *   days: number,
  *   options: Array<{ value: number, label: string, selected: boolean }>,
  *   preserve: Array<{ name: string, value: string }>,
+ *   customRange: { from: string | null, to: string | null, label: string, href: string } | null,
  * }}
  */
-export function buildPeriodControl({ query = {} } = {}) {
+export function buildPeriodControl({ query = {}, period = null } = {}) {
   const days = Number(query.days ?? METRICS_CONFIG.periods.defaultDays);
 
   const preserve = [];
@@ -153,6 +162,27 @@ export function buildPeriodControl({ query = {} } = {}) {
     }
   }
 
+  const explicitRange = (query.days === undefined || query.days === null || query.days === '') && Boolean(
+    period?.from || period?.to || query.from || query.to,
+  );
+  const from = period?.from ?? (typeof query.from === 'string' ? query.from : null);
+  const to = period?.to ?? (typeof query.to === 'string' ? query.to : null);
+  const customRange = explicitRange && from !== null && to !== null
+    ? {
+        from,
+        to,
+        label: `${formatDateRu(from)} — ${formatDateRu(to)}`,
+        href: (() => {
+          const queryString = buildQueryString(query, {
+            days: METRICS_CONFIG.periods.defaultDays,
+            from: null,
+            to: null,
+          });
+          return queryString === '' ? '?' : `?${queryString}`;
+        })(),
+      }
+    : null;
+
   return {
     days,
     options: METRICS_CONFIG.periods.options.map((option) => ({
@@ -161,6 +191,7 @@ export function buildPeriodControl({ query = {} } = {}) {
       selected: option === days,
     })),
     preserve,
+    customRange,
   };
 }
 
@@ -293,17 +324,25 @@ export function buildChannelsWeightsControl({ query = {}, filters, sort = 'rank'
   for (const name of ['wCac', 'wRomi', 'wLtvCac', 'wNewCustomers']) delete withoutWeights[name];
   const resetQuery = buildQueryString(withoutWeights);
 
+  const raw = rawWeightParams(query);
+  const display = {
+    wCac: raw?.wCac ?? percentOf(weights.cac),
+    wRomi: raw?.wRomi ?? percentOf(weights.romi),
+    wLtvCac: raw?.wLtvCac ?? percentOf(weights.ltvCac),
+    wNewCustomers: raw?.wNewCustomers ?? percentOf(weights.newCustomers),
+  };
+
   return {
     action: '/app/channels',
     hiddenFields: hidden,
     fields: [
-      { name: 'wCac', label: 'CAC', value: percentOf(weights.cac), hint: 'Дешевле — больше баллов' },
-      { name: 'wRomi', label: 'ROMI', value: percentOf(weights.romi), hint: 'Возврат на маркетинг' },
-      { name: 'wLtvCac', label: 'LTV:CAC', value: percentOf(weights.ltvCac), hint: 'Окупаемость клиента' },
+      { name: 'wCac', label: 'CAC', value: display.wCac, hint: 'Дешевле — больше баллов' },
+      { name: 'wRomi', label: 'ROMI', value: display.wRomi, hint: 'Возврат на маркетинг' },
+      { name: 'wLtvCac', label: 'LTV:CAC', value: display.wLtvCac, hint: 'Окупаемость клиента' },
       {
         name: 'wNewCustomers',
         label: 'Новые клиенты',
-        value: percentOf(weights.newCustomers),
+        value: display.wNewCustomers,
         hint: 'Объём привлечения',
       },
     ],
@@ -340,12 +379,27 @@ export function buildChannelsQueryState({ query = {}, filters, sort, dir, weight
   // change even though `asc` happens to be CAC's default today.
   if (sort !== 'rank' || direction !== field.defaultDir) state.dir = direction;
   if (weightsCustom) {
-    state.wCac = percentOf(weights.cac);
-    state.wRomi = percentOf(weights.romi);
-    state.wLtvCac = percentOf(weights.ltvCac);
-    state.wNewCustomers = percentOf(weights.newCustomers);
+    const raw = rawWeightParams(query);
+    state.wCac = raw?.wCac ?? percentOf(weights.cac);
+    state.wRomi = raw?.wRomi ?? percentOf(weights.romi);
+    state.wLtvCac = raw?.wLtvCac ?? percentOf(weights.ltvCac);
+    state.wNewCustomers = raw?.wNewCustomers ?? percentOf(weights.newCustomers);
   }
   return state;
+}
+
+/**
+ * Replays the raw percentage strings a validated query used, so `33.3` does not become `33` after a filter submit.
+ * Returns null when the query is not a complete four-parameter set; the normalised weights are the fallback.
+ *
+ * @param {Record<string, unknown>} query
+ * @returns {Record<string, string> | null}
+ */
+function rawWeightParams(query) {
+  const names = ['wCac', 'wRomi', 'wLtvCac', 'wNewCustomers'];
+  const values = names.map((name) => query?.[name]);
+  if (!values.every((value) => typeof value === 'string' && value.trim() !== '')) return null;
+  return Object.fromEntries(names.map((name, index) => [name, values[index].trim()]));
 }
 
 /**
@@ -382,10 +436,10 @@ function addWeightFields(fields, state) {
 
 /**
  * @param {number} value Weight fraction in `[0, 1]`.
- * @returns {string} Whole percent for a `step="1"` input.
+ * @returns {string} Percent without trailing zeros, up to three decimals (the basis-point precision).
  */
 function percentOf(value) {
-  return String(Math.round(value * 100));
+  return String(Number((value * 100).toFixed(3)));
 }
 
 /**

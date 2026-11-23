@@ -32,6 +32,8 @@ describe('Sparkline', () => {
       }),
     );
 
-    expect(html).toBe('<span class="sparkline sparkline--empty" title="Недостаточно недель для тренда">—</span>');
+    expect(html).toBe(
+      '<div class="sparkline sparkline--empty" title="Недостаточно недель для тренда">—</div>',
+    );
   });
 });

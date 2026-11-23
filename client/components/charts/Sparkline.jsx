@@ -16,14 +16,14 @@ export function Sparkline({ values }) {
 
   if (measured < 2) {
     return (
-      <span className="sparkline sparkline--empty" title="Недостаточно недель для тренда">
+      <div className="sparkline sparkline--empty" title="Недостаточно недель для тренда">
         —
-      </span>
+      </div>
     );
   }
 
   return (
-    <span className="sparkline" aria-hidden="true" title="CAC по неделям">
+    <div className="sparkline" aria-hidden="true" title="CAC по неделям">
       <LineChart data={values} width={72} height={20} margin={{ top: 2, right: 1, bottom: 2, left: 1 }}>
         <Line
           type="monotone"
@@ -36,6 +36,6 @@ export function Sparkline({ values }) {
           connectNulls={false}
         />
       </LineChart>
-    </span>
+    </div>
   );
 }

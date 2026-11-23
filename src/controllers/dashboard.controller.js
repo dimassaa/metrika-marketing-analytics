@@ -60,7 +60,7 @@ export function createDashboardController({ services, screenModels, referenceRep
         ...buildShellLocals(req, { title: 'Дашборд', activeNav: 'dashboard', dataAnchor: anchor }),
         model: screen,
         islandEntries: ['dashboard'],
-        periodControl: buildPeriodControl({ query }),
+        periodControl: buildPeriodControl({ query, period: screen.period }),
         filterControl: buildChannelFilterControl({ options: screen.channelOptions, query }),
         currentPath: `${req.baseUrl}${req.path}`,
       });

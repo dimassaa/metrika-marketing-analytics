@@ -9,7 +9,7 @@ import {
   buildChannelsWeightsControl,
   buildPeriodControl,
 } from '../services/metrics/screen-models.js';
-import { channelsPageQuerySchema, channelsQuerySchema } from '../validators/metrics.schema.js';
+import { channelsPageQuerySchema } from '../validators/metrics.schema.js';
 import {
   channelCreateSchema,
   channelFormValues,
@@ -165,7 +165,7 @@ export function createChannelsController({ channelsService, campaignsService, re
         dir: query.dir,
         weights: screen.weights,
       }),
-      periodControl: buildPeriodControl({ query: state }),
+      periodControl: buildPeriodControl({ query: state, period: screen.period }),
       currentPath: `${req.baseUrl}${req.path}`,
       createError: error,
       createValues: values ?? EMPTY_CREATE_FORM,

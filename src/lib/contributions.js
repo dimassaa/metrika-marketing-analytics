@@ -6,12 +6,17 @@
  */
 
 /** Order is the contract of the stack bar and of the ranking view-model. */
-const CRITERION_LABELS = Object.freeze({
-  cac: 'CAC',
-  romi: 'ROMI',
-  ltvCac: 'LTV:CAC',
-  newCustomers: 'Новые клиенты',
-});
+export const RANKING_CRITERIA = Object.freeze([
+  Object.freeze({ criterion: 'cac', label: 'CAC' }),
+  Object.freeze({ criterion: 'romi', label: 'ROMI' }),
+  Object.freeze({ criterion: 'ltvCac', label: 'LTV:CAC' }),
+  Object.freeze({ criterion: 'newCustomers', label: 'Новые клиенты' }),
+]);
+
+/** Criterion → Russian label, the one map used by the stack bar and its table. */
+export const RANKING_CRITERION_LABELS = Object.freeze(
+  Object.fromEntries(RANKING_CRITERIA.map((entry) => [entry.criterion, entry.label])),
+);
 
 /**
  * @param {object} row A ranked channel row or one entry of `ranking.ranked`.
@@ -28,7 +33,7 @@ export function toStackSegments(row) {
   if (!Array.isArray(row?.contributions) || row.contributions.length === 0) return [];
 
   return row.contributions.map((entry) => {
-    const label = CRITERION_LABELS[entry.criterion];
+    const label = RANKING_CRITERION_LABELS[entry.criterion];
     if (label === undefined) {
       throw new TypeError(`unknown ranking criterion: ${String(entry.criterion)}`);
     }

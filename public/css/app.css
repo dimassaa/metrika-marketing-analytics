@@ -2386,3 +2386,44 @@ input[type='file'] {
   color: var(--color-warm-gray);
   font-size: 13px;
 }
+
+/* Topbar honest range: an explicit from/to URL has no value in the days select, so it is labelled, not faked. */
+.app-topbar__range {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-8);
+  margin: 0;
+  color: var(--color-warm-gray);
+  font-size: 12px;
+}
+
+.app-topbar__range strong {
+  color: var(--color-ink-black);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-topbar__range-reset {
+  color: var(--color-cyan-edge);
+  text-decoration: none;
+}
+
+.app-topbar__range-reset:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* The whole channel row is a click target; the name link stays the semantic destination. */
+.table__row--clickable {
+  cursor: pointer;
+}
+
+.table__row--clickable:hover {
+  background-color: var(--color-stone-canvas);
+}
+
+.table__row--clickable:focus-visible {
+  outline: 2px solid var(--color-cyan-edge);
+  outline-offset: -2px;
+}

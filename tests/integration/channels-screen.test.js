@@ -124,6 +124,41 @@ describe('channels screen', () => {
     }
   });
 
+  it('replays decimal weights on the forms and in sort links, and the API agrees', async () => {
+    const agent = await signedIn();
+    const query = 'wCac=33.3&wRomi=33.3&wLtvCac=33.3&wNewCustomers=0.1';
+
+    const page = await agent.get(`/app/channels?${query}`);
+    const api = await agent.get(`/api/v1/channels?${query}`);
+
+    expect(page.status).toBe(200);
+    expect(api.status).toBe(200);
+    expect(extractDataProps(page.text, 'channels')).toEqual(api.body);
+    for (const link of extractDataProps(page.text, 'channels').sortLinks) {
+      expect(link.href).toContain('wCac=33.3');
+      expect(link.href).toContain('wNewCustomers=0.1');
+    }
+    expect(page.text).toContain('name="wCac"');
+    expect(page.text).toContain('value="33.3"');
+    expect(page.text).toContain('value="0.1"');
+  });
+
+  it('labels an explicit from/to range instead of showing the default 30 days', async () => {
+    const agent = await signedIn();
+
+    const res = await agent.get('/app/channels?from=2026-10-01&to=2026-10-31');
+
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('01.10.2026 — 31.10.2026');
+    expect(res.text).toContain('app-topbar__range');
+    expect(res.text).not.toContain('app-topbar__period');
+    expect(extractDataProps(res.text, 'channels').period).toMatchObject({
+      from: '2026-10-01',
+      to: '2026-10-31',
+      days: 31,
+    });
+  });
+
   it('sorts revenue by kopeck value and keeps null ranks after measured rows', async () => {
     const agent = await signedIn();
 

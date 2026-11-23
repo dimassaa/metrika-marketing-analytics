@@ -618,5 +618,16 @@ Still open:
   bump.
 - **Two channel repository instances are alive in one app.** M2's channel controller builds its own
   `channelsRepository`, while the metrics composition root builds another. The instances are stateless wrappers
-  around one pool, so this costs no connection and no state; moving M2 onto the module is T3's cleanup, together
-  with its `channelListService`/`passportService`.
+  around one pool, so this costs no connection and no state. T3 added `channelListService` but did not move M2 onto
+  the composition root; the cleanup now belongs with the T4 passport wiring so the router does not change twice.
+
+## M4 Task 3 — channels table follow-ups
+
+- **Archive/restore buttons left the channels list.** The M2 list was replaced by the React island, whose model is
+  data-only; a per-row POST form would need a CSRF token in `data-props`, which the island contract deliberately does
+  not carry. The passports keep both actions, and the list row now opens the passport, so nothing is unreachable.
+  A quick archive column is an M5+ decision, not a silent regression.
+- **The sparkline unit test cannot assert the final `<svg>`.** Recharts 3 builds its surface after layout
+  (`ReportChartSize` dispatches in an effect), so `react-dom/server` renders the fixed `recharts-wrapper` only. The
+  unit test pins the wrapper geometry and the dash state; the real SVG (8 of them) is verified in `agent-browser`.
+  An automated DOM environment would need a new dev dependency, which this milestone does not justify.
