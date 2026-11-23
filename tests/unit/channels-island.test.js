@@ -70,9 +70,21 @@ describe('channels island structure', () => {
     expect(html).toContain('aria-sort="ascending"');
     expect(html).toContain('aria-sort="none"');
     expect(html).toContain('table__row--clickable');
+    // The row is a mouse target; the channel link is the only keyboard tab stop.
+    expect(html).not.toContain('tabindex="0"');
     // Recharts renders a div wrapper; never put it inside a span in a table cell.
     expect(html).toContain('<div class="sparkline');
     expect(html).not.toContain('<span class="sparkline');
+  });
+
+  it('shows a sub-percent weight instead of rounding it to zero', () => {
+    const props = model();
+    props.weights = { cac: 0.3, romi: 0.3, ltvCac: 0.25, newCustomers: 0.001 };
+
+    const html = renderToStaticMarkup(createElement(ChannelsIsland, props));
+
+    expect(html).toContain('Клиенты 0,1%');
+    expect(html).not.toContain('Клиенты 0%');
   });
 
   it('shows a dash instead of a broken line for a one-point sparkline', () => {

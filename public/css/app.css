@@ -2423,7 +2423,12 @@ input[type='file'] {
   background-color: var(--color-stone-canvas);
 }
 
-.table__row--clickable:focus-visible {
+.table__row--clickable:focus-within {
   outline: 2px solid var(--color-cyan-edge);
   outline-offset: -2px;
+}
+
+.table__channel:focus-visible {
+  outline: 2px solid var(--color-cyan-edge);
+  outline-offset: 2px;
 }

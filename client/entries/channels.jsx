@@ -37,7 +37,7 @@ export function ChannelsIsland({ period, filters, weights, rows, excluded, spark
   const stack = buildScoreStack(rows);
   const stackCaption = scoreStackCaption(stack);
   const weightLabel = ['cac', 'romi', 'ltvCac', 'newCustomers']
-    .map((key) => `${WEIGHT_LABELS[key]} ${Math.round(weights[key] * 100)}%`)
+    .map((key) => `${WEIGHT_LABELS[key]} ${formatWeightPercent(weights[key])}%`)
     .join(' · ');
 
   return (
@@ -162,8 +162,8 @@ export function ChannelsIsland({ period, filters, weights, rows, excluded, spark
 }
 
 /**
- * One channel row. The whole row is a click target; the name stays a real link so middle-click, keyboard and assistive
- * technology still have a semantic destination, and Enter/Space on the focused row open the passport as well.
+ * One channel row. The whole row is a mouse click target; the name stays a real link and is the single keyboard tab
+ * stop, so the table does not expose the same destination twice to screen readers or tab navigation.
  *
  * @param {{ row: object, sparkline: Array<{ weekLabel: string, value: number | null }> }} props
  */
@@ -174,17 +174,7 @@ function ChannelTableRow({ row, sparkline }) {
   };
 
   return (
-    <tr
-      className="table__row--clickable"
-      tabIndex={0}
-      onClick={open}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          open();
-        }
-      }}
-    >
+    <tr className="table__row--clickable" onClick={open}>
       <td className="u-right">
         <span className="table__rank">{row.rank === null ? '—' : row.rank}</span>
         {row.score !== null && <span className="table__score">{formatRatio(row.score, { decimals: 1 })}</span>}
@@ -221,6 +211,17 @@ function ChannelTableRow({ row, sparkline }) {
       </td>
     </tr>
   );
+}
+
+/**
+ * Weight percentage with the same precision as the server's basis points: up to three decimals, comma, no trailing
+ * zeros. A 0.1% weight must not be reported as "0%".
+ *
+ * @param {number} value Weight fraction.
+ * @returns {string}
+ */
+function formatWeightPercent(value) {
+  return String(Number((value * 100).toFixed(3))).replace('.', ',');
 }
 
 const WEIGHT_LABELS = Object.freeze({

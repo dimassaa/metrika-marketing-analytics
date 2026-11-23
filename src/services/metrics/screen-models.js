@@ -162,9 +162,11 @@ export function buildPeriodControl({ query = {}, period = null } = {}) {
     }
   }
 
-  const explicitRange = (query.days === undefined || query.days === null || query.days === '') && Boolean(
-    period?.from || period?.to || query.from || query.to,
-  );
+  // The request, not the resolved period, decides whether the select applies. Every controller passes a resolved
+  // period even for a default page; treating that as an explicit range replaced the days select on every visit.
+  const explicitRange =
+    (query.days === undefined || query.days === null || query.days === '') &&
+    Boolean(query.from || query.to);
   const from = period?.from ?? (typeof query.from === 'string' ? query.from : null);
   const to = period?.to ?? (typeof query.to === 'string' ? query.to : null);
   const customRange = explicitRange && from !== null && to !== null

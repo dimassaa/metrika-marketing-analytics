@@ -53,6 +53,18 @@ describe('channels screen', () => {
     expect(res.text).not.toContain('kpi__value');
   });
 
+  it('renders the days select on the default URL, with 30 days selected', async () => {
+    const agent = await signedIn();
+
+    const res = await agent.get('/app/channels');
+
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('app-topbar__period');
+    expect(res.text).toContain('name="days"');
+    expect(res.text).toContain('<option value="30" selected>');
+    expect(res.text).not.toContain('app-topbar__range');
+  });
+
   it('puts eight health rows in data-props, including no_data rows with null rank', async () => {
     const agent = await signedIn();
 

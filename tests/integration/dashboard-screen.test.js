@@ -80,6 +80,18 @@ describe('dashboard screen', () => {
     expect(res.text).not.toContain('kpi__value');
   });
 
+  it('renders the days select on the default URL, with 30 days selected', async () => {
+    const agent = await signedIn();
+
+    const res = await agent.get('/app/dashboard');
+
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('app-topbar__period');
+    expect(res.text).toContain('name="days"');
+    expect(res.text).toContain('<option value="30" selected>');
+    expect(res.text).not.toContain('app-topbar__range');
+  });
+
   it('gives the page exactly the object the JSON API returns', async () => {
     const agent = await signedIn();
 
@@ -213,6 +225,9 @@ describe('dashboard screen', () => {
     );
 
     expect(res.status).toBe(200);
+    // The topbar must not pretend this range is the default 30 days.
+    expect(res.text).toContain('app-topbar__range');
+    expect(res.text).not.toContain('app-topbar__period');
     // The resolved length (31) is not an allowed `days` value; replaying from/to is the only 200-safe form.
     expect(filterPeriodFields(res.text)).toEqual([
       { name: 'from', value: '2026-10-01' },
