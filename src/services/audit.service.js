@@ -27,6 +27,8 @@ const ACTION_LABELS = Object.freeze({
   [AUDIT_ACTIONS.IMPORT_RUN]: 'Импорт данных',
   [AUDIT_ACTIONS.EXPORT_CSV]: 'Экспорт CSV',
   [AUDIT_ACTIONS.MEDIA_UPLOAD]: 'Загрузка файла',
+  [AUDIT_ACTIONS.SCENARIO_CREATE]: 'Создание сценария',
+  [AUDIT_ACTIONS.ALERT_DISMISS]: 'Закрытие алерта',
 });
 
 const ENTITY_LABELS = Object.freeze({
@@ -36,6 +38,8 @@ const ENTITY_LABELS = Object.freeze({
   goal: 'Цель',
   import: 'Импорт',
   media: 'Файл',
+  scenario: 'Сценарий',
+  alert: 'Алерт',
   // Export writes the dataset name as the entity (export.csv + entity=channels/orders/...), so the journal column
   // must not fall back to the raw English code.
   channels: 'Каналы',
@@ -62,6 +66,9 @@ function formatFilters(filters) {
  * Russian labels for the role codes shown in audit payload summaries.
  */
 const ROLE_LABELS = Object.freeze({ admin: 'администратор', analyst: 'аналитик', viewer: 'наблюдатель' });
+
+/** Severity codes stay English in `alerts`; the journal line reads Russian. */
+const SEVERITY_LABELS = Object.freeze({ warning: 'предупреждение', critical: 'критично' });
 
 /**
  * Russian labels for goal metric codes in the audit summary. The codes stay English in the database and payload.
@@ -97,6 +104,11 @@ const DETAIL_KEYS = Object.freeze([
   ['rowsCount', 'Строк'],
   ['truncated', 'Обрезано'],
   ['filters', 'Фильтры'],
+  // Alert dismissals and scenario saves carry these; the numeric channel id is deliberately not rendered because the
+  // journal line already has the entity id column.
+  ['rule', 'Правило'],
+  ['severity', 'Важность'],
+  ['reason', 'Причина'],
 ]);
 
 /**
@@ -112,6 +124,7 @@ function summarisePayload(payload) {
     let text = String(value);
     if (key === 'role') text = ROLE_LABELS[value] ?? text;
     if (key === 'metric') text = GOAL_METRIC_LABELS[value] ?? text;
+    if (key === 'severity') text = SEVERITY_LABELS[value] ?? text;
     if (key === 'truncated') text = value ? 'да' : 'нет';
     if (key === 'filters') text = formatFilters(value);
     parts.push(`${label}: ${text}`);

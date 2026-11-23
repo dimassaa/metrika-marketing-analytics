@@ -778,3 +778,12 @@ Still open:
   `scenarios.extrapolationFactor` key was drafted in Task 1 but removed because it duplicated that number and its
   comment invented a per-channel rule the spec does not contain. Task 7 (`buildScenariosScreen`) must use
   `budget.warnAboveCents = currentWeeklyCents * warnBudgetMultiplier` and must not add a second 2× literal or key.
+
+## M5 Task 5 — alert recalculation cost
+
+- **`getAttributionReport` computes all three attribution models even when one is requested.** The alert recalculation
+  needs only `last_touch` revenue for two windows, but each call allocates every model over all orders and touchpoints
+  before narrowing the returned map. Two calls per recalculation are correct but spend CPU on `first_touch`/`linear`
+  that the result discards. If `/app/alerts` ever approaches its 32-query or latency budget, add an optional
+  `models` fast path in the attribution service or a narrow `getChannelRevenueByPeriod` method; the alert rules must
+  keep using the same last-touch base, not a second attribution implementation.

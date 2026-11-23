@@ -34,6 +34,9 @@ export const AUDIT_ACTIONS = Object.freeze({
   IMPORT_RUN: 'import.run',
   EXPORT_CSV: 'export.csv',
   MEDIA_UPLOAD: 'media.upload',
+
+  SCENARIO_CREATE: 'scenario.create',
+  ALERT_DISMISS: 'alert.dismiss',
 });
 
 /**
@@ -57,5 +60,7 @@ export const AUDIT_ENTITIES = Object.freeze([
   'goal',
   'import',
   'media',
+  'scenario',
+  'alert',
   ...AUDIT_EXPORT_DATASETS,
 ]);

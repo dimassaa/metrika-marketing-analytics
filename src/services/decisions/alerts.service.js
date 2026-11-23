@@ -1,6 +1,14 @@
+import { AUDIT_ACTIONS } from '../../config/audit-actions.js';
 import { METRICS_CONFIG } from '../../config/metrics.js';
-import { addDays } from '../../lib/dates.js';
+import { addDays, toDateOnly } from '../../lib/dates.js';
+import { withTransaction } from '../../lib/db.js';
+import { NotFoundError, ValidationError } from '../../lib/errors.js';
+import { parseBigIntId } from '../../lib/ids.js';
 import { centsPercent, centsRatio, roundNumber } from '../../lib/metrics-math.js';
+import { centsFromDb } from '../../lib/money.js';
+import { createAlertsRepository } from '../../repositories/alerts.repo.js';
+import { createAuditRepository } from '../../repositories/audit.repo.js';
+import { createAuditService } from '../audit.service.js';
 import { resolveWeekRange } from '../metrics/weekly-series.js';
 
 /**
@@ -294,4 +302,281 @@ export function evaluateChannelAlerts({
   }
 
   return candidates;
+}
+
+/** A reason is free text for the audit journal only; 200 characters keeps a pasted log from filling the row. */
+const MAX_REASON_LENGTH = 200;
+
+/** @param {unknown} value @returns {number} */
+function nextPage(value) {
+  return Number.isInteger(value) && value >= 1 ? value : 1;
+}
+
+/**
+ * Normalises the optional dismissal reason. It is stored only in `audit_log`, never on the alert row, so the
+ * validation lives at the service boundary instead of a database column.
+ * @param {unknown} reason
+ * @returns {string | null}
+ * @throws {ValidationError} When the value is not a string or is too long.
+ */
+function normalizeReason(reason) {
+  if (reason === null || reason === undefined) return null;
+  if (typeof reason !== 'string') throw new ValidationError('Причина должна быть строкой');
+  const text = reason.trim();
+  if (text.length > MAX_REASON_LENGTH) {
+    throw new ValidationError(`Причина не длиннее ${MAX_REASON_LENGTH} символов`);
+  }
+  return text === '' ? null : text;
+}
+
+/**
+ * @param {string} anchor Raw data anchor.
+ * @returns {string} A validated `YYYY-MM-DD` date.
+ * @throws {ValidationError} When the anchor is missing or not a real calendar date.
+ */
+function normalizeAnchor(anchor) {
+  if (anchor === null || anchor === undefined || anchor === '') {
+    throw new ValidationError('Не указана отчётная дата');
+  }
+  try {
+    return toDateOnly(anchor);
+  } catch {
+    throw new ValidationError('Некорректная отчётная дата');
+  }
+}
+
+/**
+ * Builds `channelId → revenueCents` from the default attribution model of one report.
+ *
+ * The report returns rows for every channel, including zero-revenue ones; the map keeps the zero as a measured value
+ * (a channel with spend and customers but no attributed orders has ROMI −100 %, not "no data").
+ *
+ * @param {{ models: Record<string, { revenueByChannel: Array<{ channelId: string, revenueCents: string }> }> }} report
+ * @returns {Map<string, bigint>}
+ */
+function revenueByChannel(report) {
+  const model = METRICS_CONFIG.attribution.defaultModel;
+  const rows = report?.models?.[model]?.revenueByChannel ?? [];
+  return new Map(rows.map((row) => [row.channelId, centsFromDb(row.revenueCents) ?? 0n]));
+}
+
+/**
+ * Alert persistence and lifecycle (metrics spec §7).
+ *
+ * The pure half of this module decides whether a rule fires. This service is the only place that combines the
+ * aggregate queries, the stored rows and the audit journal, so the rule maths stays testable without a database.
+ *
+ * The service never holds a pool: reads use injected repositories, and the write path opens
+ * `withTransaction(db, …)` and creates a repository (and an audit service) from the checked-out client. That is what
+ * makes "dismiss writes the status and the audit row together" true rather than aspirational; an injected
+ * `auditServiceFactory` can fail the audit write and prove the status rolled back.
+ *
+ * @param {{
+ *   db: { connect: () => Promise<import('pg').PoolClient> },
+ *   metricsRepository: ReturnType<typeof import('../../repositories/metrics.repo.js').createMetricsRepository>,
+ *   channelsRepository: ReturnType<typeof import('../../repositories/channels.repo.js').createChannelsRepository>,
+ *   attributionService: ReturnType<typeof import('../metrics/attribution.service.js').createAttributionService>,
+ *   ltvService: ReturnType<typeof import('../metrics/ltv.service.js').createLtvService>,
+ *   auditServiceFactory?: (client: import('pg').PoolClient) => ReturnType<typeof createAuditService>,
+ * }} deps
+ */
+export function createAlertsService({
+  db,
+  metricsRepository,
+  channelsRepository,
+  attributionService,
+  ltvService,
+  auditServiceFactory = (client) => createAuditService({ auditRepository: createAuditRepository(client) }),
+}) {
+  /** Read-side repository bound to the caller's database; writes always create their own client-scoped one. */
+  const alertsRepository = createAlertsRepository(db);
+
+  return {
+    /**
+     * @param {string} anchor Data anchor as `YYYY-MM-DD`.
+     * @returns {ReturnType<typeof resolveAlertWindows>}
+     */
+    resolveWindows(anchor) {
+      return resolveAlertWindows(normalizeAnchor(anchor));
+    },
+
+    /**
+     * Recalculates the current four-week window and maintains the alert lifecycle.
+     *
+     * Order matters: older active rows are resolved first, the candidates are upserted second, and only then is the
+     * surviving active set compared with the rules that fired. A dismissed row is updated in place but stays
+     * dismissed, and a resolved row reopens when its rule fires again.
+     *
+     * @param {{ anchor: string, actor?: { id?: string } | null }} input `actor` is accepted for interface symmetry;
+     *   recalculation itself is not an audited event.
+     * @returns {Promise<{
+     *   periodStart: string,
+     *   triggered: number,
+     *   inserted: number,
+     *   updated: number,
+     *   resolved: number,
+     *   keptDismissed: number,
+     * }>}
+     * @throws {ValidationError} When the anchor is invalid.
+     */
+    async recalculate({ anchor } = {}) {
+      const anchorDate = normalizeAnchor(anchor);
+      const windows = resolveAlertWindows(anchorDate);
+
+      // Reads are independent and stay on the injected repositories, not on the transaction that starts below.
+      const [windowTotals, channels, ltv] = await Promise.all([
+        metricsRepository.listChannelWindowTotals({
+          nowFrom: windows.now.from,
+          nowTo: windows.now.to,
+          prevFrom: windows.prev.from,
+          prevTo: windows.prev.to,
+        }),
+        channelsRepository.listChannels(),
+        ltvService.getChannelLtv({ anchor: anchorDate, horizonMonths: 12, channelIds: null }),
+      ]);
+
+      // Two windows, two reports: the rules read `now` revenue today, but the evaluator contract carries a `prev`
+      // revenue too, and passing a fabricated zero would make a future rule silently wrong.
+      const nowReport = await attributionService.getAttributionReport({
+        from: windows.now.from,
+        to: windows.now.to,
+        models: [METRICS_CONFIG.attribution.defaultModel],
+      });
+      const prevReport = await attributionService.getAttributionReport({
+        from: windows.prev.from,
+        to: windows.prev.to,
+        models: [METRICS_CONFIG.attribution.defaultModel],
+      });
+      const nowRevenue = revenueByChannel(nowReport);
+      const prevRevenue = revenueByChannel(prevReport);
+
+      const ltvByChannel = new Map(
+        (ltv.rows ?? []).map((row) => [row.channelId, centsFromDb(row.ltvCents)]),
+      );
+
+      /** @type {Map<string, { now: object, prev: object }>} */
+      const windowsByChannel = new Map();
+      for (const row of windowTotals) {
+        const entry = windowsByChannel.get(row.channelId) ?? {};
+        entry[row.window] = row;
+        windowsByChannel.set(row.channelId, entry);
+      }
+
+      const zeroWindow = { spendCents: 0n, newCustomers: 0 };
+      const candidates = [];
+      for (const channel of channels) {
+        const entry = windowsByChannel.get(channel.id);
+        const now = entry?.now ?? zeroWindow;
+        const prev = entry?.prev ?? zeroWindow;
+        // The SQL pivot already zero-fills idle channels; this fallback only covers a channel that disappeared from
+        // the aggregate between two statements. The evaluator's guard then keeps every rule silent for it.
+        const channelCandidates = evaluateChannelAlerts({
+          channel,
+          now: { ...now, revenueCents: nowRevenue.get(channel.id) ?? 0n },
+          prev: { ...prev, revenueCents: prevRevenue.get(channel.id) ?? 0n },
+          ltv12Cents: ltvByChannel.get(channel.id) ?? null,
+        });
+
+        for (const candidate of channelCandidates) {
+          candidates.push({
+            channelId: channel.id,
+            rule: candidate.rule,
+            periodStart: windows.now.periodStart,
+            severity: candidate.severity,
+            value: candidate.value,
+            threshold: candidate.threshold,
+          });
+        }
+      }
+
+      return withTransaction(db, async (client) => {
+        const repository = createAlertsRepository(client);
+
+        const resolvedPrevious = await repository.resolveActiveBefore(windows.now.periodStart);
+        const upsert = await repository.upsertAlerts(candidates);
+
+        // `triggeredKeys` is the only source of "what is alive": after the upsert, active rows whose key did not fire
+        // are stale. Reading the set after the upsert also means a rule that just reopened a resolved row is kept.
+        const activeRows = await repository.listCurrentPeriodActive(windows.now.periodStart);
+        const triggeredKeys = new Set(candidates.map((row) => `${row.channelId}|${row.rule}`));
+        const staleIds = activeRows
+          .filter((row) => !triggeredKeys.has(`${row.channelId}|${row.rule}`))
+          .map((row) => row.id);
+        const resolvedStale = await repository.resolveAlerts(staleIds);
+
+        return {
+          periodStart: windows.now.periodStart,
+          triggered: candidates.length,
+          inserted: upsert.inserted,
+          updated: upsert.updated,
+          resolved: resolvedPrevious + resolvedStale,
+          keptDismissed: upsert.dismissed,
+        };
+      });
+    },
+
+    /**
+     * One page of alerts plus the unfiltered summary.
+     * @param {{
+     *   filters?: { status?: string | null, severity?: string | null, channelId?: string | null },
+     *   page?: number,
+     * }} [input]
+     * @returns {ReturnType<typeof alertsRepository.listAlerts>}
+     */
+    async list({ filters = {}, page = 1 } = {}) {
+      return alertsRepository.listAlerts({ filters, page: nextPage(page), limit: 50 });
+    },
+
+    /**
+     * Dismisses one active alert and records `alert.dismiss` in the same transaction.
+     *
+     * The reason is part of the audit payload only; the alert row keeps no free text. A second dismissal is a
+     * validation error, not a silent success, so the UI cannot claim a change that did not happen and the journal
+     * never receives a duplicate entry.
+     *
+     * @param {{
+     *   id: string,
+     *   reason?: string | null,
+     *   actor?: { id?: string, ip?: string } | null,
+     * }} input
+     * @returns {Promise<{ id: string, status: 'dismissed', channelId: string, rule: string, periodStart: string }>}
+     * @throws {NotFoundError} When the alert does not exist.
+     * @throws {ValidationError} When the id or reason is invalid or the alert is already closed.
+     */
+    async dismiss({ id, reason = null, actor = null }) {
+      const alertId = parseBigIntId(id);
+      if (alertId === null) throw new ValidationError('Некорректный идентификатор алерта');
+      const normalizedReason = normalizeReason(reason);
+
+      return withTransaction(db, async (client) => {
+        const repository = createAlertsRepository(client);
+        const alert = await repository.findAlertById(alertId);
+        if (!alert) throw new NotFoundError('Алерт не найден');
+        if (alert.status !== 'active') throw new ValidationError('Алерт уже закрыт');
+
+        const dismissed = await repository.dismissAlert(alertId);
+        // A concurrent dismissal between the read and the update is still "already closed"; do not fall through to
+        // the audit write with a row whose status did not change.
+        if (!dismissed) throw new ValidationError('Алерт уже закрыт');
+
+        const auditService = auditServiceFactory(client);
+        await auditService.record({
+          userId: actor?.id ?? null,
+          action: AUDIT_ACTIONS.ALERT_DISMISS,
+          entity: 'alert',
+          entityId: alertId,
+          payload: {
+            channelId: alert.channelId,
+            rule: alert.rule,
+            periodStart: alert.periodStart,
+            severity: alert.severity,
+            reason: normalizedReason,
+          },
+          ip: actor?.ip ?? null,
+        });
+
+        return dismissed;
+      });
+    },
+  };
 }

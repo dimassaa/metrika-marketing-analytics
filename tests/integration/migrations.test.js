@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { env } from '../../src/config/env.js';
 import { runMigrations } from '../../db/migrate.js';
@@ -126,5 +127,55 @@ describe('migrations', () => {
 
     // pg returns int8/bigint columns as strings to avoid precision loss; money columns rely on the same mapping.
     expect(user.rows[0].id).toMatch(/^\d+$/);
+  });
+
+  it('widens the alert trace columns to four decimals without rewriting the initial migration', async () => {
+    const { rows } = await pool.query(
+      `SELECT column_name, data_type, numeric_precision, numeric_scale
+         FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'alerts'
+          AND column_name IN ('value', 'threshold')
+        ORDER BY column_name`,
+    );
+
+    expect(rows).toEqual([
+      { column_name: 'threshold', data_type: 'numeric', numeric_precision: 14, numeric_scale: 4 },
+      { column_name: 'value', data_type: 'numeric', numeric_precision: 14, numeric_scale: 4 },
+    ]);
+
+    // `001_init.sql` must stay a historical record: an upgraded database applies 006 on top, while a fresh database
+    // does the same. Editing 001 would make the two paths diverge for anyone who already deployed.
+    const initial = await readFile(new URL('../../db/migrations/001_init.sql', import.meta.url), 'utf8');
+    expect(initial).toContain('value NUMERIC(14,2)');
+    expect(initial).toContain('threshold NUMERIC(14,2)');
+  });
+
+  it('rejects a negative target ROMI instead of aborting the next alert recalculation', async () => {
+    const { rows } = await pool.query(
+      `SELECT pg_get_constraintdef(oid) AS definition
+         FROM pg_constraint
+        WHERE conname = 'channels_target_romi_nonnegative'
+          AND conrelid = 'channels'::regclass`,
+    );
+    expect(rows).toHaveLength(1);
+    // PostgreSQL renders the bound as `(0)::numeric`, so assert the operator instead of exact formatting.
+    expect(rows[0].definition).toContain('target_romi_pct >=');
+
+    await expectSqlState(
+      pool.query(
+        `INSERT INTO channels (code, name, target_romi_pct)
+         VALUES ($1, 'Канал с отрицательной целью', -1)`,
+        [`negative_target_${Date.now().toString(36)}`],
+      ),
+      '23514',
+    );
+  });
+
+  it('records both 001 and 006 as applied versions', async () => {
+    const { rows } = await pool.query(
+      `SELECT version FROM schema_migrations WHERE version IN ('001_init.sql', '006_decisions.sql') ORDER BY version`,
+    );
+    expect(rows.map((row) => row.version)).toEqual(['001_init.sql', '006_decisions.sql']);
   });
 });
