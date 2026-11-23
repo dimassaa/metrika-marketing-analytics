@@ -7,5 +7,8 @@
  * @param {{ status: 'healthy' | 'watch' | 'risk' | 'no_data', label: string }} props
  */
 export function HealthBadge({ status, label }) {
-  return <span className={`badge badge--${status}`}>{label}</span>;
+  // The data status is `no_data` in the service contract, but CSS modifiers cannot contain `_` in this codebase's
+  // naming; map it once here so the stylesheet keeps `.badge--no-data`.
+  const modifier = status === 'no_data' ? 'no-data' : status;
+  return <span className={`badge badge--${modifier}`}>{label}</span>;
 }

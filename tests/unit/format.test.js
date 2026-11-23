@@ -100,8 +100,16 @@ describe('formatCompactCents', () => {
     expect(formatCompactCents(1_234_500_000)).toBe('12,3 млн');
   });
 
-  it('drops a trailing zero decimal instead of printing ,0', () => {
-    expect(formatCompactCents(1_200_000)).toBe('12 тыс.');
+  it('keeps one decimal in compact units, including a zero one', () => {
+    // Corrected in the T1 review: compact units always keep one decimal so a value promoted at the boundary cannot
+    // read like a whole different quantity (`1,0 млн`, not `1 млн`).
+    expect(formatCompactCents(1_200_000)).toBe('12,0 тыс.');
+  });
+
+  it('promotes a value that rounds up at the unit boundary', () => {
+    // 999 999 BYN in kopecks; the rounded value is 1 000,0 тыс., so the unit must become millions.
+    expect(formatCompactCents(99_999_900)).toBe('1,0 млн');
+    expect(formatCompactCents(100_000_000)).toBe('1,0 млн');
   });
 
   it('keeps a missing value honest and uses the typographic minus', () => {

@@ -114,7 +114,9 @@ export function buildDashboardScreen({ summary, channelIds = null }) {
  *
  * `preserve` keeps every other query key as a hidden input, so changing the period does not silently drop the
  * channel filter or a sort order. Arrays are emitted as repeated inputs, which is exactly how `<select multiple>`
- * submits them. A page without a daily window (cohorts) passes `period: null` and renders no select at all.
+ * submits them. `from`/`to` are deliberately dropped: the topbar submits `days`, and the schema rejects an explicit
+ * range together with `days`, so replaying an old range would make the generated form return a 400.
+ * A page without a daily window (cohorts) passes `period: null` and renders no select at all.
  *
  * @param {{ query?: Record<string, unknown> }} [input] Validated query object.
  * @returns {{
@@ -128,7 +130,8 @@ export function buildPeriodControl({ query = {} } = {}) {
 
   const preserve = [];
   for (const [name, value] of Object.entries(query)) {
-    if (name === 'days') continue;
+    // `days` is the value this form sets; `from`/`to` conflict with it. Everything else is replayed.
+    if (name === 'days' || name === 'from' || name === 'to') continue;
     if (Array.isArray(value)) {
       for (const item of value) preserve.push({ name, value: String(item) });
     } else if (value !== undefined && value !== null && value !== '') {

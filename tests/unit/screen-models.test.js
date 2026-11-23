@@ -95,7 +95,7 @@ describe('dashboard screen model', () => {
     ]);
   });
 
-  it('marks a chart empty when every week is unmeasured, without inventing zero points', () => {
+  it('keeps CAC and ROMI empty while a measured zero spend/revenue series still counts as data', () => {
     const weeklySeries = Array.from({ length: 12 }, (_, index) => ({
       weekStart: addDays(FIRST_WEEK, index * 7),
       weekLabel: `неделя ${index}`,
@@ -112,9 +112,17 @@ describe('dashboard screen model', () => {
 
     expect(screen.charts.cac.hasData).toBe(false);
     expect(screen.charts.romi.hasData).toBe(false);
-    expect(screen.charts.spendRevenue.hasData).toBe(false);
+    // A zero is a measurement: the bars must render at zero instead of claiming there was no data.
+    expect(screen.charts.spendRevenue.hasData).toBe(true);
     expect(screen.charts.cac.series.every((point) => point.value === null)).toBe(true);
     expect(screen.charts.cac.caption).toContain('последняя —');
+  });
+
+  it('marks spend/revenue empty only when the period has no weeks at all', () => {
+    const screen = buildDashboardScreen({ summary: summaryWith({ weeklySeries: [] }) });
+
+    expect(screen.charts.spendRevenue.hasData).toBe(false);
+    expect(screen.charts.spendRevenue.series).toEqual([]);
   });
 
   it('keeps the honest empty dashboard: measured zeros stay zeros, CAC/ROMI stay dashes', () => {
@@ -201,5 +209,11 @@ describe('period control', () => {
   it('defaults to the configured period when the query has none', () => {
     expect(buildPeriodControl({ query: {} }).days).toBe(30);
     expect(buildPeriodControl().preserve).toEqual([]);
+  });
+
+  it('drops an explicit from/to, because the generated form submits days and the schema rejects both', () => {
+    const control = buildPeriodControl({ query: { from: '2026-10-01', to: '2026-10-31' } });
+
+    expect(control.preserve).toEqual([]);
   });
 });

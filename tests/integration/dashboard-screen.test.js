@@ -113,6 +113,18 @@ describe('dashboard screen', () => {
     expect(props.period.label).toBe('180 дней');
   });
 
+  it('renders an explicit from/to window without replaying the conflicting bounds in the period form', async () => {
+    const agent = await signedIn();
+
+    const res = await agent.get('/app/dashboard?from=2026-10-01&to=2026-10-31');
+
+    expect(res.status).toBe(200);
+    // Submitting the days select together with a hidden from/to is a 400 by schema; the form must carry days only.
+    expect(res.text).not.toContain('name="from"');
+    expect(res.text).not.toContain('name="to"');
+    expect((await agent.get('/app/dashboard?days=30')).status).toBe(200);
+  });
+
   it('rejects an invalid filter with 400 instead of rendering a wider report', async () => {
     const agent = await signedIn();
 
@@ -146,7 +158,9 @@ describe('dashboard on an empty stand', () => {
     expect(props.verdict.status).toBe('no_data');
     expect(props.charts.cac.hasData).toBe(false);
     expect(props.charts.romi.hasData).toBe(false);
-    expect(props.charts.spendRevenue.hasData).toBe(false);
+    // Twelve weeks of measured zero spend/revenue: the arrows are flat at zero, not "no data". The empty-state copy
+    // would claim nothing was measured, which is false on this stand.
+    expect(props.charts.spendRevenue.hasData).toBe(true);
     expect(res.text).not.toContain('NaN');
   });
 });

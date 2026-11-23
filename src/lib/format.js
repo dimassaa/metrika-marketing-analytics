@@ -20,7 +20,9 @@ function groupThousands(digits) {
  *
  * Compaction applies to whole roubles (the input is kopecks), so the unit always means roubles: `12,3 тыс.` is
  * 12 300 BYN. A chart axis has no room for kopecks; the tooltip and the duplicate table keep the exact amount.
- * Below ten thousand roubles the grouped number is short enough and more precise than a unit suffix.
+ * The unit is chosen from the rounded value, so a boundary case such as 999 999 BYN promotes to `1,0 млн` instead
+ * of a misleading `1 000 тыс.`. Below ten thousand roubles the grouped number is short enough and more precise than
+ * a unit suffix.
  *
  * @param {bigint | string | number | null | undefined} value Amount in kopecks.
  * @returns {string} Ready-to-display compact amount; the caller adds the BYN glyph to the axis label.
@@ -34,6 +36,9 @@ export function formatCompactCents(value) {
   if (rubles === 0n) return '0';
 
   /**
+   * Renders `rubles` in units with one decimal (including a trailing `,0`, so a value promoted to the next unit
+   * never looks like a whole different quantity). Rounding happens before the unit is chosen by the caller.
+   *
    * @param {bigint} unit Size of one compact unit in roubles.
    * @param {string} suffix
    * @returns {string}
@@ -42,14 +47,16 @@ export function formatCompactCents(value) {
     const tenths = (rubles + unit / 20n) / (unit / 10n);
     const whole = tenths / 10n;
     const fraction = tenths % 10n;
-    const body = fraction === 0n ? whole.toString() : `${whole},${fraction}`;
-    return `${body} ${suffix}`;
+    return `${whole},${fraction} ${suffix}`;
   };
 
+  // Choose the unit from the rounded value: 999 999 BYN rounds to 1 000,0 тыс. and must read `1,0 млн`, not a
+  // fictional `1 000 тыс.`.
+  const thousands = (rubles + 50n) / 100n;
   let text;
-  if (rubles < 10_000n) {
+  if (thousands < 100n) {
     text = groupThousands(rubles.toString());
-  } else if (rubles < 1_000_000n) {
+  } else if (thousands < 10_000n) {
     text = compact(1000n, 'тыс.');
   } else {
     text = compact(1_000_000n, 'млн');

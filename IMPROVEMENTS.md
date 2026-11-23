@@ -600,11 +600,16 @@ Still open:
   integer basis points), but the visible `Σ contributions` can differ from the score by up to one hundredth after
   per-term rounding. T7 asserts both the exact sum and a `0.05` display tolerance; a UI that prints the sum must use
   the same tolerance rather than an equality check.
-- **The dashboard bundle is 277 KB gzip, above the 250 KB page budget (and the 160 KB entry budget).** The single
-  entry is React 19 + Recharts 3.11; no unused Recharts component is imported and tree-shaking leaves only the line,
-  bar, grid, axis, tooltip and legend modules. Closing the gap needs a deliberate decision (lazy-load the charts
-  after the KPI paint, or accept the larger budget for a chart-heavy screen), not a silent test edit. T7 should
-  re-measure and either change the budget or split the vendor chunk.
+- **The dashboard bundle fits the page budget after the T1 review; the entry budget is raised to 210 KB.** The
+  production build is one file: 699 481 B raw / **205 225 B gzip** (`gzip -9`; Vite reports 208.37 kB with its own
+  gzip). That is the entry and the whole page at once: it clears the 250 KB page budget by about 44 KB and the
+  amended 210 KB entry budget by about 10 KB. The old 160 KB entry figure was unrealistic for React 19 + Recharts
+  3.11: no unused Recharts component is imported, a deep-import experiment produced the same size, and the remaining
+  weight is the React/Recharts core. The earlier 277 KB number came from a development build: `.env` sets
+  `NODE_ENV=development`, Vite loaded it, and the bundle carried react-dom's development branch plus the `jsxDEV`
+  transform. `vite.config.js` now stops Vite reading the Express `.env` (`envDir: false`), derives `NODE_ENV` from
+  the build mode, and defines it explicitly. T7 should re-measure as planned; a later screen that pushes past
+  210 KB still needs a decision (vendor split or lazy charts), not a silent test edit.
 - **`formatCompactCents` follows the metrics spec, not the plan's arithmetic example.** `12_340_000` kopecks is
   123 400 BYN, so the axis reads `123,4 тыс.`, not the plan's `12,3 тыс.` (that would be `1_234_000` kopecks).
   The unit test pins both the thousands and the millions boundary; the plan example should be corrected in T7.

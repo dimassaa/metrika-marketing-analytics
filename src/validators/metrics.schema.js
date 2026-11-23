@@ -11,7 +11,6 @@ import { parseBigIntId } from '../lib/ids.js';
  */
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-const ID_PATTERN = /^\d+$/;
 
 /**
  * `days` arrives as a string from a query string. An empty value stays empty so the schema, not `Number('')`, decides
@@ -57,28 +56,25 @@ const periodShape = {
 /**
  * Normalises the repeated/comma-separated `channelIds` form into a list of BIGINT strings.
  *
- * Express parses `channelIds=1&channelIds=2` as an array and `channelIds=1,2` as a string; both are the same
- * multi-select. An empty value is a user mistake, not "all channels": silently widening the report would show
- * numbers for channels the person did not select.
+ * The raw parsing rules live only in `parseChannelIds`; this field wraps them for Zod so the page and the API keep
+ * the same behaviour and the same Russian messages. An empty value is a user mistake, not "all channels": silently
+ * widening the report would show numbers for channels the person did not select.
  */
-const channelIdsField = z
-  .preprocess((value) => {
+const channelIdsField = z.preprocess(
+  (value, ctx) => {
     if (value === undefined) return undefined;
-    return (Array.isArray(value) ? value : [value]).flatMap((item) => String(item).split(','));
-  }, z
-    .array(
-      z
-        .string()
-        .trim()
-        .min(1, 'Укажите хотя бы один канал')
-        .regex(ID_PATTERN, 'Некорректный идентификатор канала'),
-    )
-    .min(1, 'Укажите хотя бы один канал')
-    .transform((items) => [...new Set(items.map((item) => parseBigIntId(item)))])
-    .refine((ids) => ids.length > 0 && ids.every((id) => id !== null), {
-      message: 'Некорректный идентификатор канала',
-    }))
-  .optional();
+    try {
+      return parseChannelIds(value);
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        ctx.addIssue({ code: 'custom', message: error.message });
+        return z.NEVER;
+      }
+      throw error;
+    }
+  },
+  z.array(z.string()).optional(),
+);
 
 /**
  * @param {unknown} value Query value: an array, a comma-separated string or a single id.

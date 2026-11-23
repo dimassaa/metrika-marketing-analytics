@@ -142,7 +142,10 @@ export function buildRomiChart({ weeklySeries, channelIds = null }) {
  * @returns {object}
  */export function buildSpendRevenueChart({ weeklySeries, channelIds = null }) {
   const points = toSpendRevenuePoints(weeklySeries);
-  const hasData = points.some((point) => point.spend > 0 || point.revenue > 0);
+  // Spend and attributed revenue are always measured (a string, including `0`), so a non-empty series is data even
+  // when every value is zero. Treating a measured zero as "no data" would hide the honest answer: the period spent
+  // nothing. Only a series with no weeks at all is empty.
+  const hasData = weeklySeries.length > 0;
   const weeks = weeksLabel(weeklySeries.length);
   const last = weeklySeries.at(-1);
   const lastLabel = last === undefined ? '—' : last.weekLabel;

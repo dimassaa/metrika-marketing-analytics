@@ -14,26 +14,43 @@ import react from '@vitejs/plugin-react';
  *
  * The entry map is explicit rather than a glob so a scratch file cannot end up in the production bundle. Later
  * milestones add their page here together with the entry file.
+ *
+ * React's development/production branch is chosen twice. `.env` sets `NODE_ENV=development` for the Express
+ * process, and Vite loads that file while resolving config, which would both define `process.env.NODE_ENV` and tell
+ * `@vitejs/plugin-react` to emit `jsxDEV`. Pinning `define` alone is not enough: the production runtime has no
+ * `jsxDEV` (`jsxDEV is not a function`), so the plugin's choice must be fixed too. `envDir: false` stops Vite reading
+ * the Express `.env` at all (the client bundle has no `VITE_*` variables), `NODE_ENV` is derived from the mode, and
+ * `define` states the same value explicitly. `vite build` therefore always ships production; `vite build --mode
+ * development` is the explicit opt-out.
  */
-export default defineConfig({
-  publicDir: false,
-  plugins: [react()],
-  build: {
-    outDir: 'public/assets',
-    emptyOutDir: true,
-    manifest: true,
-    sourcemap: false,
-    rollupOptions: {
-      input: {
-        dashboard: fileURLToPath(new URL('./client/entries/dashboard.jsx', import.meta.url)),
-      },
-      output: {
-        entryFileNames: '[name]-[hash].js',
-        chunkFileNames: 'chunks/[name]-[hash].js',
-        // Flat asset names: a nested `assets/` directory inside `public/assets` breaks the static mount and the
-        // build-output regression test.
-        assetFileNames: '[name]-[hash][extname]',
+export default defineConfig(({ mode }) => {
+  const nodeEnv = mode === 'production' ? 'production' : 'development';
+  process.env.NODE_ENV = nodeEnv;
+
+  return {
+    envDir: false,
+    publicDir: false,
+    plugins: [react()],
+    define: {
+      'process.env.NODE_ENV': JSON.stringify(nodeEnv),
+    },
+    build: {
+      outDir: 'public/assets',
+      emptyOutDir: true,
+      manifest: true,
+      sourcemap: false,
+      rollupOptions: {
+        input: {
+          dashboard: fileURLToPath(new URL('./client/entries/dashboard.jsx', import.meta.url)),
+        },
+        output: {
+          entryFileNames: '[name]-[hash].js',
+          chunkFileNames: 'chunks/[name]-[hash].js',
+          // Flat asset names: a nested `assets/` directory inside `public/assets` breaks the static mount and the
+          // build-output regression test.
+          assetFileNames: '[name]-[hash][extname]',
+        },
       },
     },
-  },
+  };
 });

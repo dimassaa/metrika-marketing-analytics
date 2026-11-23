@@ -91,6 +91,14 @@ describe('asset manifest', () => {
     expect(warnings[0].message).toMatch(/manifest/i);
   });
 
+  it('still rejects an unknown entry when the optional manifest is missing', () => {
+    const path = join(tmpdir(), `metrika-missing-${Date.now()}-unknown.json`);
+    const assets = createAssetManifest({ manifestPath: path, required: false, warn: () => {} });
+
+    expect(() => assets.assets(['dashbaord'])).toThrow(AssetManifestError);
+    expect(() => assets.assets(['dashbaord'])).toThrow(/dashbaord/);
+  });
+
   it('re-reads a development manifest when its mtime changes', () => {
     const path = manifestFile({ 'client/entries/dashboard.jsx': { file: 'dashboard-old.js', isEntry: true } });
     const assets = createAssetManifest({ manifestPath: path, required: false, warn: () => {} });
