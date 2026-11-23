@@ -11,8 +11,10 @@
   <div class="stack stack--lg">
     <% if (locals.filterControl && filterControl.options.length > 0) { %>
     <form class="card filters" method="get" action="<%= filterControl.action %>" aria-label="Фильтр по каналам">
-      <%# The period lives in the topbar; the filter must preserve it instead of resetting to the default window. %>
-      <input type="hidden" name="days" value="<%= filterControl.days %>">
+      <%# Replay the period exactly as the request used it: `days` or an explicit `from`/`to` pair, never both. %>
+      <% for (const field of filterControl.periodFields) { %>
+      <input type="hidden" name="<%= field.name %>" value="<%= field.value %>">
+      <% } %>
 
       <div class="filters__field">
         <label class="filters__label" for="dashboard-channels">Каналы</label>
@@ -22,12 +24,13 @@
           name="channelIds"
           multiple
           size="<%= filterControl.size %>"
+          aria-describedby="dashboard-channels-hint"
         >
           <% for (const option of filterControl.options) { %>
           <option value="<%= option.value %>"<%= option.selected ? ' selected' : '' %>><%= option.label %></option>
           <% } %>
         </select>
-        <p class="filters__hint">
+        <p class="filters__hint" id="dashboard-channels-hint">
           <% if (filterControl.active) { %>Выбрано <%= filterControl.selectedCount %> из <%= filterControl.total %>.
           <% } else { %>Ничего не выбрано — все каналы. <% } %>Несколько значений: Ctrl или ⌘.
         </p>

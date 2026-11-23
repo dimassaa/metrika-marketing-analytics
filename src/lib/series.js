@@ -113,7 +113,7 @@ export function toCacLtvPoints(channels) {
 function toCentsNumber(value, name) {
   const cents = Number(value);
   if (!Number.isSafeInteger(cents)) {
-    throw new TypeError(`weekly ${name} must be an integer string, got ${JSON.stringify(value)}`);
+    throw new TypeError(`chart ${name} must be an integer string, got ${JSON.stringify(value)}`);
   }
   return cents;
 }

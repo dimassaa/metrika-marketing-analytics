@@ -111,7 +111,7 @@ export function buildDashboardScreen({ summary, channelIds = null }) {
       // The two per-channel charts read `health.rows` from the same summary, so the filter, the KPI and these cards
       // cannot disagree and the dashboard adds no query.
       channelSpend: buildChannelSpendChart({ channels: summary.channels, channelIds }),
-      cacLtv: buildCacLtvScatter({ channels: summary.channels, channelIds }),
+      cacLtv: buildCacLtvScatter({ channels: summary.channels }),
     },
     labels: {
       period: periods,
@@ -167,36 +167,58 @@ export function buildPeriodControl({ query = {} } = {}) {
  * Page-only control model for the dashboard channel filter. It is deliberately not part of the screen model: the
  * API returns data, while a form action and a reset link are presentation of the same HTML frame.
  *
- * `resetHref` keeps the current period and drops only the channel selection, so "Сбросить" cannot silently send the
- * reader back to the default 30-day window. The `days` hidden input keeps the period when the multi-select submits.
+ * The hidden period fields mirror what the request actually used, exactly like `buildPeriodControl`: a validated
+ * `days` request replays `days`, while an explicit range replays `from`/`to` and omits `days`. Emitting the resolved
+ * `period.days` would produce a 31-day hidden value that the schema rejects on the form's own submit.
+ *
+ * `resetHref` keeps the period and drops only the channel selection. `active` and `selectedCount` come from the
+ * validated `channelIds`, not from the option list, so a filter with an id that is not in the dimension still shows
+ * «Сбросить» and agrees with the verdict card.
  *
  * @param {{
  *   options?: Array<{ value: string, label: string, selected: boolean }>,
- *   days?: number,
- * }} [input] `options` come from the screen model's full `channelOptions`.
+ *   query?: Record<string, unknown>,
+ * }} [input] `options` come from the screen model's full `channelOptions`; `query` is the validated query object.
  * @returns {{
  *   action: string,
- *   days: number | undefined,
  *   size: number,
  *   active: boolean,
  *   selectedCount: number,
  *   total: number,
  *   options: Array<{ value: string, label: string, selected: boolean }>,
+ *   periodFields: Array<{ name: string, value: string }>,
  *   resetHref: string,
  * }}
  */
-export function buildChannelFilterControl({ options = [], days } = {}) {
-  const query = buildQueryString({ days }, { channelIds: null });
+export function buildChannelFilterControl({ options = [], query = {} } = {}) {
+  const selectedIds = Array.isArray(query.channelIds) ? query.channelIds : [];
+
+  /** @type {Array<{ name: string, value: string }>} */
+  const periodFields = [];
+  if (query.days !== undefined && query.days !== null) {
+    periodFields.push({ name: 'days', value: String(query.days) });
+  } else {
+    // Replay only the bounds the request actually used; `resolvePeriod` may fill the missing one on the next request.
+    if (query.from !== undefined && query.from !== null && query.from !== '') {
+      periodFields.push({ name: 'from', value: String(query.from) });
+    }
+    if (query.to !== undefined && query.to !== null && query.to !== '') {
+      periodFields.push({ name: 'to', value: String(query.to) });
+    }
+  }
+
+  const periodQuery = Object.fromEntries(periodFields.map((field) => [field.name, field.value]));
+  const queryString = buildQueryString(periodQuery, { channelIds: null });
 
   return {
     action: '/app/dashboard',
-    days,
     // A multi-select needs a visible box; cap it so eight channels do not push the charts below the fold.
     size: Math.min(Math.max(options.length, 2), 6),
-    active: options.some((option) => option.selected),
-    selectedCount: options.filter((option) => option.selected).length,
+    active: selectedIds.length > 0,
+    selectedCount: selectedIds.length,
     total: options.length,
     options,
-    resetHref: query === '' ? '/app/dashboard' : `/app/dashboard?${query}`,
+    periodFields,
+    resetHref: queryString === '' ? '/app/dashboard' : `/app/dashboard?${queryString}`,
   };
 }

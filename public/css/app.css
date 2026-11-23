@@ -2223,7 +2223,6 @@ input[type='file'] {
 }
 
 .filters__select {
-  height: auto;
   min-height: 132px;
   padding: var(--spacing-8);
 }
@@ -2248,9 +2247,7 @@ input[type='file'] {
   .filters__actions .btn {
     flex: 1;
   }
-}
 
-@media (max-width: 768px) {
   .chart {
     padding: var(--spacing-16);
   }

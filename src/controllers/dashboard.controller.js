@@ -22,7 +22,6 @@ export function createDashboardController({ services, screenModels, referenceRep
    * @returns {Promise<{
    *   query: object,
    *   anchor: string,
-   *   period: { from: string, to: string, days: number },
    *   screen: object,
    * }>}
    * @throws {import('../lib/errors.js').ValidationError} When a query parameter is invalid.
@@ -41,7 +40,6 @@ export function createDashboardController({ services, screenModels, referenceRep
     return {
       query,
       anchor,
-      period,
       screen: screenModels.dashboard({ summary, channelIds: query.channelIds }),
     };
   }
@@ -55,7 +53,7 @@ export function createDashboardController({ services, screenModels, referenceRep
      * @type {import('express').RequestHandler}
      */
     async page(req, res) {
-      const { query, anchor, period, screen } = await load(req);
+      const { query, anchor, screen } = await load(req);
 
       res.set('Cache-Control', 'no-store');
       res.render('pages/dashboard', {
@@ -63,7 +61,7 @@ export function createDashboardController({ services, screenModels, referenceRep
         model: screen,
         islandEntries: ['dashboard'],
         periodControl: buildPeriodControl({ query }),
-        filterControl: buildChannelFilterControl({ options: screen.channelOptions, days: period.days }),
+        filterControl: buildChannelFilterControl({ options: screen.channelOptions, query }),
         currentPath: `${req.baseUrl}${req.path}`,
       });
     },

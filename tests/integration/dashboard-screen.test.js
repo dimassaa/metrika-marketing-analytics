@@ -40,6 +40,30 @@ async function signedIn() {
   return agent;
 }
 
+/**
+ * Reads the hidden period fields of the dashboard channel filter, so a test submits what the form really carries
+ * instead of reconstructing the expected query by hand.
+ *
+ * @param {string} html Rendered page.
+ * @returns {Array<{ name: string, value: string }>}
+ */
+function filterPeriodFields(html) {
+  const form = html.match(/<form class="card filters"[\s\S]*?<\/form>/)?.[0];
+  if (!form) throw new Error('dashboard filter form not found');
+  return [...form.matchAll(/<input type="hidden" name="([^"]+)" value="([^"]*)">/g)].map((match) => ({
+    name: match[1],
+    value: match[2],
+  }));
+}
+
+/**
+ * @param {Array<{ name: string, value: string }>} fields
+ * @returns {string}
+ */
+function asQuery(fields) {
+  return new URLSearchParams(fields.map((field) => [field.name, field.value])).toString();
+}
+
 describe('dashboard screen', () => {
   it('renders one island mount node with a skeleton and no server-rendered KPI text', async () => {
     const agent = await signedIn();
@@ -77,13 +101,20 @@ describe('dashboard screen', () => {
     expect(res.status).toBe(200);
     expect(res.text).toContain('name="channelIds"');
     expect(res.text).toContain('multiple');
-    expect(res.text).toContain('name="days" value="90"');
+    expect(res.text).toContain('aria-describedby="dashboard-channels-hint"');
+    expect(res.text).toContain('id="dashboard-channels-hint"');
+    expect(filterPeriodFields(res.text)).toEqual([{ name: 'days', value: '90' }]);
     for (const id of ids) {
       // A filtered page must reopen with the same channels ticked, not with an empty multi-select.
       expect(res.text).toContain(`<option value="${id}" selected>`);
     }
     expect(res.text).toContain('Сбросить');
     expect(res.text).toContain('href="/app/dashboard?days=90"');
+
+    // The generated form fields must be accepted as-is, not just look plausible.
+    const submitted = await agent.get(`/app/dashboard?${asQuery(filterPeriodFields(res.text))}`);
+    expect(submitted.status).toBe(200);
+    expect(extractDataProps(submitted.text).period.days).toBe(90);
   });
 
   it('keeps the page and the API identical under a channel filter', async () => {
@@ -172,16 +203,32 @@ describe('dashboard screen', () => {
     expect(props.period.label).toBe('180 дней');
   });
 
-  it('renders an explicit from/to window without replaying the conflicting bounds in the period form', async () => {
+  it('replays an explicit from/to range and accepts the generated form submit', async () => {
+    const { rows } = await pool.query('SELECT id::text AS id FROM channels ORDER BY code LIMIT 1');
+    const id = rows[0].id;
     const agent = await signedIn();
 
-    const res = await agent.get('/app/dashboard?from=2026-10-01&to=2026-10-31');
+    const res = await agent.get(
+      `/app/dashboard?from=2026-10-01&to=2026-10-31&channelIds=${id}`,
+    );
 
     expect(res.status).toBe(200);
-    // Submitting the days select together with a hidden from/to is a 400 by schema; the form must carry days only.
-    expect(res.text).not.toContain('name="from"');
-    expect(res.text).not.toContain('name="to"');
-    expect((await agent.get('/app/dashboard?days=30')).status).toBe(200);
+    // The resolved length (31) is not an allowed `days` value; replaying from/to is the only 200-safe form.
+    expect(filterPeriodFields(res.text)).toEqual([
+      { name: 'from', value: '2026-10-01' },
+      { name: 'to', value: '2026-10-31' },
+    ]);
+    expect(res.text).toContain('href="/app/dashboard?from=2026-10-01&amp;to=2026-10-31"');
+
+    // Submit exactly what the form carries (its select still contributes the same channel).
+    const submitted = await agent.get(
+      `/app/dashboard?${asQuery(filterPeriodFields(res.text))}&channelIds=${id}`,
+    );
+    expect(submitted.status).toBe(200);
+    expect(extractDataProps(submitted.text).period).toMatchObject({
+      from: '2026-10-01',
+      to: '2026-10-31',
+    });
   });
 
   it('rejects an invalid filter with 400 instead of rendering a wider report', async () => {
@@ -192,6 +239,22 @@ describe('dashboard screen', () => {
 
     expect(bad.status).toBe(400);
     expect(empty.status).toBe(400);
+  });
+
+  it('shows Reset for a filter id that is not in the channel dimension', async () => {
+    const agent = await signedIn();
+
+    const res = await agent.get('/app/dashboard?days=30&channelIds=999999');
+
+    expect(res.status).toBe(200);
+    const props = extractDataProps(res.text);
+    expect(props.filter.active).toBe(true);
+    expect(props.verdict.status).toBe('no_data');
+    expect(res.text).toContain('Сбросить');
+    expect(res.text).toContain('Выбрано 1 из 8.');
+    // No option can be ticked, but the control still agrees with the verdict and offers the way back.
+    const filterForm = res.text.match(/<form class="card filters"[\s\S]*?<\/form>/)?.[0];
+    expect(filterForm).not.toMatch(/<option value="[^"]+" selected>/);
   });
 
   it('rejects days together with from or to at the window boundary', async () => {

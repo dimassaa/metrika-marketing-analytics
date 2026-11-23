@@ -224,6 +224,7 @@ describe('dashboard screen model', () => {
     expect(chart.series[0]).toMatchObject({ cac: 50000, ltv: 150000, newCustomers: 6 });
     expect(chart.caption).toContain('3 канала');
     expect(chart.caption).toContain('2 с CAC и LTV12 · LTV выше CAC у 1');
+    expect(chart.caption).toContain('размер круга — новые клиенты');
 
     expect(chart.table.rows).toHaveLength(3);
     expect(chart.table.rows.find((row) => row.key === '3').cells).toEqual({
@@ -315,16 +316,30 @@ describe('channel filter control', () => {
     { value: '2', label: 'Google Ads', selected: false },
   ];
 
-  it('builds a GET form that keeps the period and resets only the channel selection', () => {
-    const control = buildChannelFilterControl({ options, days: 90 });
+  it('builds a GET form that keeps a days period and resets only the channel selection', () => {
+    const control = buildChannelFilterControl({ options, query: { days: 90, channelIds: ['1'] } });
 
     expect(control.action).toBe('/app/dashboard');
-    expect(control.days).toBe(90);
+    expect(control.periodFields).toEqual([{ name: 'days', value: '90' }]);
     expect(control.active).toBe(true);
     expect(control.size).toBe(2);
     expect(control.selectedCount).toBe(1);
     expect(control.total).toBe(2);
     expect(control.resetHref).toBe('/app/dashboard?days=90');
+  });
+
+  it('replays an explicit from/to range instead of the resolved day count', () => {
+    const control = buildChannelFilterControl({
+      options,
+      query: { from: '2026-10-01', to: '2026-10-31', channelIds: null },
+    });
+
+    // The resolved length (31) is not an allowed `days` option; emitting it would 400 on the form's own submit.
+    expect(control.periodFields).toEqual([
+      { name: 'from', value: '2026-10-01' },
+      { name: 'to', value: '2026-10-31' },
+    ]);
+    expect(control.resetHref).toBe('/app/dashboard?from=2026-10-01&to=2026-10-31');
   });
 
   it('is inactive and caps the multi-select height for a long channel list', () => {
@@ -334,10 +349,30 @@ describe('channel filter control', () => {
         label: `Канал ${index + 1}`,
         selected: false,
       })),
-      days: 30,
+      query: { days: 30, channelIds: null },
     });
 
     expect(control.active).toBe(false);
     expect(control.size).toBe(6);
+  });
+
+  it('derives active state from the validated ids, even when no option matches them', () => {
+    const control = buildChannelFilterControl({
+      options: options.map((option) => ({ ...option, selected: false })),
+      query: { days: 30, channelIds: ['999'] },
+    });
+
+    // The verdict is risky/no_data for this filter and the reset link must be reachable, even though the dimension
+    // has no option 999 to tick.
+    expect(control.active).toBe(true);
+    expect(control.selectedCount).toBe(1);
+    expect(control.options.every((option) => option.selected === false)).toBe(true);
+  });
+
+  it('emits no hidden period fields when the request used neither days nor bounds', () => {
+    const control = buildChannelFilterControl({ options, query: { channelIds: null } });
+
+    expect(control.periodFields).toEqual([]);
+    expect(control.resetHref).toBe('/app/dashboard');
   });
 });

@@ -1,9 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, sep } from 'node:path';
+import { gzipSync } from 'node:zlib';
 
 const ASSETS = join(process.cwd(), 'public', 'assets');
 const MANIFEST = join(ASSETS, '.vite', 'manifest.json');
+
+/**
+ * Gzip ceilings from the M4 plan. The build is one entry, so the entry and the page are measured on the same file;
+ * `imports`/`dynamicImports` are included in the page total in case a later split moves code out.
+ *
+ * The measurement uses zlib level 9, matching the numbers recorded in `IMPROVEMENTS.md`. zlib output can differ by a
+ * few bytes between Node versions, which is why the ceilings are whole kilobytes and the test reports the measured
+ * value on failure. The guard runs only when a build exists (`describe.skipIf`), so CI must build before testing —
+ * the same precondition as the other tests in this file.
+ */
+const ENTRY_GZIP_BUDGET = 210 * 1024;
+const PAGE_GZIP_BUDGET = 250 * 1024;
 
 /**
  * @param {string} path
@@ -42,6 +55,33 @@ describe.skipIf(!hasBuild)('vite build output', () => {
     expect(existsSync(MANIFEST)).toBe(true);
     const manifest = JSON.parse(readFileSync(MANIFEST, 'utf8'));
     expect(manifest['client/entries/dashboard.jsx']?.isEntry).toBe(true);
+  });
+
+  it('keeps the dashboard entry and the whole page under their gzip budgets', () => {
+    const manifest = JSON.parse(readFileSync(MANIFEST, 'utf8'));
+    const entryKey = 'client/entries/dashboard.jsx';
+    const entry = manifest[entryKey];
+    const chunkKeys = new Set([
+      entryKey,
+      ...(entry.imports ?? []),
+      ...(entry.dynamicImports ?? []),
+    ]);
+    const pageFiles = new Set(
+      [...chunkKeys].map((key) => manifest[key]?.file).filter((file) => typeof file === 'string'),
+    );
+
+    /** @param {string} file */
+    const gzipSize = (file) => gzipSync(readFileSync(join(ASSETS, file)), { level: 9 }).length;
+
+    const entryGzip = gzipSize(entry.file);
+    const pageGzip = [...pageFiles].reduce((sum, file) => sum + gzipSize(file), 0);
+
+    expect(entryGzip, `entry gzip is ${entryGzip} B, budget ${ENTRY_GZIP_BUDGET} B`).toBeLessThanOrEqual(
+      ENTRY_GZIP_BUDGET,
+    );
+    expect(pageGzip, `page gzip is ${pageGzip} B, budget ${PAGE_GZIP_BUDGET} B`).toBeLessThanOrEqual(
+      PAGE_GZIP_BUDGET,
+    );
   });
 
   it('emits the dashboard entry and every file the manifest names', () => {

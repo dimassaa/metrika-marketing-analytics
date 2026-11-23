@@ -258,11 +258,10 @@ export function buildChannelSpendChart({ channels, channelIds = null }) {
  * A channel missing CAC or LTV12 is not plotted (a point would claim a measurement that does not exist) but stays
  * in the duplicate table with a dash, so the reader can see which channels were filtered out of the picture and why.
  *
- * @param {{ channels: object[], channelIds?: string[] | null }} input `channels` are JSON-safe health rows.
+ * @param {{ channels: object[] }} input `channels` are JSON-safe health rows.
  * @returns {object}
  */
-export function buildCacLtvScatter({ channels, channelIds = null }) {
-  const selected = channelIds && channelIds.length > 0 ? new Set(channelIds) : null;
+export function buildCacLtvScatter({ channels }) {
   const points = toCacLtvPoints(channels);
   const plottable = points.filter((point) => point.cac !== null && point.ltv !== null);
   const count = channelsLabel(points.length);
@@ -272,7 +271,9 @@ export function buildCacLtvScatter({ channels, channelIds = null }) {
     plottable.length === 0
       ? 'нет каналов с CAC и LTV12'
       : `${plottable.length} с CAC и LTV12 · LTV выше CAC у ${aboveCac}`;
-  const detail = `${count} · ${conclusion}`;
+  // The bubble size has no visible axis, so the caption states it; a single-series legend would only repeat the
+  // chart title and was removed.
+  const detail = `${count} · ${conclusion} · размер круга — новые клиенты`;
 
   return {
     id: 'cac-ltv',
@@ -282,10 +283,7 @@ export function buildCacLtvScatter({ channels, channelIds = null }) {
     unit: 'BYN',
     // A scatter with one missing pair would be an empty box, so plottability depends on complete pairs only.
     hasData: plottable.length > 0,
-    series: plottable.map((point) => ({
-      ...point,
-      highlight: selected === null ? true : selected.has(point.channelId),
-    })),
+    series: plottable,
     // The table keeps every filtered channel, including the ones the chart cannot place.
     table: {
       columns: [

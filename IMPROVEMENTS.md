@@ -601,20 +601,21 @@ Still open:
   per-term rounding. T7 asserts both the exact sum and a `0.05` display tolerance; a UI that prints the sum must use
   the same tolerance rather than an equality check.
 - **The dashboard bundle fits the page budget; the entry budget is raised to 210 KB and is now nearly full.** The
-  T2 build is one production file: 718 510 B raw / **209 664 B gzip** (`gzip -9`; Vite reports 212.80 kB with its own
+  T2 build is one production file: 718 886 B raw / **209 740 B gzip** (`gzip -9`; Vite reports 212.87 kB with its own
   gzip). That is the entry and the whole page at once: it clears the 250 KiB page budget by about 45 KiB but the
   amended 210 KiB entry budget by only about 5 KiB, because T2 added the two per-channel charts. The old 160 KB entry
   figure was unrealistic for React 19 + Recharts 3.11: no unused Recharts component is imported and a deep-import
   experiment produced the same size. The next dashboard addition needs a decision (vendor split or lazy charts), not
-  a silent budget edit; T7 must re-measure.
+  a silent budget edit; T7 must re-measure. `tests/integration/build-output.test.js` now enforces both ceilings.
 - **`formatCompactCents` follows the metrics spec, not the plan's arithmetic example.** `12_340_000` kopecks is
   123 400 BYN, so the axis reads `123,4 тыс.`, not the plan's `12,3 тыс.` (that would be `1_234_000` kopecks).
   The unit test pins both the thousands and the millions boundary; the plan example should be corrected in T7.
-- **The dashboard filter form keeps `days` but not an explicit `from`/`to`.** The page control submits the multi-select
-  plus a hidden `days`; an API-only reader that opens a bookmarked explicit range and then applies a channel filter
-  gets the same-length `days` window instead of that exact range. The alternative — a hidden `from`/`to` pair —
-  would be a guaranteed 400 because the schema forbids `days` with either bound, so the current behaviour is the
-  least surprising one; a UI that exposes explicit ranges needs a separate control.
+- **The gzip budget guard is build-dependent and zlib-version sensitive.**
+  `tests/integration/build-output.test.js` now measures zlib level 9 on the manifest's entry/page files and fails above
+  210 KiB / 250 KiB. It is skipped when `public/assets` is absent, so CI must build before testing (the same
+  precondition as the other build-output assertions). zlib output can move a few bytes between Node releases; the
+  whole-kilobyte ceilings absorb that. A future failure should trigger a split or lazy-chart decision, not a byte
+  bump.
 - **Two channel repository instances are alive in one app.** M2's channel controller builds its own
   `channelsRepository`, while the metrics composition root builds another. The instances are stateless wrappers
   around one pool, so this costs no connection and no state; moving M2 onto the module is T3's cleanup, together
