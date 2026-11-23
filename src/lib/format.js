@@ -241,6 +241,40 @@ export function formatRatio(value, { decimals = 3 } = {}) {
   return `${sign}${Math.abs(rounded).toFixed(decimals).replace('.', ',')}`;
 }
 
+/** Non-breaking space between date and time: a timestamp never wraps in the middle of a table cell. */
+const NBSP = '\u00a0';
+
+/**
+ * One formatter for every Minsk timestamp, so an ICU update cannot shift the output between screens. `en-US` parts
+ * then assembled by hand avoid the comma and narrow spaces `ru-RU` inserts, whose exact characters differ between
+ * ICU builds.
+ */
+const dateTimeFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'Europe/Minsk',
+  hourCycle: 'h23',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
+/**
+ * Renders an instant as `DD.MM.YYYY HH:mm` in Europe/Minsk with a non-breaking space before the time.
+ * Used by the audit journal and the import batch list, where the time of day matters.
+ * @param {Date | string | null | undefined} value Instant; a string must be parseable by `new Date`.
+ * @returns {string} Ready-to-display timestamp, or `—` for NULL and malformed input.
+ */
+export function formatDateTimeRu(value) {
+  if (value === null || value === undefined || value === '') return EM_DASH;
+
+  const instant = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(instant.getTime())) return EM_DASH;
+
+  const parts = Object.fromEntries(dateTimeFormatter.formatToParts(instant).map((part) => [part.type, part.value]));
+  return `${parts.day}.${parts.month}.${parts.year}${NBSP}${parts.hour}:${parts.minute}`;
+}
+
 /**
  * Renders a whole count with grouped thousands: `12 345`. Used for customer, click and campaign counters.
  * @param {string | number | bigint | null | undefined} value Integer, or NULL when nothing was counted.

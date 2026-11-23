@@ -1,4 +1,5 @@
 import { AUDIT_ACTIONS, AUDIT_ENTITIES } from '../config/audit-actions.js';
+import { formatDateTimeRu } from '../lib/format.js';
 
 /** Page size fixed by the brief: the journal is scanned fifty rows at a time. */
 export const AUDIT_PAGE_SIZE = 50;
@@ -98,34 +99,6 @@ const DETAIL_KEYS = Object.freeze([
   ['filters', 'Фильтры'],
 ]);
 
-const dateTimeFormatter = new Intl.DateTimeFormat('en-US', {
-  timeZone: 'Europe/Minsk',
-  hourCycle: 'h23',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-});
-
-/** Non-breaking space between date and time: a screenshot never wraps the label in the middle. */
-const NBSP = '\u00a0';
-
-/**
- * `DD.MM.YYYY HH:mm` in Europe/Minsk. Audit entries need the time of day, which the shared date-only formatter drops.
- * The parts are assembled manually because `ru-RU` inserts a comma and narrow spaces that vary between ICU builds.
- * @param {Date | string} value
- * @returns {string}
- */
-function formatDateTimeMinsk(value) {
-  const instant = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(instant.getTime())) return '—';
-  const parts = Object.fromEntries(
-    dateTimeFormatter.formatToParts(instant).map((part) => [part.type, part.value]),
-  );
-  return `${parts.day}.${parts.month}.${parts.year}${NBSP}${parts.hour}:${parts.minute}`;
-}
-
 /**
  * One-line summary of the safe payload keys, e.g. «Роль: аналитик · Почта: junior@metrika.by».
  * @param {Record<string, unknown>} payload
@@ -162,7 +135,7 @@ function toView(entry) {
     actionLabel: ACTION_LABELS[entry.action] ?? entry.action,
     entityLabel: ENTITY_LABELS[entry.entity] ?? entry.entity,
     actorLabel: entry.userEmail ?? 'Система',
-    createdAtLabel: formatDateTimeMinsk(entry.createdAt),
+    createdAtLabel: formatDateTimeRu(entry.createdAt),
     detail: summarisePayload(entry.payload),
   };
 }

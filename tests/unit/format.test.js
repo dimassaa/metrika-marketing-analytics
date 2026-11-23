@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { formatCompactCents, formatMonths, formatRatio, formatRomi, formatSignedPercent } from '../../src/lib/format.js';
+import {
+  formatCompactCents,
+  formatDateTimeRu,
+  formatMonths,
+  formatRatio,
+  formatRomi,
+  formatSignedPercent,
+} from '../../src/lib/format.js';
 
 describe('formatMonths', () => {
   it('drops trailing zeros instead of showing a fake precision', () => {
@@ -85,6 +92,8 @@ describe('formatRatio', () => {
   it('honours the requested precision', () => {
     expect(formatRatio(2.5, { decimals: 2 })).toBe('2,50');
     expect(formatRatio('2.50', { decimals: 2 })).toBe('2,50');
+    // The K/S/R² screens ask for two decimals; half up must not be lost to the binary representation of 12.345.
+    expect(formatRatio(12.345, { decimals: 2 })).toBe('12,35');
   });
 
   it('keeps a missing value honest and is not a percentage formatter', () => {
@@ -102,6 +111,27 @@ describe('formatRatio', () => {
     expect(() => formatRatio(2.5, { decimals: -1 })).toThrow(TypeError);
     expect(() => formatRatio(2.5, { decimals: 1.5 })).toThrow(TypeError);
     expect(() => formatRatio(2.5, { decimals: 13 })).toThrow(/between 0 and 12/);
+  });
+});
+
+describe('formatDateTimeRu', () => {
+  it('renders an instant as DD.MM.YYYY HH:mm in Europe/Minsk with a non-breaking space', () => {
+    // 10:05 UTC is 13:05 in Minsk (UTC+3, no DST). The NBSP keeps the label on one line in a screenshot.
+    expect(formatDateTimeRu('2026-11-23T10:05:00Z')).toBe('23.11.2026\u00a013:05');
+    expect(formatDateTimeRu(new Date('2026-01-01T00:00:00Z'))).toBe('01.01.2026\u00a003:00');
+  });
+
+  it('never emits the ICU-specific comma or narrow space of a locale formatter', () => {
+    const label = formatDateTimeRu('2026-11-23T10:05:00Z');
+    expect(label).not.toContain(',');
+    expect(label).toMatch(/^\d{2}\.\d{2}\.\d{4}\u00a0\d{2}:\d{2}$/);
+  });
+
+  it('keeps a missing or malformed timestamp honest', () => {
+    expect(formatDateTimeRu(null)).toBe('—');
+    expect(formatDateTimeRu(undefined)).toBe('—');
+    expect(formatDateTimeRu('not-a-date')).toBe('—');
+    expect(formatDateTimeRu(new Date(Number.NaN))).toBe('—');
   });
 });
 

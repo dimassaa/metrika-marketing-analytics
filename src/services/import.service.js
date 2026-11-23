@@ -2,6 +2,7 @@ import { AUDIT_ACTIONS } from '../config/audit-actions.js';
 import { stringifyCsv } from '../lib/csv.js';
 import { withTransaction } from '../lib/db.js';
 import { ValidationError } from '../lib/errors.js';
+import { formatDateTimeRu } from '../lib/format.js';
 import {
   IMPORT_COLUMNS,
   IMPORT_KINDS,
@@ -38,29 +39,6 @@ const TEMPLATE_ROWS = Object.freeze({
   ],
 });
 
-const dateTimeFormatter = new Intl.DateTimeFormat('en-US', {
-  timeZone: 'Europe/Minsk',
-  hourCycle: 'h23',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-});
-
-/**
- * `DD.MM.YYYY HH:mm` in Europe/Minsk for the batch list. Assembled from parts because `ru-RU` inserts commas and
- * narrow spaces that differ between ICU builds.
- * @param {Date | string} value
- * @returns {string}
- */
-function formatDateTimeMinsk(value) {
-  const instant = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(instant.getTime())) return '—';
-  const parts = Object.fromEntries(dateTimeFormatter.formatToParts(instant).map((part) => [part.type, part.value]));
-  return `${parts.day}.${parts.month}.${parts.year}\u00a0${parts.hour}:${parts.minute}`;
-}
-
 /**
  * Strips any directory component and control characters from the uploaded name.
  *
@@ -86,7 +64,7 @@ function toBatchView(batch) {
   return {
     ...batch,
     kindLabel: IMPORT_KIND_LABELS[batch.kind] ?? batch.kind,
-    createdAtLabel: formatDateTimeMinsk(batch.createdAt),
+    createdAtLabel: formatDateTimeRu(batch.createdAt),
   };
 }
 
