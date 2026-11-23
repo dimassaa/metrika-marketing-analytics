@@ -842,3 +842,37 @@ Still open:
   `aria-valuenow` exposes the unrounded float. Fixing that without stale announcements needs a paired number input or
   a small island that mirrors the slider into a formatted `aria-valuetext`. Deferred to M6; the visible label, the
   hint and the submitted value are exact kopecks today.
+
+## M5 Task 8 — final E2E and evidence follow-ups
+
+- **The slider's HTML `min="0.01"` is below the server's feasible minimum.** The optimizer rejects a budget smaller
+  than one kopeck per optimizable curve; the demo has six curves, so `0.01` returns 400 «Бюджета не хватает даже на
+  1 копейку каждому каналу», while `0.06` is the first accepted value. A keyboard user pressing `Home` therefore
+  lands on a value the form itself cannot submit. Compute the slider minimum from the number of optimizable channels
+  (or let the server allocate one kopeck to only some channels) instead of hard-coding `0.01`; the E2E run recorded
+  both the `Home → 0.01 → 400` path and `0.06 → 200`.
+- **The raw-float `aria-valuenow` is confirmed in a real browser, not just inferred.** On `/app/scenarios` the
+  accessibility tree reports `0.009999999776482582` after `Home`; the visible hint and the submitted `budgetByn` stay
+  exact. This is the same M6 item as the note above, now with evidence.
+- **Scenario validation errors lose the page and the entered budget.** `GET /app/scenarios?budgetByn=8082.01`
+  returns a plain-text 400 («Бюджет больше 3× текущего недельного бюджета в BYN»), not the styled builder with an
+  error card, so the person cannot correct the value in place. The same is true of the zero/one-kopeck messages. A
+  page-level catch that renders the builder with an alert would match the empty-builder treatment; the API may keep
+  the plain JSON error.
+- **Waterfall was not added; `IncrementBars` is the intended chart.** The stored snapshot has no cumulative steps, so
+  a classical waterfall would invent an ordering. Design spec §8 already describes «бары прироста по каналам», and
+  `IMPROVEMENTS.md` records the divergence; no copy change was needed in Task 8.
+- **The campaign dimension is still absent from alerts, scenarios and attribution.** All three work at channel
+  granularity: the attribution service allocates channel revenue only, so an alert or scenario cannot be filtered by
+  campaign without a second aggregation path. This remains a product decision for M6+, not a missing filter that can
+  be added to the existing model.
+- **Alert pagination cannot be reached on the seeded stand.** The demo produces two alerts, so the 50-row pager was
+  exercised with 51 synthetic rows (the exact SQL is in `docs/screenshots/m5/README.md`) and the database was reseeded
+  afterwards. If a demo script needs to show pagination without SQL, the seed should generate enough alerts or a
+  fixture mode should exist; neither belongs in product code.
+- **The alerts page's first GET is the most expensive decisions request (19 statements) because it writes.** The new
+  page-query budget pins 32 and the API at 12. If the alert rule set grows, the recalculation cost will grow before
+  any read does; the M5 Task 5 note about computing all three attribution models is the first place to optimise.
+- **The §6.2 linear-curve exclusion is now written into the metrics spec.** The service already excluded
+  `linear`/`no_data` from KKT and the UI already showed «Линейная кривая — без оптимума»; Task 8 added the missing
+  paragraph so the behaviour is not mistaken for an oversight.

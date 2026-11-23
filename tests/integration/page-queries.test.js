@@ -23,7 +23,32 @@ const CEILINGS = Object.freeze({
   '/app/channels/1': 24,
   '/app/cohorts': 9,
   '/app/attribution': 8,
+  // The measured alerts page is 19 because the first GET in a session also runs the throttled recalculation
+  // (two window reports, upserts and stale resolution). The ceiling keeps that write path from hiding a read
+  // regression while staying well below the brief's 32.
+  '/app/alerts': 32,
+  '/app/scenarios': 12,
+  // The API never recalculates on GET, so it is cheaper than the page and has its own flat ceiling.
+  '/api/v1/alerts': 12,
+  '/api/v1/scenarios': 12,
 });
+
+/**
+ * Fails on a statement that repeats with the same parameters inside one request.
+ *
+ * @param {string} path Request path used in the assertion message.
+ * @returns {void}
+ */
+function findDuplicates(path) {
+  const seen = new Set();
+  const duplicates = [];
+  for (const [text, params] of statements) {
+    const key = `${text}::${params}`;
+    if (seen.has(key)) duplicates.push(text.slice(0, 90));
+    seen.add(key);
+  }
+  expect(duplicates, `${path} repeated a statement with identical parameters`).toEqual([]);
+}
 
 /** @type {import('pg').Pool} */
 let pool;
@@ -77,13 +102,34 @@ describe('page query budget', () => {
     expect(res.status).toBe(200);
     expect(statements.length, `${path} ran ${statements.length} statements`).toBeLessThanOrEqual(ceiling);
 
-    const seen = new Set();
-    const duplicates = [];
-    for (const [text, params] of statements) {
-      const key = `${text}::${params}`;
-      if (seen.has(key)) duplicates.push(text.slice(0, 90));
-      seen.add(key);
+    findDuplicates(path);
+  });
+
+  it('keeps a saved scenario detail at or below six statements on the page and the API', async () => {
+    const agent = await signedIn();
+    const builder = await agent.get('/app/scenarios');
+    const csrf = builder.text.match(/name="_csrf" value="([^"]+)"/)?.[1];
+    expect(csrf, 'the builder form must carry a CSRF token').toBeTypeOf('string');
+
+    const saved = await agent
+      .post('/app/scenarios')
+      .type('form')
+      .send({ _csrf: csrf, name: 'Бюджет запросов' });
+    expect(saved.status).toBe(302);
+    expect(saved.headers.location).toMatch(/^\/app\/scenarios\/\d+$/);
+
+    // The snapshot is read-only: the detail path must not refit curves or replay the builder's list queries.
+    const detailPath = saved.headers.location;
+    const targets = [
+      [detailPath, 'page'],
+      [detailPath.replace('/app/', '/api/v1/'), 'api'],
+    ];
+    for (const [target, label] of targets) {
+      statements = [];
+      const res = await agent.get(target);
+      expect(res.status, `${label} ${target}`).toBe(200);
+      expect(statements.length, `${label} ${target} ran ${statements.length} statements`).toBeLessThanOrEqual(6);
+      findDuplicates(target);
     }
-    expect(duplicates, `${path} repeated a statement with identical parameters`).toEqual([]);
   });
 });
