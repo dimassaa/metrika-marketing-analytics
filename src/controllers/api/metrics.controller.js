@@ -12,6 +12,7 @@ import { rankingQuerySchema } from '../../validators/metrics.schema.js';
  * @param {{
  *   dashboardController: ReturnType<typeof import('../dashboard.controller.js').createDashboardController>,
  *   channelsScreenLoader: (req: import('express').Request) => Promise<{ screen: object }>,
+ *   channelPassportScreenLoader: (req: import('express').Request) => Promise<{ screen: object }>,
  *   rankingService: ReturnType<typeof import('../../services/metrics/ranking.service.js').createRankingService>,
  *   referenceRepository: ReturnType<typeof import('../../repositories/reference.repo.js').createReferenceRepository>,
  * }} deps
@@ -19,6 +20,7 @@ import { rankingQuerySchema } from '../../validators/metrics.schema.js';
 export function createMetricsApiController({
   dashboardController,
   channelsScreenLoader,
+  channelPassportScreenLoader,
   rankingService,
   referenceRepository,
 }) {
@@ -38,6 +40,15 @@ export function createMetricsApiController({
      */
     async channels(req, res) {
       const { screen } = await channelsScreenLoader(req);
+      res.json(screen);
+    },
+
+    /**
+     * Same object as the channel passport page's `data-props`.
+     * @type {import('express').RequestHandler}
+     */
+    async channel(req, res) {
+      const { screen } = await channelPassportScreenLoader(req);
       res.json(screen);
     },
 

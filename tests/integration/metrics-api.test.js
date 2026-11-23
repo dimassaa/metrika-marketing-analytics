@@ -190,6 +190,62 @@ describe('GET /api/v1/channels', () => {
   });
 });
 
+describe('GET /api/v1/channels/:id', () => {
+  it('requires a session and the channels:view permission', async () => {
+    expect(METRICS_API_PERMISSIONS['/channels/:id']).toBe('channels:view');
+    const { rows } = await pool.query('SELECT id::text AS id FROM channels ORDER BY id LIMIT 1');
+    const id = rows[0].id;
+
+    const anonymous = await request(app).get(`/api/v1/channels/${id}`);
+    expect(anonymous.status).toBe(401);
+    expect(anonymous.body.error.code).toBe('UNAUTHORIZED');
+
+    const agent = await signedIn();
+    const res = await agent.get(`/api/v1/channels/${id}`);
+    expect(res.status).toBe(200);
+    expect(res.type).toMatch(/application\/json/);
+    expect(res.headers['cache-control']).toBe('no-store');
+  });
+
+  it('rejects an invalid period with 400 and an unknown id with 404 JSON', async () => {
+    const agent = await signedIn();
+    const { rows } = await pool.query('SELECT id::text AS id FROM channels ORDER BY id LIMIT 1');
+
+    const period = await agent.get(`/api/v1/channels/${rows[0].id}?days=45`);
+    expect(period.status).toBe(400);
+    expect(period.body.error.code).toBe('VALIDATION_ERROR');
+
+    for (const id of ['999999', 'abc']) {
+      const res = await agent.get(`/api/v1/channels/${id}`);
+      expect(res.status, id).toBe(404);
+      expect(res.type, id).toMatch(/application\/json/);
+      expect(res.body.error.code, id).toBe('NOT_FOUND');
+    }
+  });
+
+  it('returns a JSON-safe empty passport for a channel without statistics', async () => {
+    const { rows } = await pool.query(
+      `INSERT INTO channels (code, name, kind, target_cac_cents, target_romi_pct)
+       VALUES ('api_empty', 'API empty', 'paid', 5000, 100)
+       RETURNING id::text AS id`,
+    );
+    const id = rows[0].id;
+    const agent = await signedIn();
+
+    try {
+      const res = await agent.get(`/api/v1/channels/${id}`);
+      expect(res.status).toBe(200);
+      expect(res.body.health.status).toBe('no_data');
+      expect(res.body.funnel.stages).toHaveLength(5);
+      expect(res.body.funnel.meterMax).toBe(1);
+      expect(res.body.retention.hasData).toBe(false);
+      expect(JSON.stringify(res.body)).not.toMatch(/NaN|Infinity/);
+    } finally {
+      await pool.query('DELETE FROM channels WHERE id = $1::bigint', [id]);
+    }
+  });
+});
+
 describe('GET /api/v1/ranking', () => {
   it('is guarded by channels:view and returns the raw M3 ranking report', async () => {
     expect(METRICS_API_PERMISSIONS['/ranking']).toBe('channels:view');

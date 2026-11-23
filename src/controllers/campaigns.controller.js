@@ -1,6 +1,7 @@
 import { buildShellLocals } from './app.controller.js';
 import { NotFoundError, ValidationError } from '../lib/errors.js';
 import { buildSeo } from '../lib/seo.js';
+import { buildPeriodControl } from '../services/metrics/screen-models.js';
 import {
   campaignCreateSchema,
   campaignFiltersSchema,
@@ -46,9 +47,13 @@ function actorOf(req) {
  *   campaignsService: ReturnType<typeof import('../services/campaigns.service.js').createCampaignsService>,
  *   channelsService: ReturnType<typeof import('../services/channels.service.js').createChannelsService>,
  *   referenceRepository: ReturnType<typeof import('../repositories/reference.repo.js').createReferenceRepository>,
+ *   metrics: {
+ *     loaders: { channelPassport: (req: import('express').Request, options?: { channelId?: string }) =>
+ *       Promise<{ query: object, anchor: string, screen: object }> },
+ *   },
  * }} deps
  */
-export function createCampaignsController({ campaignsService, channelsService, referenceRepository }) {
+export function createCampaignsController({ campaignsService, channelsService, referenceRepository, metrics }) {
   /**
    * @param {import('express').Response} res
    */
@@ -138,9 +143,11 @@ export function createCampaignsController({ campaignsService, channelsService, r
    * @returns {Promise<void>}
    */
   async function renderChannelWithCampaignError(req, res, channelId, { status, error, values }) {
-    const dataAnchor = await referenceRepository.getDataAnchor();
+    let passport;
     let detail;
     try {
+      // The POST has no `:id` route param, so the hidden channel field is passed explicitly to the shared loader.
+      passport = await metrics.loaders.channelPassport(req, { channelId });
       detail = await channelsService.getChannelDetail(channelId);
     } catch (detailError) {
       // The hidden channel id can point at a channel deleted between page load and submit; the list still exists.
@@ -148,10 +155,15 @@ export function createCampaignsController({ campaignsService, channelsService, r
       await renderList(req, res, { status, createError: error, createValues: values });
       return;
     }
+    const { query, anchor: dataAnchor, screen } = passport;
     const channelCampaigns = await campaignsService.listCampaignsForChannel(channelId);
     res.status(status).render('pages/channel-detail', {
       ...buildShellLocals(req, { title: detail.channel.name, activeNav: 'channels', dataAnchor }),
       channel: detail.channel,
+      model: screen,
+      islandEntries: ['channel'],
+      periodControl: buildPeriodControl({ query, period: screen.period }),
+      currentPath: `${req.baseUrl}${req.path}`,
       formValues: detail.form,
       formError: null,
       channelCampaigns,

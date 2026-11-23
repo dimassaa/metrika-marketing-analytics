@@ -43,6 +43,7 @@ export default defineConfig(({ mode }) => {
         input: {
           dashboard: fileURLToPath(new URL('./client/entries/dashboard.jsx', import.meta.url)),
           channels: fileURLToPath(new URL('./client/entries/channels.jsx', import.meta.url)),
+          channel: fileURLToPath(new URL('./client/entries/channel.jsx', import.meta.url)),
         },
         output: {
           entryFileNames: '[name]-[hash].js',

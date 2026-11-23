@@ -11,6 +11,7 @@ import { createImportRateLimiter } from '../middleware/rateLimit.js';
 export const METRICS_API_PERMISSIONS = Object.freeze({
   '/dashboard': 'dashboard:view',
   '/channels': 'channels:view',
+  '/channels/:id': 'channels:view',
   '/ranking': 'channels:view',
 });
 
@@ -48,6 +49,12 @@ export function createApiRouter({ importController, mediaController, metrics }) 
     requireAuth,
     requirePermission(METRICS_API_PERMISSIONS['/channels']),
     metrics.controllers.api.channels,
+  );
+  router.get(
+    '/channels/:id',
+    requireAuth,
+    requirePermission(METRICS_API_PERMISSIONS['/channels/:id']),
+    metrics.controllers.api.channel,
   );
   router.get(
     '/ranking',

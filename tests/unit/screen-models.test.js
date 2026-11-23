@@ -6,9 +6,11 @@ import {
   buildChannelsScreen,
   buildChannelsWeightsControl,
   buildDashboardScreen,
+  buildPassportScreen,
   buildPeriodControl,
 } from '../../src/services/metrics/screen-models.js';
-import { buildRomiByChannelChart } from '../../src/services/metrics/chart-series.js';
+import { buildFunnelSteps, buildRomiByChannelChart } from '../../src/services/metrics/chart-series.js';
+import { heatBucket } from '../../src/lib/heat-scale.js';
 
 const LAST_WEEK = '2026-11-09';
 const FIRST_WEEK = addDays(LAST_WEEK, -7 * 11);
@@ -602,6 +604,242 @@ describe('channels screen model', () => {
 
   it('serialises without a bigint, NaN or Infinity', () => {
     const screen = buildChannelsScreen({ list: channelList(), query: { sort: 'rank', dir: 'desc' } });
+
+    expect(() => JSON.stringify(screen)).not.toThrow();
+    expect(JSON.stringify(screen)).not.toMatch(/NaN|Infinity/);
+  });
+});
+
+describe('passport screen model', () => {
+  /**
+   * @param {object} [overrides]
+   * @returns {object} A passport result in the M3 contract, plus the optional `isActive` flag of the channel.
+   */
+  function passportWith({
+    channel = {
+      id: '4',
+      code: 'instagram',
+      name: 'Instagram',
+      kind: 'paid',
+      targetCacCents: '4500',
+      targetRomiPct: 120,
+    },
+    isActive = true,
+    health = {
+      channelId: '4',
+      code: 'instagram',
+      name: 'Instagram',
+      spendCents: '295953',
+      revenueCents: '2176622',
+      newCustomers: 68,
+      cacCents: '4352',
+      cacLabel: '43,52',
+      ltv12Cents: '14903',
+      ltvLabel: '149,03',
+      romiPct: 635.46,
+      romiLabel: '+635,5%',
+      paybackMonths: 3.5,
+      paybackLabel: '3,5 мес.',
+      ltvCacRatio: 3.424,
+      ratioLabel: '3,424',
+      status: 'healthy',
+      statusLabel: 'В норме',
+    },
+    series = Array.from({ length: 3 }, (_, index) => ({
+      weekStart: addDays('2026-11-09', (index - 2) * 7),
+      weekLabel: `неделя ${index}`,
+      spendCents: '90000',
+      newCustomers: 10,
+      cacCents: '9000',
+      romiPct: 60,
+      attributedCents: '144000',
+      attributedLabel: '1 440,00',
+    })),
+    funnel = { impressions: 120000, clicks: 3200, leads: 160, newCustomers: 10, orders: 14 },
+    campaigns = [
+      {
+        id: '41',
+        code: 'ig_warm',
+        name: 'Instagram тёплый',
+        status: 'active',
+        spendCents: '60000',
+        newCustomers: 6,
+        cacCents: '10000',
+      },
+    ],
+  } = {}) {
+    return {
+      channel,
+      isActive,
+      period: { from: '2026-10-23', to: '2026-11-21', days: 30, anchor: '2026-11-21' },
+      health,
+      series,
+      funnel,
+      campaigns,
+    };
+  }
+
+  /**
+   * @returns {object} A cohort matrix with one complete and one incomplete row.
+   */
+  function matrixWith() {
+    return {
+      horizonMonths: 2,
+      anchor: '2026-11-21',
+      cohorts: [
+        {
+          cohortMonth: '2026-09-01',
+          cohortLabel: 'сен 2026',
+          cohortSize: 10,
+          ltvCents: '10000',
+          ltvLabel: '100,00',
+          isComplete: true,
+          monthsObserved: 2,
+          cells: [
+            { monthOffset: 0, retentionPct: 100, cumLtvCents: '4000' },
+            { monthOffset: 1, retentionPct: 50, cumLtvCents: '10000' },
+          ],
+        },
+        {
+          cohortMonth: '2026-11-01',
+          cohortLabel: 'ноя 2026',
+          cohortSize: 4,
+          ltvCents: null,
+          ltvLabel: '—',
+          isComplete: false,
+          monthsObserved: 1,
+          cells: [
+            { monthOffset: 0, retentionPct: 25, cumLtvCents: null },
+            { monthOffset: 1, retentionPct: null, cumLtvCents: null },
+          ],
+        },
+      ],
+      channelLtv: [],
+      excludedIncomplete: [],
+    };
+  }
+
+  it('keeps the health row and the period label unchanged', () => {
+    const passport = passportWith();
+    const screen = buildPassportScreen({
+      passport,
+      matrix: matrixWith(),
+      funnelSteps: buildFunnelSteps(passport.funnel),
+    });
+
+    expect(screen.page).toBe('channel');
+    expect(screen.channel).toMatchObject({ id: '4', name: 'Instagram', kindLabel: 'Платный', isActive: true });
+    expect(screen.health).toEqual(passport.health);
+    expect(screen.period).toMatchObject({ from: '2026-10-23', to: '2026-11-21', days: 30, label: '30 дней' });
+  });
+
+  it('builds CAC, ROMI and spend/revenue charts from the same passport series', () => {
+    const passport = passportWith();
+    const screen = buildPassportScreen({ passport, matrix: matrixWith() });
+
+    expect(Object.keys(screen.charts)).toEqual(['cac', 'romi', 'spendRevenue']);
+    expect(screen.charts.cac.series).toHaveLength(3);
+    expect(screen.charts.romi.hasData).toBe(true);
+    expect(screen.charts.spendRevenue.hasData).toBe(true);
+    expect(screen.charts.spendRevenue.table.rows).toHaveLength(3);
+  });
+
+  it('maps the retention matrix without losing rows, partial flags or heat buckets', () => {
+    const matrix = matrixWith();
+    const screen = buildPassportScreen({ passport: passportWith(), matrix });
+
+    expect(screen.retention.horizonMonths).toBe(2);
+    expect(screen.retention.cohorts).toHaveLength(matrix.cohorts.length);
+    expect(screen.retention.cohorts.map((cohort) => cohort.cohortMonth)).toEqual(
+      matrix.cohorts.map((cohort) => cohort.cohortMonth),
+    );
+    expect(screen.retention.cohorts[0].isPartial).toBe(false);
+    expect(screen.retention.cohorts[1].isPartial).toBe(true);
+    expect(screen.retention.incompleteCount).toBe(1);
+    expect(screen.retention.cohorts[0].cells[1]).toMatchObject({
+      retentionPct: 50,
+      retentionLabel: '50,0%',
+      heatClass: heatBucket(50),
+      cumLtvLabel: '100,00',
+    });
+    expect(screen.retention.cohorts[1].cells[1]).toMatchObject({
+      retentionPct: null,
+      retentionLabel: '—',
+      heatClass: 'is-empty',
+    });
+    expect(screen.retention.hasData).toBe(true);
+  });
+
+  it('keeps the period CAC of campaigns instead of the lifetime spend', () => {
+    const screen = buildPassportScreen({ passport: passportWith(), matrix: matrixWith() });
+
+    expect(screen.campaigns).toEqual([
+      expect.objectContaining({ id: '41', spendCents: '60000', cacCents: '10000', newCustomers: 6 }),
+    ]);
+  });
+
+  it('compares ready fact and target values for CAC and ROMI', () => {
+    const screen = buildPassportScreen({ passport: passportWith(), matrix: matrixWith() });
+    const targets = Object.fromEntries(screen.targets.map((target) => [target.metric, target]));
+
+    expect(targets.cac).toMatchObject({
+      targetLabel: '45,00',
+      factLabel: '43,52',
+      unit: 'BYN',
+      tone: 'good',
+    });
+    expect(targets.romi).toMatchObject({ targetLabel: '120,0%', factLabel: '+635,5%', tone: 'good' });
+
+    const overTarget = passportWith({
+      health: { ...passportWith().health, cacCents: '5000', cacLabel: '50,00', romiPct: 90, romiLabel: '+90,0%' },
+    });
+    const worse = buildPassportScreen({ passport: overTarget, matrix: matrixWith() });
+    expect(worse.targets.find((target) => target.metric === 'cac').tone).toBe('bad');
+    expect(worse.targets.find((target) => target.metric === 'romi').tone).toBe('bad');
+  });
+
+  it('leaves the target tone unset when a target or a fact is missing', () => {
+    const passport = passportWith({
+      channel: {
+        id: '4',
+        code: 'instagram',
+        name: 'Instagram',
+        kind: 'paid',
+        targetCacCents: null,
+        targetRomiPct: null,
+      },
+      health: {
+        ...passportWith().health,
+        cacCents: null,
+        cacLabel: '—',
+        romiPct: null,
+        romiLabel: '—',
+        status: 'no_data',
+        statusLabel: 'Мало данных',
+      },
+    });
+    const screen = buildPassportScreen({ passport, matrix: { horizonMonths: 2, anchor: '2026-11-21', cohorts: [] } });
+
+    expect(screen.targets.map((target) => target.tone)).toEqual([null, null]);
+    expect(screen.targets.map((target) => target.targetLabel)).toEqual(['—', '—']);
+    expect(screen.retention.hasData).toBe(false);
+  });
+
+  it('marks an archived channel and builds a funnel with a safe meter maximum', () => {
+    const zero = passportWith({
+      isActive: false,
+      funnel: { impressions: 0, clicks: 0, leads: 0, newCustomers: 0, orders: 0 },
+    });
+    const screen = buildPassportScreen({ passport: zero, matrix: matrixWith() });
+
+    expect(screen.channel).toMatchObject({ isActive: false, statusLabel: 'В архиве' });
+    expect(screen.funnel.hasData).toBe(false);
+    expect(screen.funnel.meterMax).toBe(1);
+    expect(screen.funnel.stages.every((stage) => stage.meterMax >= 1)).toBe(true);
+  });
+
+  it('serialises without a bigint, NaN or Infinity', () => {
+    const screen = buildPassportScreen({ passport: passportWith(), matrix: matrixWith() });
 
     expect(() => JSON.stringify(screen)).not.toThrow();
     expect(JSON.stringify(screen)).not.toMatch(/NaN|Infinity/);

@@ -1,11 +1,15 @@
 import { METRICS_CONFIG } from '../../config/metrics.js';
 import { formatDateRu } from '../../lib/dates.js';
+import { formatCentsToByn, formatPercent } from '../../lib/format.js';
+import { heatBucket } from '../../lib/heat-scale.js';
+import { CHANNEL_KIND_LABELS } from '../../lib/metrics-labels.js';
 import { buildQueryString } from '../../lib/query.js';
 import { CHANNEL_SORT_FIELDS } from '../../lib/sort-rows.js';
 import {
   buildCacChart,
   buildCacLtvScatter,
   buildChannelSpendChart,
+  buildFunnelSteps,
   buildRomiChart,
   buildSpendRevenueChart,
   daysLabel,
@@ -121,6 +125,181 @@ export function buildDashboardScreen({ summary, channelIds = null }) {
       anchor: summary.period.anchor,
       filter: filterLabel,
     },
+  };
+}
+
+/**
+ * Compares a fact with its target without inventing a value when either side is missing.
+ *
+ * CAC is better when it is lower and ROMI is better when it is higher, so the two metrics cannot share one generic
+ * comparator. The comparison uses the exact kopeck strings and the numeric percentage, not the display labels: a fact
+ * of `43,999` must not become "good" merely because it rounds to `44,00`.
+ *
+ * @param {string | null} factCents
+ * @param {string | null} targetCents
+ * @returns {'good' | 'bad' | null}
+ */
+function compareCacTarget(factCents, targetCents) {
+  if (factCents === null || targetCents === null) return null;
+  return BigInt(factCents) <= BigInt(targetCents) ? 'good' : 'bad';
+}
+
+/**
+ * @param {number | null} factPct
+ * @param {number | null} targetPct
+ * @returns {'good' | 'bad' | null}
+ */
+function compareRomiTarget(factPct, targetPct) {
+  if (factPct === null || targetPct === null) return null;
+  return factPct >= targetPct ? 'good' : 'bad';
+}
+
+/**
+ * Builds the two target rows of the passport. Labels are ready strings, so React never compares raw values or adds
+ * a unit of its own.
+ *
+ * @param {{ channel: object, health: object }} input
+ * @returns {Array<{
+ *   metric: 'cac' | 'romi',
+ *   label: string,
+ *   targetLabel: string,
+ *   factLabel: string,
+ *   unit: 'BYN' | null,
+ *   tone: 'good' | 'bad' | null,
+ * }>}
+ */
+function buildPassportTargets({ channel, health }) {
+  return [
+    {
+      metric: 'cac',
+      label: 'Целевой CAC',
+      targetLabel: formatCentsToByn(channel.targetCacCents),
+      factLabel: health.cacLabel ?? formatCentsToByn(health.cacCents),
+      unit: 'BYN',
+      tone: compareCacTarget(health.cacCents, channel.targetCacCents),
+    },
+    {
+      metric: 'romi',
+      label: 'Целевой ROMI',
+      targetLabel: formatPercent(channel.targetRomiPct),
+      factLabel: health.romiLabel ?? formatPercent(health.romiPct),
+      unit: null,
+      tone: compareRomiTarget(health.romiPct, channel.targetRomiPct),
+    },
+  ];
+}
+
+/**
+ * Renders the cohort matrix as the retention grid of the passport.
+ *
+ * The rows are the M3 matrix rows unchanged in meaning: a partial cohort stays visible and is flagged instead of
+ * being dropped. The colour class comes from the shared `heatBucket`, so the passport and the cohorts screen cannot
+ * disagree about the same percentage. A future cell keeps `retentionPct: null` and gets the empty class.
+ *
+ * @param {{
+ *   horizonMonths: number,
+ *   anchor: string,
+ *   cohorts: Array<{
+ *     cohortMonth: string, cohortLabel: string, cohortSize: number,
+ *     ltvCents: string | null, ltvLabel: string, isComplete: boolean, monthsObserved: number,
+ *     cells: Array<{ monthOffset: number, retentionPct: number | null, cumLtvCents: string | null }>,
+ *   }>,
+ * }} matrix
+ * @returns {object}
+ */
+function buildPassportRetention(matrix) {
+  const cohorts = matrix.cohorts.map((cohort) => ({
+    cohortMonth: cohort.cohortMonth,
+    cohortLabel: cohort.cohortLabel,
+    cohortSize: cohort.cohortSize,
+    ltvCents: cohort.ltvCents,
+    ltvLabel: cohort.ltvLabel,
+    isComplete: cohort.isComplete,
+    isPartial: !cohort.isComplete,
+    monthsObserved: cohort.monthsObserved,
+    cells: cohort.cells.map((cell) => ({
+      monthOffset: cell.monthOffset,
+      retentionPct: cell.retentionPct,
+      retentionLabel: formatPercent(cell.retentionPct),
+      heatClass: heatBucket(cell.retentionPct),
+      cumLtvCents: cell.cumLtvCents,
+      cumLtvLabel: formatCentsToByn(cell.cumLtvCents),
+    })),
+  }));
+
+  return {
+    horizonMonths: matrix.horizonMonths,
+    anchor: matrix.anchor,
+    cohorts,
+    hasData: cohorts.length > 0,
+    incompleteCount: cohorts.filter((cohort) => cohort.isPartial).length,
+  };
+}
+
+/**
+ * Builds the channel passport screen model (BO-01, BO-03, BO-06).
+ *
+ * The health row is copied verbatim from M3: recomputing CAC/LTV/ROMI here would be a second formula that could
+ * disagree with the channel table and the KPI above. The charts reuse the same weekly series and the same spend/
+ * attributed-revenue fields as the dashboard, and the funnel is a loss-free presentation of the M3 aggregate.
+ *
+ * @param {{
+ *   passport: {
+ *     channel: { id: string, code: string, name: string, kind: string,
+ *       targetCacCents: string | null, targetRomiPct: number | null },
+ *     isActive?: boolean,
+ *     period: { from: string, to: string, days: number, anchor: string },
+ *     health: object,
+ *     series: object[],
+ *     funnel: object,
+ *     campaigns: object[],
+ *   },
+ *   matrix: object,
+ *   funnelSteps?: object,
+ * }} input `funnelSteps` is optional so a caller that already built it can pass it; otherwise it is built from the
+ *   passport funnel with the same pure function.
+ * @returns {{
+ *   page: 'channel',
+ *   channel: object,
+ *   period: { from: string, to: string, days: number, anchor: string, label: string },
+ *   health: object,
+ *   charts: { cac: object, romi: object, spendRevenue: object },
+ *   retention: object,
+ *   funnel: object,
+ *   campaigns: object[],
+ *   targets: object[],
+ *   labels: { period: string, weeks: string },
+ * }}
+ */
+export function buildPassportScreen({ passport, matrix, funnelSteps = buildFunnelSteps(passport.funnel) }) {
+  const periodLabel = daysLabel(passport.period.days);
+  const channel = {
+    id: passport.channel.id,
+    code: passport.channel.code,
+    name: passport.channel.name,
+    kind: passport.channel.kind,
+    kindLabel: CHANNEL_KIND_LABELS[passport.channel.kind] ?? passport.channel.kind,
+    isActive: passport.isActive !== false,
+    statusLabel: passport.isActive === false ? 'В архиве' : 'Активен',
+    targetCacCents: passport.channel.targetCacCents,
+    targetRomiPct: passport.channel.targetRomiPct,
+  };
+
+  return {
+    page: 'channel',
+    channel,
+    period: { ...passport.period, label: periodLabel },
+    health: passport.health,
+    charts: {
+      cac: buildCacChart({ weeklySeries: passport.series }),
+      romi: buildRomiChart({ weeklySeries: passport.series }),
+      spendRevenue: buildSpendRevenueChart({ weeklySeries: passport.series }),
+    },
+    retention: buildPassportRetention(matrix),
+    funnel: funnelSteps,
+    campaigns: passport.campaigns,
+    targets: buildPassportTargets({ channel: passport.channel, health: passport.health }),
+    labels: { period: periodLabel, weeks: weeksLabel(passport.series.length) },
   };
 }
 

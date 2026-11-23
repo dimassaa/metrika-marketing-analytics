@@ -4,16 +4,17 @@ import { createChannelsRepository } from '../../repositories/channels.repo.js';
 import { createCohortsRepository } from '../../repositories/cohorts.repo.js';
 import { createMetricsRepository } from '../../repositories/metrics.repo.js';
 import { createMetricsApiController } from '../../controllers/api/metrics.controller.js';
-import { createChannelsScreenLoader } from '../../controllers/channels.controller.js';
+import { createChannelPassportLoader, createChannelsScreenLoader } from '../../controllers/channels.controller.js';
 import { createDashboardController } from '../../controllers/dashboard.controller.js';
 import { createAttributionService } from './attribution.service.js';
 import { createCacService } from './cac.service.js';
 import { createChannelListService } from './channel-list.service.js';
+import { createChannelPassportService } from './channel-passport.service.js';
 import { createDashboardService } from './dashboard.service.js';
 import { createLtvService } from './ltv.service.js';
 import { createRankingService } from './ranking.service.js';
 import { createChannelHealthService } from './romi.service.js';
-import { buildChannelsScreen, buildDashboardScreen } from './screen-models.js';
+import { buildChannelsScreen, buildDashboardScreen, buildPassportScreen } from './screen-models.js';
 import { channelsQuerySchema } from '../../validators/metrics.schema.js';
 
 /**
@@ -79,6 +80,13 @@ export function createMetricsModule({ db, referenceRepository = null } = {}) {
     metricsRepository: repository,
     channelsRepository,
   });
+  const channelPassportService = createChannelPassportService({
+    healthService: channelHealthService,
+    metricsRepository: repository,
+    attributionService,
+    channelsRepository,
+    campaignsRepository,
+  });
 
   const services = {
     cac: cacService,
@@ -88,8 +96,13 @@ export function createMetricsModule({ db, referenceRepository = null } = {}) {
     ranking: rankingService,
     dashboard: dashboardService,
     channelList: channelListService,
+    channelPassport: channelPassportService,
   };
-  const screenModels = { dashboard: buildDashboardScreen, channels: buildChannelsScreen };
+  const screenModels = {
+    dashboard: buildDashboardScreen,
+    channels: buildChannelsScreen,
+    passport: buildPassportScreen,
+  };
   const loaders = {
     channels: createChannelsScreenLoader({ services, screenModels, referenceRepository }),
     channelsApi: createChannelsScreenLoader({
@@ -98,11 +111,13 @@ export function createMetricsModule({ db, referenceRepository = null } = {}) {
       referenceRepository,
       schema: channelsQuerySchema,
     }),
+    channelPassport: createChannelPassportLoader({ services, screenModels, referenceRepository }),
   };
   const dashboardController = createDashboardController({ services, screenModels, referenceRepository });
   const apiController = createMetricsApiController({
     dashboardController,
     channelsScreenLoader: loaders.channelsApi,
+    channelPassportScreenLoader: loaders.channelPassport,
     rankingService,
     referenceRepository,
   });

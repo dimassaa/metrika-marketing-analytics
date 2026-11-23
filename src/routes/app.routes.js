@@ -55,10 +55,14 @@ export function createAppRouter({
   const channelsController = createChannelsController({
     channelsService,
     campaignsService,
+    metrics,
+  });
+  const campaignsController = createCampaignsController({
+    campaignsService,
+    channelsService,
     referenceRepository,
     metrics,
   });
-  const campaignsController = createCampaignsController({ campaignsService, channelsService, referenceRepository });
   const goalsController = createGoalsController({ goalsService, channelsService, referenceRepository });
   const exportController = createExportController({ exportService, auditService });
   const router = Router();

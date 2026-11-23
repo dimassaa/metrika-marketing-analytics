@@ -75,6 +75,7 @@ export function createChannelPassportService({
      *     id: string, code: string, name: string, kind: string,
      *     targetCacCents: string | null, targetRomiPct: number | null,
      *   },
+     *   isActive: boolean,
      *   period: { from: string, to: string, days: number, anchor: string },
      *   health: object,
      *   series: Array<{
@@ -166,6 +167,9 @@ export function createChannelPassportService({
           targetCacCents: centsToApi(channel.targetCacCents),
           targetRomiPct: targetRomiValue(channel.targetRomiPct),
         },
+        // Top-level, next to the identity object: the screen needs the archive badge and the M3 channel object
+        // remains the stable identity contract asserted by the existing passport test.
+        isActive: channel.isActive,
         period: { from: period.from, to: period.to, days: period.days, anchor: anchorDate },
         health: healthRow,
         series: buildWeeklySeries({ firstWeekStart, weeks: METRICS_CONFIG.dashboard.weeks, weeklyRows, attributedRows }),

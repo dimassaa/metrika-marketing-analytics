@@ -9,7 +9,7 @@ import {
   buildChannelsWeightsControl,
   buildPeriodControl,
 } from '../services/metrics/screen-models.js';
-import { channelsPageQuerySchema } from '../validators/metrics.schema.js';
+import { channelsPageQuerySchema, periodQuerySchema } from '../validators/metrics.schema.js';
 import {
   channelCreateSchema,
   channelFormValues,
@@ -100,19 +100,71 @@ export function createChannelsScreenLoader({
 }
 
 /**
+ * Loads the channel passport screen once for both the page and the JSON API.
+ *
+ * Sharing the loader is what keeps `data-props` and `/api/v1/channels/:id` identical. The period is resolved here,
+ * from the data anchor, and every service receives concrete `{ from, to }` bounds; the cohort matrix is anchored the
+ * same way but has no day window of its own. Malformed ids become the same 404 as a missing channel, because a
+ * hand-typed URL must not expose a different failure than a stale link.
+ *
+ * @param {{
+ *   services: {
+ *     channelPassport: { getChannelPassport: Function },
+ *     ltv: { getCohortMatrix: Function },
+ *   },
+ *   screenModels: { passport: Function },
+ *   referenceRepository: ReturnType<typeof import('../repositories/reference.repo.js').createReferenceRepository>,
+ * }} deps
+ * @returns {(req: import('express').Request, options?: { channelId?: string }) => Promise<{
+ *   query: object, anchor: string, period: object, screen: object,
+ * }>} The optional `channelId` lets the campaign quick-add error path render the passport for its hidden channel
+ *   field, where `req.params.id` does not exist.
+ * @throws {import('../lib/errors.js').ValidationError} When the period query is invalid.
+ * @throws {import('../lib/errors.js').NotFoundError} When the id is malformed or the channel does not exist.
+ */
+export function createChannelPassportLoader({ services, screenModels, referenceRepository }) {
+  return async function load(req, { channelId: explicitChannelId } = {}) {
+    const channelId = parseChannelId(explicitChannelId ?? req.params.id);
+    if (channelId === null) throw new NotFoundError('Канал не найден');
+
+    const query = parseQuery(periodQuerySchema, req.query);
+    const anchor = await referenceRepository.getDataAnchor();
+    const period = resolvePeriod({ anchor, days: query.days, from: query.from, to: query.to });
+
+    const passport = await services.channelPassport.getChannelPassport({
+      anchor,
+      channelId,
+      from: period.from,
+      to: period.to,
+    });
+    // The matrix is a cohort view of the same anchor; it deliberately ignores the day window of the passport.
+    const matrix = await services.ltv.getCohortMatrix({ anchor, channelId });
+
+    return {
+      query,
+      anchor,
+      period,
+      screen: screenModels.passport({ passport, matrix }),
+    };
+  };
+}
+
+/**
  * Channel screens. Handlers translate HTTP only: parse with Zod, call one service method, render or redirect.
  * @param {{
  *   channelsService: ReturnType<typeof import('../services/channels.service.js').createChannelsService>,
  *   campaignsService: ReturnType<typeof import('../services/campaigns.service.js').createCampaignsService>,
- *   referenceRepository: ReturnType<typeof import('../repositories/reference.repo.js').createReferenceRepository>,
  *   metrics: {
  *     services: object,
  *     screenModels: object,
- *     loaders: { channels: (req: import('express').Request) => Promise<object> },
+ *     loaders: {
+ *       channels: (req: import('express').Request) => Promise<object>,
+ *       channelPassport: (req: import('express').Request) => Promise<object>,
+ *     },
  *   },
  * }} deps
  */
-export function createChannelsController({ channelsService, campaignsService, referenceRepository, metrics }) {
+export function createChannelsController({ channelsService, campaignsService, metrics }) {
   /**
    * @param {import('express').Response} res
    */
@@ -179,13 +231,18 @@ export function createChannelsController({ channelsService, campaignsService, re
    * @param {{ status?: number, error?: string | null, values?: object }} [options]
    */
   async function renderDetail(req, res, id, { status = 200, error = null, values } = {}) {
-    const dataAnchor = await referenceRepository.getDataAnchor();
+    const { query, anchor: dataAnchor, screen } = await metrics.loaders.channelPassport(req);
     const detail = await channelsService.getChannelDetail(id);
-    // The passport shows this channel's campaigns and the quick-add form posts back into the campaigns controller.
+    // The M2 management table and its quick-add form stay on the page; the island adds the period CAC table.
     const channelCampaigns = await campaignsService.listCampaignsForChannel(id);
     res.status(status).render('pages/channel-detail', {
       ...buildShellLocals(req, { title: detail.channel.name, activeNav: 'channels', dataAnchor }),
       channel: detail.channel,
+      model: screen,
+      islandEntries: ['channel'],
+      // The topbar period form changes `days` without dropping any other query key; this page has no other filter.
+      periodControl: buildPeriodControl({ query, period: screen.period }),
+      currentPath: `${req.baseUrl}${req.path}`,
       formValues: values ?? detail.form,
       formError: error,
       channelCampaigns,

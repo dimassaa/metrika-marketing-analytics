@@ -1,4 +1,5 @@
-import { formatCentsToByn, formatInteger, formatRomi } from '../../lib/format.js';
+import { formatCentsToByn, formatInteger, formatPercent, formatRomi } from '../../lib/format.js';
+import { roundNumber } from '../../lib/metrics-math.js';
 import {
   hasPlottableData,
   toCacPoints,
@@ -334,6 +335,96 @@ export function toSparklinePoints(weeklyCacRows) {
     weekLabel: row.weekLabel,
     value: sparkValue(row.cacCents),
   }));
+}
+
+/**
+ * The five funnel stages in acquisition order. The order is a product decision, not a property of the query, so it
+ * lives in one frozen list instead of being derived from object keys.
+ */
+const FUNNEL_STAGES = Object.freeze([
+  { key: 'impressions', label: 'Показы' },
+  { key: 'clicks', label: 'Клики' },
+  { key: 'leads', label: 'Лиды' },
+  { key: 'newCustomers', label: 'Новые клиенты' },
+  { key: 'orders', label: 'Заказы' },
+]);
+
+/**
+ * @param {unknown} value
+ * @param {string} key
+ * @returns {number}
+ * @throws {TypeError} When a stage is not a non-negative integer.
+ */
+function requireFunnelCount(value, key) {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new TypeError(`funnel ${key} must be a non-negative integer, got ${JSON.stringify(value)}`);
+  }
+  return value;
+}
+
+/**
+ * Screen model of the channel funnel.
+ *
+ * `sharePct` divides every stage by impressions, because impressions are the only stage every source measures from
+ * the same starting point. The stages themselves come from different tables (statistics, customers, orders), so a
+ * later stage can legitimately exceed the number of impressions; clipping at 100 would hide that inconsistency
+ * instead of exposing it. A zero-impression funnel has no meaningful share and reports `null`.
+ *
+ * `<meter max="0">` is invalid and makes every browser render a full bar, so the display maximum is at least 1 even
+ * for a completely empty funnel. The value stays the raw count; the meter maximum is the largest stage.
+ *
+ * @param {{ impressions: number, clicks: number, leads: number, newCustomers: number, orders: number }} funnel
+ * @returns {{
+ *   id: 'funnel',
+ *   title: string,
+ *   caption: string,
+ *   ariaLabel: string,
+ *   unit: null,
+ *   hasData: boolean,
+ *   scaleMax: number,
+ *   meterMax: number,
+ *   stages: Array<{
+ *     key: string, label: string, value: number, valueLabel: string,
+ *     sharePct: number | null, shareLabel: string, meterMax: number,
+ *   }>,
+ * }}
+ * @throws {TypeError} When a stage is negative or fractional.
+ */
+export function buildFunnelSteps(funnel) {
+  if (funnel === null || typeof funnel !== 'object') {
+    throw new TypeError('buildFunnelSteps requires a funnel object');
+  }
+
+  const stages = FUNNEL_STAGES.map((stage) => ({
+    ...stage,
+    value: requireFunnelCount(funnel[stage.key], stage.key),
+  }));
+  const scaleMax = stages.reduce((max, stage) => Math.max(max, stage.value), 0);
+  const meterMax = Math.max(1, scaleMax);
+  const impressions = funnel.impressions;
+
+  const detail = `${stages.length} этапов · максимум ${formatInteger(scaleMax)}`;
+  return {
+    id: 'funnel',
+    title: 'Воронка канала',
+    caption: `Воронка канала · ${detail}`,
+    ariaLabel: `Воронка канала: ${detail}`,
+    unit: null,
+    hasData: scaleMax > 0,
+    scaleMax,
+    meterMax,
+    stages: stages.map((stage) => {
+      const sharePct =
+        impressions === 0 ? null : roundNumber((stage.value * 100) / impressions, 2);
+      return {
+        ...stage,
+        valueLabel: formatInteger(stage.value),
+        sharePct,
+        shareLabel: formatPercent(sharePct),
+        meterMax,
+      };
+    }),
+  };
 }
 
 /**

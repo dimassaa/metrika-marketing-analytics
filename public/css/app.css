@@ -2432,3 +2432,230 @@ input[type='file'] {
   outline: 2px solid var(--color-cyan-edge);
   outline-offset: 2px;
 }
+
+/* Channel passport: target comparison, funnel and retention matrix. The colours are tokens only; heat cells mix the
+   single cyan accent with white, so no second palette appears in the stylesheet. */
+.target__status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-8);
+  color: var(--color-warm-gray);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.target__status::before {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: currentColor;
+}
+
+.target__status--good {
+  color: var(--color-status-healthy);
+}
+
+.target__status--bad {
+  color: var(--color-status-risk);
+}
+
+.target__status--none {
+  color: var(--color-ash-gray);
+}
+
+.funnel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-12);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.funnel__stage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-4);
+  padding-bottom: var(--spacing-12);
+  border-bottom: 1px solid var(--color-stone-border);
+}
+
+.funnel__stage:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.funnel__head,
+.funnel__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-12);
+}
+
+.funnel__label {
+  color: var(--color-ink-black);
+  font-size: 14px;
+}
+
+.funnel__value {
+  color: var(--color-ink-black);
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.funnel__meter {
+  flex: 1;
+  width: 100%;
+  height: 12px;
+  overflow: hidden;
+  border: 1px solid var(--color-stone-border);
+  border-radius: var(--radius-pill);
+  background-color: var(--color-stone-canvas);
+  appearance: none;
+}
+
+/* Native meters ignore `accent-color` in Chromium and fall back to the browser's green/red scale, which would misuse
+   the status palette. The explicit pseudo-elements keep the single cyan accent and the hairline frame. */
+.funnel__meter::-webkit-meter-bar {
+  height: 10px;
+  border: 0;
+  background-color: var(--color-stone-canvas);
+}
+
+.funnel__meter::-webkit-meter-optimum-value,
+.funnel__meter::-webkit-meter-suboptimum-value,
+.funnel__meter::-webkit-meter-even-less-good-value {
+  height: 10px;
+  background-color: var(--color-cyan-signal) !important;
+  background-image: none !important;
+}
+
+.funnel__meter::-moz-meter-bar {
+  border-radius: var(--radius-pill);
+  background-color: var(--color-cyan-signal);
+}
+
+.funnel__share {
+  flex: none;
+  min-width: 136px;
+  color: var(--color-warm-gray);
+  font-size: 12px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.matrix-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--color-stone-border);
+  border-radius: var(--radius-cards);
+}
+
+.matrix {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.matrix th,
+.matrix td {
+  padding: var(--spacing-8) var(--spacing-12);
+  border-bottom: 1px solid var(--color-stone-border);
+  white-space: nowrap;
+}
+
+.matrix thead th {
+  background-color: var(--color-pure-white);
+  color: var(--color-warm-gray);
+  font-weight: 400;
+  text-align: right;
+}
+
+.matrix thead th:first-child {
+  text-align: left;
+}
+
+.matrix tbody tr:last-child th,
+.matrix tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.matrix__cohort {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background-color: var(--color-pure-white);
+  color: var(--color-ink-black);
+  font-weight: 500;
+  text-align: left;
+}
+
+.matrix__month {
+  width: 48px;
+  text-align: center !important;
+}
+
+.matrix__cell {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.matrix tr.is-partial .matrix__cohort {
+  border-left: 2px dashed var(--color-ash-gray);
+}
+
+.matrix__partial {
+  display: block;
+  color: var(--color-warm-gray);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.matrix__note {
+  margin: 0;
+  color: var(--color-warm-gray);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.heat-0 {
+  background-color: color-mix(in srgb, var(--color-cyan-signal) 6%, var(--color-pure-white));
+}
+
+.heat-1 {
+  background-color: color-mix(in srgb, var(--color-cyan-signal) 20%, var(--color-pure-white));
+}
+
+.heat-2 {
+  background-color: color-mix(in srgb, var(--color-cyan-signal) 38%, var(--color-pure-white));
+}
+
+.heat-3 {
+  background-color: color-mix(in srgb, var(--color-cyan-signal) 58%, var(--color-pure-white));
+}
+
+.heat-4 {
+  background-color: color-mix(in srgb, var(--color-cyan-signal) 78%, var(--color-pure-white));
+}
+
+.matrix__cell.is-empty {
+  background-color: var(--color-stone-canvas);
+  color: var(--color-ash-gray);
+}
+
+@media (max-width: 768px) {
+  .funnel__share {
+    min-width: 104px;
+    font-size: 11px;
+  }
+
+  .matrix {
+    min-width: 640px;
+  }
+}
