@@ -274,9 +274,9 @@ PostgreSQL 18.6 и Compose-стенд; Windows недоступен.
 
 ```text
 $ npx vitest run tests/unit/backup-format.test.js tests/integration/backup-restore.test.js
-✓ tests/unit/backup-format.test.js (35 tests)
+✓ tests/unit/backup-format.test.js (47 tests)
 ✓ tests/integration/backup-restore.test.js (3 tests)
-Tests  38 passed (38)
+Tests  50 passed (50)
 ```
 
 Unit: потоковый round-trip (включая проверку, что `.tmp` растёт до конца входного потока), ровно `v/alg/iv` в
@@ -379,7 +379,34 @@ no password in argv
 Удалён устаревший временный каталог: …/tmp/metrika-restore-stale
 ```
 
-### 5. Мелкие правки по ревью T1
+### 5. Password-auth regression (`connectionString` + `password`)
+
+`pg` parses `connectionString` after merging explicit options, so `new pg.Client({ connectionString: passwordless,
+password })` produced `connectionParameters.password === null`. The fix builds an explicit config (`host`, `port`,
+`user`, `database`, `ssl`, optional libpq fields) and sets `password` last; `connectionString` is never passed with
+`password`. The unit test asserts `new pg.Client(config).connectionParameters.password` directly, so local `trust`
+auth cannot hide the regression.
+
+Final container rebuild `metrika-app:latest` = `5d0695aa94fe`; the Compose stand uses password auth for both
+`DATABASE_URL` and `ADMIN_DATABASE_URL`:
+
+```text
+$ docker compose exec -T app node scripts/backup.js
+pg_dump (PostgreSQL) 18.7 (Debian 18.7-1.pgdg12+5); сервер PostgreSQL 18.7; БД metrika
+Бэкап создан: /backup/metrika-2026-11-24T09-25-08Z.dump.enc (695.6 КиБ)
+
+$ docker compose exec -T -e ADMIN_DATABASE_URL=postgres://postgres:postgres@db:5432/postgres \
+    app node scripts/restore.js --file /backup/<file> --database metrika_regression_check --create --verify
+Создана scratch-база "metrika_regression_check".
+users 3/3, channels 8/8, campaigns 32/32, customers 4000/4000,
+orders 9446/9446, daily_stats 12723/12723, audit_log 0/0
+Проверка row-count + key checksum: совпадает (7 таблиц).
+final_container_password_restore_exit=0
+```
+
+Scratch-база удалена, `/app/data/tmp` пуст.
+
+### 6. Мелкие правки по ревью T1
 
 - `docker/entrypoint.sh` получил executable-бит (`100755`); содержимое не менялось.
 - В `docs/deployment.md` добавлена сверка SHA-256 для скачиваемого Compose-плагина.
@@ -387,6 +414,55 @@ no password in argv
   точки входа, а не разная трактовка значения.
 - В таблицу переменных добавлены `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB` и предупреждение о символах
   `@ : / ?` в неpercent-encoded `DATABASE_URL`.
+
+## Task 4 — доступность и мобильная ширина
+
+Дата прогона: 24.11.2026. База: `54ceeaa` + рабочее дерево Task 4. Linux (CachyOS), Chromium через `agent-browser`.
+Метод: WCAG 2.1 relative luminance по фактическим токенам `public/css/app.css` (`tests/unit/contrast.test.js`), затем
+точечная сверка через `getComputedStyle` в браузере на живом стенде.
+
+### 1. Контраст токенов
+
+Порог текста 4,5:1, нетекстовых элементов 3:1.
+
+| Пара | Отношение | Порог | Итог |
+|---|---:|---:|---|
+| `#0c0a09` на `#ffffff` | 19,76 | 4,5 | ok |
+| `#0c0a09` на `#fafaf9` | 18,92 | 4,5 | ok |
+| `#1c1917` на `#ffffff` | 17,49 | 4,5 | ok |
+| `#1c1917` на `#fafaf9` | 16,74 | 4,5 | ok |
+| `#78716c` на `#ffffff` | 4,80 | 4,5 | ok |
+| `#78716c` на `#fafaf9` | 4,59 | 4,5 | ok |
+| `#2f7d5f` (healthy) на `#ffffff` | 4,98 | 4,5 | ok |
+| `#a16207` (watch) на `#ffffff` | 4,92 | 4,5 | ok |
+| `#b91c1c` (risk) на `#ffffff` | 6,47 | 4,5 | ok |
+
+`#a8a29e` (ash gray) на белом — 2,52:1, поэтому им окрашены только disabled-поля; смысловой текст и иконки
+используют `#78716c`. Статусные точки — `currentColor` рядом с текстом статуса, не единственный носитель смысла.
+
+### 2. Кольцо фокуса
+
+| Пара | Отношение | Порог |
+|---|---:|---:|
+| `#3398e1` на `#ffffff` | 3,13 | 3 |
+| `#3398e1` на `#fafaf9` | **2,99** | 3 — не проходит |
+| `#2f8bd0` (`--color-cyan-focus`) на `#ffffff` | 3,67 | 3 |
+| `#2f8bd0` на `#fafaf9` | 3,51 | 3 |
+
+Поэтому кольцо фокуса — `#2f8bd0`, а не брендовый `#3398e1`: на canvas брендовый cyan даёт 2,99:1. Линии графиков
+остаются `#3398e1` (3,13:1 на белой карточке).
+
+### 3. Записанное исключение владельца
+
+Highlight-пара `#3398e1` на `#c1e1f7` — **2,29:1**, ниже AA даже для крупного текста. Владелец решил сохранить
+брендовую пару только в заголовке лендинга; для тела текста и интерфейса она не используется. Исключение
+зафиксировано комментарием у `.highlight` и тестом `contrast.test.js`.
+
+### 4. Фактическая проверка в браузере
+
+Команды и снимки — в отчёте Task 4 (`.superpowers/sdd/2026-11-25-metrika-m6-delivery/task-4-report.md`), снимки
+`docs/screenshots/m6/a11y-*.png`. Живая сверка подтвердила значения таблиц выше; расхождений, требующих правок,
+не найдено.
 
 ## Не проверено здесь — закрывает владелец
 
@@ -398,5 +474,5 @@ no password in argv
 ## Verdict
 
 Compose установлен и проверен реальным выводом `docker compose config/up`; Docker-путь Task 1 **закрыт**.
-Task 2 **закрыт на Linux и в контейнере** (row-count + key checksum), Windows-прогон остаётся за владельцем.
-Ограничения выше относятся к T6/T8 и не выдаются за выполненные.
+Task 2 **закрыт на Linux и в контейнере** (row-count + key checksum, включая password-auth Compose-стенд); Windows-прогон
+остаётся за владельцем. Ограничения выше относятся к T6/T8 и не выдаются за выполненные.

@@ -205,6 +205,105 @@ export async function assertKeyFileMode(keyFile, { allowLooseKey = false, platfo
 }
 
 /**
+ * Builds a `pg.Client` config from URL fields instead of `connectionString`.
+ *
+ * `pg` parses `connectionString` after merging the explicit options, so `{ connectionString: passwordless, password }`
+ * ends up with `connectionParameters.password === null`. Passing the fields (and the password last) is the only
+ * form that preserves the credential without keeping it in the URL.
+ *
+ * @param {string} connectionString
+ * @returns {Record<string, unknown>}
+ * @throws {BackupUsageError} When the URL, port or percent-encoding is invalid.
+ */
+export function databaseClientConfig(connectionString) {
+  let url;
+  try {
+    url = new URL(connectionString);
+  } catch (error) {
+    throw new BackupUsageError('Строка подключения не является корректным URL.', { cause: error });
+  }
+  if (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') {
+    throw new BackupUsageError('Строка подключения должна начинаться с postgres:// или postgresql://.');
+  }
+
+  const params = url.searchParams;
+  let host = params.get('host') ?? url.hostname;
+  if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1); // IPv6 literals arrive bracketed.
+
+  const rawPort = params.get('port') ?? url.port;
+  let port;
+  if (rawPort) {
+    port = Number(rawPort);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new BackupUsageError(`Некорректный порт в строке подключения: "${rawPort}".`);
+    }
+  }
+
+  let user;
+  let password;
+  let database;
+  try {
+    user = url.username ? decodeURIComponent(url.username) : undefined;
+    password = url.password ? decodeURIComponent(url.password) : undefined;
+    const pathname = url.pathname.replace(/^\//, '');
+    database = pathname ? decodeURIComponent(pathname) : undefined;
+  } catch (error) {
+    throw new BackupUsageError(
+      'Некорректное percent-encoding в строке подключения (user, password или имя базы).',
+      { cause: error },
+    );
+  }
+
+  const config = {};
+  if (host) config.host = host;
+  if (port) config.port = port;
+  if (user) config.user = user;
+  if (database) config.database = database;
+
+  const ssl = sslFromSearchParams(params);
+  if (ssl !== undefined) config.ssl = ssl;
+
+  // Keep the small set of libpq options that the project may carry in a URL; unknown parameters stay ignored.
+  for (const key of ['application_name', 'options', 'connect_timeout']) {
+    const value = params.get(key);
+    if (value !== null) config[key] = value;
+  }
+
+  // Last on purpose: no later assignment may overwrite the credential.
+  if (password) config.password = password;
+  return config;
+}
+
+/**
+ * Maps `ssl`/`sslmode` query parameters to the value `pg.Client` accepts.
+ *
+ * @param {URLSearchParams} params
+ * @returns {boolean | { rejectUnauthorized: boolean } | undefined}
+ * @throws {BackupUsageError}
+ */
+function sslFromSearchParams(params) {
+  const explicit = params.get('ssl');
+  if (explicit === 'true' || explicit === '1') return true;
+  if (explicit === 'false' || explicit === '0') return false;
+
+  const mode = params.get('sslmode');
+  if (!mode) return undefined;
+  switch (mode) {
+    case 'disable':
+      return false;
+    case 'prefer':
+    case 'require':
+    case 'verify-ca':
+    case 'verify-full':
+      return { rejectUnauthorized: true };
+    case 'no-verify':
+      return { rejectUnauthorized: false };
+    default:
+      throw new BackupUsageError(`Неподдерживаемый sslmode в строке подключения: "${mode}".`);
+  }
+}
+
+/**
  * Splits a PostgreSQL URL into the password-free form safe for `argv`/`ps` and the decoded password for
  * `PGPASSWORD`. Child processes therefore never receive the password as a command-line argument.
  *
@@ -213,25 +312,18 @@ export async function assertKeyFileMode(keyFile, { allowLooseKey = false, platfo
  * @throws {BackupUsageError}
  */
 export function childConnection(connectionString) {
+  const config = databaseClientConfig(connectionString);
   let url;
   try {
     url = new URL(connectionString);
-  } catch {
-    throw new BackupUsageError('Строка подключения не является корректным URL.');
-  }
-
-  const encodedPassword = url.password;
-  let password = null;
-  if (encodedPassword) {
-    try {
-      password = decodeURIComponent(encodedPassword);
-    } catch {
-      // A malformed escape is still usable by libpq verbatim; it is better than dropping the credential.
-      password = encodedPassword;
-    }
+  } catch (error) {
+    throw new BackupUsageError('Строка подключения не является корректным URL.', { cause: error });
   }
   url.password = '';
-  return { connectionString: url.toString(), password };
+  return {
+    connectionString: url.toString(),
+    password: typeof config.password === 'string' ? config.password : null,
+  };
 }
 
 /**
@@ -310,12 +402,7 @@ export function quoteIdentifier(name) {
 export function assertRestoreTarget({ targetDatabase, databaseUrl, force = false }) {
   validateDatabaseName(targetDatabase);
 
-  let sourceDatabase;
-  try {
-    sourceDatabase = decodeURIComponent(new URL(databaseUrl).pathname.replace(/^\//, ''));
-  } catch {
-    throw new BackupUsageError('DATABASE_URL не является корректным URL или содержит неверное имя базы.');
-  }
+  const sourceDatabase = databaseClientConfig(databaseUrl).database ?? '';
   if (!sourceDatabase) {
     throw new BackupUsageError('DATABASE_URL не содержит имя базы данных.');
   }

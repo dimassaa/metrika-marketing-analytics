@@ -5,6 +5,7 @@ import { mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
+import pg from 'pg';
 import {
   BackupFormatError,
   BackupKeyError,
@@ -16,6 +17,7 @@ import {
   assertRestoreTarget,
   childConnection,
   childEnvironment,
+  databaseClientConfig,
   decryptDump,
   encryptDump,
   loadBackupKey,
@@ -317,6 +319,47 @@ describe('key handling', () => {
 });
 
 describe('child connection and key file mode', () => {
+  it('builds an explicit pg config with password set and no connectionString', () => {
+    const config = databaseClientConfig(
+      'postgres://user:p%40ss%3Aword@localhost:5433/metrika?sslmode=disable&application_name=metrika-backup',
+    );
+
+    expect(config).toMatchObject({
+      host: 'localhost',
+      port: 5433,
+      user: 'user',
+      database: 'metrika',
+      password: 'p@ss:word',
+      ssl: false,
+      application_name: 'metrika-backup',
+    });
+    expect(config.connectionString).toBeUndefined();
+    expect(Object.keys(config).at(-1)).toBe('password');
+
+    // This is the regression guard: `pg` uses connectionParameters.password from the explicit config.
+    const client = new pg.Client(config);
+    expect(client.connectionParameters.password).toBe('p@ss:word');
+    expect(client.connectionParameters.database).toBe('metrika');
+  });
+
+  it('supports a Unix-socket host from the query string and rejects invalid percent-encoding', () => {
+    expect(databaseClientConfig('postgres:///metrika?host=/var/run/postgresql')).toMatchObject({
+      host: '/var/run/postgresql',
+      database: 'metrika',
+    });
+    expect(() => databaseClientConfig('postgres://u:%E0%A4%A@localhost/db')).toThrow(BackupUsageError);
+    expect(() => childConnection('postgres://u:%E0%A4%A@localhost/db')).toThrow(BackupUsageError);
+  });
+
+  it('maps sslmode to a pg ssl object', () => {
+    expect(databaseClientConfig('postgres://u@localhost/db?sslmode=require').ssl).toEqual({
+      rejectUnauthorized: true,
+    });
+    expect(databaseClientConfig('postgres://u@localhost/db?sslmode=no-verify').ssl).toEqual({
+      rejectUnauthorized: false,
+    });
+  });
+
   it('removes the password from the argv URL and decodes it for PGPASSWORD', () => {
     const connection = childConnection(
       'postgres://user:p%40ss%3Aword@localhost:5432/metrika?sslmode=require',

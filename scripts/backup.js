@@ -11,6 +11,7 @@ import {
   backupFileName,
   childConnection,
   childEnvironment,
+  databaseClientConfig,
   encryptDump,
   loadBackupKey,
   pruneBackups,
@@ -138,11 +139,7 @@ async function binaryVersion(binary) {
  * @throws {BackupError}
  */
 async function serverVersion(databaseUrl) {
-  const connection = childConnection(databaseUrl);
-  const client = new pg.Client({
-    connectionString: connection.connectionString,
-    ...(connection.password ? { password: connection.password } : {}),
-  });
+  const client = new pg.Client(databaseClientConfig(databaseUrl));
   try {
     await client.connect();
     const { rows } = await client.query(
@@ -211,7 +208,7 @@ function parseRetentionDays(raw) {
  * @returns {string}
  */
 function databaseName(connectionString) {
-  return decodeURIComponent(new URL(connectionString).pathname.replace(/^\//, ''));
+  return databaseClientConfig(connectionString).database ?? '';
 }
 
 /** @returns {Promise<void>} */

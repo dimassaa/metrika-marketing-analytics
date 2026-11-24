@@ -12,6 +12,7 @@ import {
   assertRestoreTarget,
   childConnection,
   childEnvironment,
+  databaseClientConfig,
   decryptDump,
   loadBackupKey,
   quoteIdentifier,
@@ -163,11 +164,7 @@ async function cleanStaleRestoreDirs(root, { now = Date.now(), maxAgeMs = STALE_
  * @throws {BackupUsageError | BackupError}
  */
 async function ensureScratchDatabase({ name, adminUrl }) {
-  const connection = childConnection(adminUrl);
-  const client = new pg.Client({
-    connectionString: connection.connectionString,
-    ...(connection.password ? { password: connection.password } : {}),
-  });
+  const client = new pg.Client(databaseClientConfig(adminUrl));
   try {
     await client.connect();
   } catch (error) {
@@ -296,22 +293,16 @@ async function tableFingerprint(client, table) {
  * check, not a byte-for-byte comparison of the whole database.
  *
  * @param {{
- *   sourceConnection: { connectionString: string, password: string | null },
- *   targetConnection: { connectionString: string, password: string | null },
+ *   sourceUrl: string,
+ *   targetUrl: string,
  *   databaseUrl: string,
  * }} options
  * @returns {Promise<void>}
  * @throws {BackupError}
  */
-async function verifyRestore({ sourceConnection, targetConnection, databaseUrl }) {
-  const source = new pg.Client({
-    connectionString: sourceConnection.connectionString,
-    ...(sourceConnection.password ? { password: sourceConnection.password } : {}),
-  });
-  const target = new pg.Client({
-    connectionString: targetConnection.connectionString,
-    ...(targetConnection.password ? { password: targetConnection.password } : {}),
-  });
+async function verifyRestore({ sourceUrl, targetUrl, databaseUrl }) {
+  const source = new pg.Client(databaseClientConfig(sourceUrl));
+  const target = new pg.Client(databaseClientConfig(targetUrl));
 
   try {
     try {
@@ -405,7 +396,6 @@ async function main() {
   const pgRestore = process.env.PG_RESTORE || 'pg_restore';
   const adminUrl = process.env.ADMIN_DATABASE_URL || DEFAULT_ADMIN_DATABASE_URL;
   const targetUrl = withDatabase(databaseUrl, targetDatabase);
-  const sourceConnection = childConnection(databaseUrl);
   const targetConnection = childConnection(targetUrl);
   const tempRoot = process.env.RESTORE_TMP_DIR || tmpdir();
 
@@ -434,7 +424,7 @@ async function main() {
     await runPgRestore({ binary: pgRestore, dumpPath, targetConnection, databaseUrl });
 
     if (args.verify) {
-      await verifyRestore({ sourceConnection, targetConnection, databaseUrl });
+      await verifyRestore({ sourceUrl: databaseUrl, targetUrl, databaseUrl });
     }
 
     console.log(`Восстановление завершено: база "${targetDatabase}".`);
