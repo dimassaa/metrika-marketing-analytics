@@ -920,7 +920,7 @@ $ curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:41777/login
 | `tests/unit/docs-links.test.js` | 5 тестов |
 | `tests/integration/page-queries.test.js` | 11 тестов; `/app/channels/1` — 27 statement, включая `BEGIN`/`COMMIT` двух LTV-снапшотов |
 | `npm run build` | `✓ built in 1.45s`, единственное предупреждение — известный чанк `ChartTooltip` |
-| `npm run check:fresh` | **PASS** на `e16e802` за 4,5 с, `database: metrika_clone_check — dropped` |
+| `npm run check:fresh` | **PASS** на `948e021` за 4,3 с, `database: metrika_clone_check — dropped` |
 
 Числа в §1 (1406 тестов, 9 hygiene, 16 publication) оставлены как историческое доказательство коммита
 `be91b0d`; актуальные значения — в этой таблице.
