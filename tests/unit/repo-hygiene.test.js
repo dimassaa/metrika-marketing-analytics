@@ -42,6 +42,9 @@ export function trackedFiles() {
 export function forbiddenPathRules() {
   const dot = '.';
   const envPrefix = `${dot}${'env'}`;
+  // `.env`, `.env.local`, `config/.env.production`, `apps/web/.env-staging`; `.env.example` is the one allowed file and
+  // `.environment.md` is a normal document, so the prefix must end at a separator.
+  const envSegment = new RegExp(`^${envPrefix}(?:$|[.\\-_])`);
   const assets = `public/${'assets'}/`;
   const modules = `${'node'}${'_'}${'modules'}/`;
   const backups = `${'back'}${'ups'}/`;
@@ -51,13 +54,30 @@ export function forbiddenPathRules() {
     {
       label: 'environment file',
       matches: (path) =>
-        path === envPrefix || (path.startsWith(`${envPrefix}${dot}`) && path !== ENV_TEMPLATE),
+        path.split('/').some((segment) => envSegment.test(segment) && segment !== ENV_TEMPLATE),
     },
     { label: 'built Vite output', matches: (path) => path.startsWith(assets) },
     { label: 'installed dependency tree', matches: (path) => path.includes(modules) },
     { label: 'log file', matches: (path) => path.endsWith(`${dot}${'log'}`) },
     { label: 'backup artefact', matches: (path) => path.startsWith(backups) && path.endsWith(encrypted) },
   ];
+}
+
+/**
+ * True when a source file writes to stdout through a console method.
+ *
+ * Direct `console.log`, the `console.info`/`console.debug` siblings and computed access (`console['log']`,
+ * `console . log`) all reach stdout and all turn into log noise in a server process. `console.error` is deliberately
+ * not matched: a CLI script may report a failure on stderr, and the rule is about stdout side effects.
+ *
+ * @param {string} source File contents.
+ * @returns {boolean}
+ */
+export function writesToStdout(source) {
+  const methods = ['log', 'info', 'debug'].join('|');
+  const direct = new RegExp(`${'console'}\\s*\\.\\s*(?:${methods})\\b`);
+  const computed = new RegExp(`${'console'}\\s*\\[\\s*['"\`](?:${methods})['"\`]\\s*\\]`);
+  return direct.test(source) || computed.test(source);
 }
 
 /**
@@ -154,6 +174,24 @@ describe('repository hygiene', () => {
     expect(offenders, offenders.join('\n')).toEqual([]);
   });
 
+  it('flags nested environment files but not the template or a word that merely starts the same way', () => {
+    const synthetic = [
+      '.env',
+      'config/.env.local',
+      'apps/web/.env.production',
+      'deploy/.env-staging',
+      '.env.example',
+      'src/environment.md',
+    ];
+
+    expect(findForbiddenPaths(synthetic)).toEqual([
+      '.env (environment file)',
+      'config/.env.local (environment file)',
+      'apps/web/.env.production (environment file)',
+      'deploy/.env-staging (environment file)',
+    ]);
+  });
+
   it('keeps the example environment file tracked', () => {
     expect(INDEX).toContain(ENV_TEMPLATE);
   });
@@ -202,11 +240,19 @@ describe('repository hygiene', () => {
     expect(readdirSync(directory).length).toBeGreaterThan(0);
   });
 
-  it('writes no console.log into src/ (CLI scripts may print on purpose)', () => {
-    const needle = `${'console'}.${'log'}`;
+  it('writes no stdout console call into src/ (CLI scripts may print on purpose)', () => {
     const files = walk(join(ROOT, 'src')).filter((path) => /\.(?:js|jsx)$/.test(path));
-    const offenders = files.filter((path) => readFileSync(join(ROOT, path), 'utf8').includes(needle));
+    const offenders = files.filter((path) => writesToStdout(readFileSync(join(ROOT, path), 'utf8')));
 
     expect(offenders, offenders.join('\n')).toEqual([]);
+  });
+
+  it('recognises direct, sibling and computed stdout calls without flagging console.error', () => {
+    expect(writesToStdout("console.log('x')")).toBe(true);
+    expect(writesToStdout('console . info(1)')).toBe(true);
+    expect(writesToStdout("console['debug'](1)")).toBe(true);
+    expect(writesToStdout('console["log"](1)')).toBe(true);
+    expect(writesToStdout("console.error('x')")).toBe(false);
+    expect(writesToStdout("console.table('x')")).toBe(false);
   });
 });

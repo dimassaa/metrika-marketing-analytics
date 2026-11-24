@@ -104,11 +104,11 @@ reverse proxy с TLS (раздел 6) и `COOKIE_SECURE=true`.
 
 ```bash
 curl -fsS http://127.0.0.1:3000/health
-# {"status":"ok","db":"up","version":"0.1.0"}
+# {"status":"ok","db":"up","version":"1.0.0"}
 ```
 
 `/health` проверяет БД запросом `SELECT 1`. Если PostgreSQL недоступен, приложение отвечает `503` с
-`{"status":"error","db":"down","version":"0.1.0"}`, а Compose-контейнер становится `unhealthy`: это ожидаемое
+`{"status":"error","db":"down","version":"1.0.0"}`, а Compose-контейнер становится `unhealthy`: это ожидаемое
 поведение, а не падение процесса. Демо-вход — `admin@metrika.by` / `Metrika2026!`; данные появляются только при
 пустой БД, повторный `docker compose up` их не перезаписывает.
 
@@ -317,7 +317,7 @@ npm start
 Invoke-RestMethod http://localhost:3000/health
 # status  db  version
 # ------  --  -------
-# ok      up  0.1.0
+# ok      up  1.0.0
 Start-Process http://localhost:3000/login
 ```
 

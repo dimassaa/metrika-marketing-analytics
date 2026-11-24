@@ -11,20 +11,24 @@ import {
 /**
  * Publication readiness guard.
  *
- * These assertions describe the hand-off contract rather than the prose: the repository must carry a licence
- * placeholder (no licence is chosen for the owner), a publication note that names the tag and its blockers, a
- * version that the README example agrees with, and a fresh-clone check that is wired into npm.
+ * These assertions describe the hand-off contract rather than the prose: the repository must carry a licence file
+ * that is either the rights-reserved placeholder or the licence the owner chose, a publication note that names the
+ * tag and its blockers, a version that the README example agrees with, and a fresh-clone check that is wired into npm.
  */
 
 const ROOT = process.cwd();
 const read = (path) => readFileSync(join(ROOT, path), 'utf8');
 const pkg = JSON.parse(read('package.json'));
+const lock = JSON.parse(read('package-lock.json'));
 const publication = read('docs/publication.md');
 const readme = read('README.md');
 
 const SHORT_DESCRIPTION_MARKER = 'Короткое описание';
 const LONG_DESCRIPTION_MARKER = 'Расширенное описание';
 const TAG_ANNOTATION = 'M6 delivery: Docker, encrypted backups, deployment and user guides';
+/** Titles a licence file may carry instead of an explicit copyright line. */
+const RECOGNIZED_LICENSE_TITLE =
+  /\b(?:MIT|Apache(?:\s+License)?|BSD|ISC|GNU(?:\s+General\s+Public\s+License)?|GPL|LGPL|MPL|Mozilla\s+Public\s+License|Unlicense|Creative\s+Commons|Proprietary)\b/i;
 const TOPICS = [
   'nodejs',
   'express',
@@ -67,15 +71,84 @@ export function blockquoteAfter(markdown, marker) {
   return quote.length > 0 ? quote.join(' ').replace(/\s+/g, ' ').trim() : null;
 }
 
+/**
+ * True while `LICENSE` still carries the shipped placeholder.
+ *
+ * The placeholder is recognised by its own wording rather than by the file name or a hash, so the owner can replace
+ * the file wholesale with MIT or a proprietary text without touching the test.
+ *
+ * @param {string} text Contents of `LICENSE`.
+ * @returns {boolean}
+ */
+export function isPlaceholderLicense(text) {
+  return /No license is granted yet/i.test(text) || /license text is pending the owner/i.test(text);
+}
+
+/**
+ * Describes what is wrong with a licence file, or returns null when it is acceptable.
+ *
+ * The two branches are deliberately different. A placeholder must keep reserving the rights and must not grant a
+ * licence; a chosen licence only has to identify itself, either through a copyright line or a recognised title.
+ * Requiring the placeholder wording forever would make the documented MIT path fail the suite.
+ *
+ * @param {string} text Contents of `LICENSE`.
+ * @returns {string | null} Human-readable violation, or null.
+ */
+export function licenseViolation(text) {
+  if (text.trim().length === 0) return 'the file is empty';
+
+  if (isPlaceholderLicense(text)) {
+    if (!/Copyright/i.test(text)) return 'the placeholder lost its copyright line';
+    if (!/All rights reserved/i.test(text)) return 'the placeholder no longer reserves the rights';
+    if (/Permission is hereby granted/i.test(text)) return 'the placeholder grants a licence';
+    return null;
+  }
+
+  if (/Copyright/i.test(text) || RECOGNIZED_LICENSE_TITLE.test(text)) return null;
+  return 'the file has neither a copyright line nor a recognised licence title';
+}
+
 describe('licence hand-off', () => {
-  it('ships a LICENSE file that reserves the rights without choosing a licence', () => {
+  it('accepts the shipped placeholder and any owner-chosen licence', () => {
     expect(existsSync(join(ROOT, 'LICENSE'))).toBe(true);
     const license = read('LICENSE');
 
-    expect(license).toMatch(/^Copyright \(c\) \d{4}/m);
-    expect(license).toMatch(/All rights reserved/i);
-    // A licence grant would mean the owner's decision was made for them.
-    expect(license).not.toMatch(/Permission is hereby granted/i);
+    expect(licenseViolation(license)).toBeNull();
+  });
+
+  it('keeps the placeholder honest: rights reserved, no granted licence', () => {
+    const placeholder = [
+      'Copyright (c) 2026. No license is granted yet; the license text is pending the owner\'s',
+      'decision. All rights reserved until then.',
+    ].join('\n');
+
+    expect(isPlaceholderLicense(placeholder)).toBe(true);
+    expect(licenseViolation(placeholder)).toBeNull();
+    expect(licenseViolation(placeholder.replace('All rights reserved until then.', 'Use is permitted.'))).toMatch(
+      /reserves the rights/,
+    );
+    expect(licenseViolation(`${placeholder}\nPermission is hereby granted, free of charge.`)).toMatch(/grants a licence/);
+  });
+
+  it('does not fail when the owner replaces the placeholder with MIT', () => {
+    const mit = [
+      'MIT License',
+      '',
+      'Copyright (c) 2026 The Owner',
+      '',
+      'Permission is hereby granted, free of charge, to any person obtaining a copy of this software…',
+    ].join('\n');
+
+    expect(isPlaceholderLicense(mit)).toBe(false);
+    expect(licenseViolation(mit)).toBeNull();
+  });
+
+  it('accepts a proprietary notice and rejects an empty or unrelated file', () => {
+    const proprietary = 'Copyright (c) 2026 The Owner. All rights reserved. No part may be reused without permission.';
+    expect(licenseViolation(proprietary)).toBeNull();
+    expect(licenseViolation('Apache License, Version 2.0')).toBeNull();
+    expect(licenseViolation('   \n')).toMatch(/empty/);
+    expect(licenseViolation('Just some notes.')).toMatch(/copyright line|licence title/);
   });
 
   it('records the licence status in the publication note', () => {
@@ -125,6 +198,11 @@ describe('version and health contract', () => {
   it('releases the project as 1.0.0 with Node 24 as the floor', () => {
     expect(pkg.version).toBe('1.0.0');
     expect(pkg.engines?.node).toBe('>=24');
+  });
+
+  it('keeps package.json and the lockfile root on the same version', () => {
+    expect(lock.version).toBe(pkg.version);
+    expect(lock.packages?.['']?.version).toBe(pkg.version);
   });
 
   it('shows the same version in both README health examples', () => {

@@ -1045,7 +1045,7 @@ deferred», это значит, что каждый пункт раздела �
 | Public landing | 5 | fixed 1, deferred 4 | **fixed:** OG-обложка — PNG 1200×630 (`public/img/og-cover.png`, `tests/integration/landing.test.js`). Остальные — триггер: следующий текст/вёрстка лендинга |
 | Runtime | 2 | fixed 1, deferred 1 | **fixed:** политика кэширования — `/assets` immutable на год, `app.css` и обложка на revalidation, приватные ответы `no-store` (`src/app.js`, `tests/integration/cache-headers.test.js`). Остальное — триггер: частичная деградация в `/health` |
 | Seed and demo data | 10 | rejected 1, остальные deferred | **rejected:** `countRows()` — helper удалён из `db/seed/seed.js`, интерполяции имён таблиц больше нет. Остальные — триггер: следующее изменение сида или `src/lib/dates.js` |
-| App shell | 13 | fixed 4, deferred 9 | **fixed:** все `/app`-маршруты несут `requirePermission` (`src/routes/app.routes.js`); колонка «Почта» (`admin-users.ejs`); десять заглушек заменены экранами M2–M5; present-tense копия про импорт удалена вместе с заглушкой. Остальные — триггер: следующий проход по оболочке |
+| App shell | 13 | fixed 4, deferred 9 | **fixed:** экраны данных несут `requirePermission` (`src/routes/app.routes.js`) — расхождение с сайдбаром закрыто; при этом `/app` (redirect), `/app/profile` и `/app/profile/password` намеренно только `requireAuth`, потому что профиль принадлежит любому вошедшему; колонка «Почта» (`admin-users.ejs`); десять заглушек заменены экранами M2–M5; present-tense копия про импорт удалена вместе с заглушкой. Остальные — триггер: следующий проход по оболочке |
 | Errors and access | 2 | deferred | 4xx-контракт `text/plain` для page-POST и копия 404 без ветки — решение владельца; триггер: следующий проход по error-middleware |
 | Auth and sessions | 8 | fixed 2, deferred 6 | **fixed:** `TRUST_PROXY` (`src/config/env.js`, `tests/unit/config-env.test.js`); деактивация удаляет сессии (`users.service.toggleUserActive` → `deleteUserSessions`). Per-IP bucket добавлен в M6 T3 (`src/routes/auth.routes.js`), но store остаётся в памяти → пункт остаётся deferred вместе с R3. Остальные — триггер: следующий проход по auth |
 | Code quality | 1 | deferred | Три копии API-vs-page предиката; триггер: следующее изменение `src/app.js` или auth-middleware |
@@ -1073,7 +1073,7 @@ deferred», это значит, что каждый пункт раздела �
 | M5 Task 3 — kopeck rounding | 1 | rejected | Один копеечный допуск вместо house-monotonicity — записано в спеке §6.2 и покрыто sweep-тестом |
 | M5 Task 6 — decisions HTTP layer | 2 | deferred | Таблица алертов на сервере, JSON-формы мутаций без потребителя; триггер: появление второго клиента |
 | M5 Task 7 — decisions screens/charts | 6 | deferred | Бары прироста вместо waterfall, 12-недельный CAC-график, серверная таблица, пустой builder, выбор кривой, `aria-valuenow` — решения записаны; триггер: следующий проход по решениям |
-| M5 Task 8 — final E2E evidence | 13 | fixed 3 (M5), остальные deferred/rejected | **fixed:** минимальный бюджет слайдера (`budget.minInput`), styled-ошибка builder'а, параграф §6.2 про линейную кривую. **rejected:** отсутствие waterfall и синтетическая пагинация алертов — записанные решения. Остальные — триггер: M6+ |
+| M5 Task 8 — final E2E evidence | 8 | fixed 3 (M5), остальные deferred/rejected | **fixed:** минимальный бюджет слайдера (`budget.minInput`), styled-ошибка builder'а, параграф §6.2 про линейную кривую. **rejected:** отсутствие waterfall и синтетическая пагинация алертов — записанные решения. Остальные — триггер: M6+ |
 | M5 deferrals — recorded | 5 | deferred (M6+) | Per-channel caps, edit/delete сценариев, per-user throttle, `first_detected_at`, экспорт сценариев/алертов — продуктовые задачи M6+; триггер: решение владельца |
 | M6 Task 1 — Docker image | 4 | deferred | Размер образа, URL-encoding `POSTGRES_PASSWORD`, таймаут `/health` при мёртвой БД, `COPY --chmod`; триггер: следующий проход по образу |
 | M6 Task 2 — backups | 3 | deferred | Seed TOCTOU при `--scale`, retention по mtime, `--verify` против живой БД; триггер: масштабирование или изменение формата бэкапа |
@@ -1094,7 +1094,9 @@ deferred», это значит, что каждый пункт раздела �
 - **`TRUST_PROXY`** вместо безусловного `trust proxy: 1` (`src/config/env.js`, `tests/unit/config-env.test.js`).
 - **Второй bucket лимитера входа** по адресу (`src/routes/auth.routes.js`); store по-прежнему в памяти — R3.
 - **Сессии удаляются при деактивации и смене роли** (`src/services/users.service.js` → `users.repo.deleteUserSessions`).
-- **Все `/app`-маршруты защищены `requirePermission`**, расхождение с сайдбаром закрыто (`src/routes/app.routes.js`).
+- **Экраны `/app` защищены `requirePermission`**, расхождение с сайдбаром закрыто (`src/routes/app.routes.js`).
+  `/app` (redirect), `/app/profile` и `/app/profile/password` несут только `requireAuth` намеренно: профиль
+  принадлежит любому вошедшему.
 - **Десять заглушек M1 заменены экранами**; в `src/views` не осталось «Раздел появится на следующем этапе».
 - **`tests/integration/error-pages.test.js`** покрывает 403/404/500, включая styled 500 при отказе БД.
 - **Гигиена и публикация** — `tests/unit/repo-hygiene.test.js`, `tests/unit/publication.test.js`,

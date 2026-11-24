@@ -21,6 +21,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import dotenv from 'dotenv';
 import pg from 'pg';
 
 const REPO_ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -478,8 +479,11 @@ async function step(label, action) {
 /**
  * Runs the whole check and returns a summary for the journal.
  *
+ * `cleanup` is a mutable object because the real outcome is only known after the `finally` block has tried to drop
+ * the database; the caller prints what actually happened instead of assuming a successful drop.
+ *
  * @param {ReturnType<typeof parseArgs>} options
- * @returns {Promise<{ sha: string, durationSeconds: number, url: string }>}
+ * @returns {Promise<{ sha: string, durationSeconds: number, url: string, cleanup: { database: string } }>}
  */
 async function check(options) {
   const startedAt = Date.now();
@@ -496,7 +500,9 @@ async function check(options) {
   const baseUrl = `http://127.0.0.1:${port}`;
   const parentDirectory = mkdtempSync(join(tmpdir(), 'metrika-clone-'));
   const worktree = join(parentDirectory, 'repo');
+  const cleanup = { database: 'not created' };
   let worktreeCreated = false;
+  let databaseCreated = false;
   let server = null;
   let serverOutput = '';
 
@@ -534,6 +540,7 @@ async function check(options) {
     await step('database create (db:setup)', async () => {
       await dropCloneDatabase(adminUrl);
       await run(NPM, ['run', 'db:setup'], { ...npmOptions, label: 'db:setup' });
+      databaseCreated = true;
     });
     await step('npm run migrate', () => run(NPM, ['run', 'migrate'], { ...npmOptions, label: 'migrate' }));
     await step('npm run seed', () => run(NPM, ['run', 'seed'], { ...npmOptions, label: 'seed' }));
@@ -562,7 +569,7 @@ async function check(options) {
       console.log(`       checked: ${checked.join(', ')}`);
     });
 
-    return { sha, durationSeconds: (Date.now() - startedAt) / 1000, url: baseUrl };
+    return { sha, durationSeconds: (Date.now() - startedAt) / 1000, url: baseUrl, cleanup };
   } catch (error) {
     if (error instanceof CheckError && (error.stdout || error.stderr)) {
       console.error('\n--- captured output ---');
@@ -585,13 +592,18 @@ async function check(options) {
     }
 
     if (options.keep) {
-      console.log(`\n--keep: worktree ${worktree}; database ${CLONE_DATABASE} kept for inspection.`);
+      cleanup.database = databaseCreated ? 'kept (--keep)' : 'not created';
+      console.log(`\n--keep: worktree ${worktree}; database ${CLONE_DATABASE} — ${cleanup.database}.`);
     } else {
       if (worktreeCreated) {
-        try {
-          await dropCloneDatabase(adminUrl);
-        } catch (error) {
-          console.error(`warning: could not drop ${CLONE_DATABASE}: ${redact(error.message, adminUrl)}`);
+        if (databaseCreated) {
+          try {
+            await dropCloneDatabase(adminUrl);
+            cleanup.database = 'dropped';
+          } catch (error) {
+            cleanup.database = 'kept (drop failed)';
+            console.error(`warning: could not drop ${CLONE_DATABASE}: ${redact(error.message, adminUrl)}`);
+          }
         }
         try {
           git(['worktree', 'remove', '--force', worktree], REPO_ROOT);
@@ -627,10 +639,15 @@ async function main() {
     return;
   }
 
+  // `db/setup.js` reads `.env` through `dotenv/config`; loading it here too means the same `ADMIN_DATABASE_URL` works
+  // for both commands instead of silently falling back to the default role. Only the CLI path loads it, so importing
+  // this module from a test has no side effects.
+  dotenv.config();
+
   try {
     const summary = await check(options);
     console.log(
-      `\nFresh-clone check PASS\n  sha: ${summary.sha}\n  duration: ${summary.durationSeconds.toFixed(1)} s\n  url: ${summary.url}\n  database: ${CLONE_DATABASE} (dropped)`,
+      `\nFresh-clone check PASS\n  sha: ${summary.sha}\n  duration: ${summary.durationSeconds.toFixed(1)} s\n  url: ${summary.url}\n  database: ${CLONE_DATABASE} — ${summary.cleanup.database}`,
     );
   } catch (error) {
     console.error(`\nFresh-clone check FAIL\n  ${error.message}`);
