@@ -49,7 +49,7 @@
 | Требование | Реализация |
 |---|---|
 | Windows 10+ | инструкция установки, переменные окружения, Планировщик для бэкапов |
-| Node.js актуальной версии | 24 LTS, `engines: >=22` |
+| Node.js актуальной версии | 24 LTS, `engines.node: >=24` |
 | MySQL/PostgreSQL/MongoDB | PostgreSQL 18 (реляционная, ссылочная целостность) |
 | Yandex/Firefox/Chrome/Opera | проверка в agent-browser (Chromium) + ручной чек-лист Firefox |
 | Руководство по установке | `docs/deployment.md` (этап M6) |

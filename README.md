@@ -3,12 +3,15 @@
 Веб-приложение для оценки эффективности маркетинговых каналов: CAC, когортный LTV и ROMI по каждому каналу,
 атрибуция, алерты и сценарии бюджета. Курсовой проект БГУИР.
 
-![Лендинг «Метрики»](docs/screenshots/m1/landing-desktop.png)
+![Лендинг «Метрики»](docs/screenshots/m6/guide/landing.png)
 
 Демо-бренд — «Метрика», демо-компания — вымышленный интернет-магазин кофе «Зёрна» из Минска. Все суммы — в
 BYN, расчётные даты — Europe/Minsk. Интерфейс и подписи на русском, код и имена в БД — на английском.
 
-## Что уже работает (M1–M5)
+- Руководство пользователя: [docs/user-guide.md](docs/user-guide.md).
+- Установка, Docker, Windows 10, TLS и резервные копии: [docs/deployment.md](docs/deployment.md).
+
+## Что уже работает (M1–M6)
 
 - Публичный лендинг с SEO: canonical, Open Graph, JSON-LD, `robots.txt`, `sitemap.xml`, один `<h1>`.
 - Вход по email и паролю (argon2id), серверные сессии в PostgreSQL, CSRF, rate-limit, безопасный `next`.
@@ -57,33 +60,72 @@ BYN, расчётные даты — Europe/Minsk. Интерфейс и под�
   остаются в таблице, но не участвуют в распределении; линейная кривая помечена «линейная кривая — без оптимума».
   Сохранение замораживает `params` и `result` в JSONB, страница снимка читает только сохранённый результат и не
   пересчитывает его задним числом; ссылка «Повторить» открывает builder с теми же параметрами.
+- **M6:** Docker-стенд с multi-stage образом, non-root пользователем, read-only rootfs, healthcheck по `r.ok` и
+  Compose без правки `.env`. База не публикуется наружу, приложение слушает только `127.0.0.1`.
+- **M6:** шифрованные резервные копии `pg_dump -Fc` + AES-256-GCM, retention только для `metrika-*.dump.enc`,
+  восстановление в scratch-базу с проверкой «row-count + key checksum», отдельный ключ в файле `0600`.
+- **M6:** security-заголовки и CSP, лимиты входа и импорта, маршрутный аудит RBAC/CSRF, `X-Robots-Tag` и
+  `no-store` на приватных страницах, `noindex` для `/app` и `/api`.
+- **M6:** доступность WCAG 2.2 AA: контраст, кольцо фокуса `#2f8bd0`, порядок Tab, таблицы-дубли графиков,
+  отсутствие горизонтального переполнения на 390×844. PNG Open Graph 1200×630, SEO-проверки и
+  `docs/security-audit.md` / `docs/performance.md`.
+- **M6:** E2E-матрица трёх ролей в Chromium, проверка 403/404/500, импорта, медиа, алертов и сценариев; скриншоты
+  и журнал — в `docs/screenshots/m6/README.md`.
 - PostgreSQL-схема из 15+ таблиц с FK/CHECK/UNIQUE, миграции `001`–`006`; детерминированный сид: 8 каналов,
   32 кампании, 4 000 клиентов, 14 месяцев статистики.
 - Один stylesheet `public/css/app.css`, локальные шрифты Inter / Inter Tight / знак BYN, без CDN.
 
-Границы этапа: M5 завершает прикладные экраны — алерты и сценарии бюджета заменили последние заглушки. M6
-доводит проект до сдачи: Docker multi-stage и compose, резервное копирование и восстановление, руководство
-пользователя и развёртывания, финальный a11y/SEO-аудит и проверка на чистой машине. Полный план:
+Границы M6: новых аналитических функций нет. M6 — эксплуатационный контур, исправления подтверждённых дефектов
+с регрессионными тестами и документация. Windows 10, Docker Desktop, Firefox и публичный HTTPS-стенд остаются
+прогоном владельца: агент их не выполнял и не выдаёт за проверенные. Полный план:
 [`docs/superpowers/plans/2026-11-21-metrika-roadmap.md`](docs/superpowers/plans/2026-11-21-metrika-roadmap.md).
 
 ## Стек
 
 | Слой | Технологии |
 |---|---|
-| Runtime | Node.js 22.12+ (рекомендуется 24 LTS), ESM |
+| Runtime | Node.js 24 LTS (`engines.node` — `>=24`), ESM |
 | Сервер | Express 5, EJS 3 + `express-ejs-layouts`, Zod, pino |
 | БД | PostgreSQL 18, драйвер `pg`, SQL-миграции без ORM |
 | Auth | `express-session` + `connect-pg-simple`, `@node-rs/argon2`, CSRF, `express-rate-limit` |
-| Безопасность | helmet с явной CSP, параметризованный SQL, экранирование EJS |
-| Тесты | Vitest + Supertest |
+| Безопасность | helmet с явной CSP, параметризованный SQL, экранирование EJS, шифрованные бэкапы |
+| Тесты | Vitest + Supertest, E2E в Chromium через agent-browser |
 | Клиент | React 19 + Vite 7 + Recharts 3 — по одному острову на экран; данные приходят из `data-props`, отдельных запросов нет |
+| Эксплуатация | Docker/Compose, healthcheck, `pg_dump`/`pg_restore`, Caddy/nginx |
 
 TypeScript не используется. Второго CSS-файла, CSS-фреймворков и CDN нет.
 
-## Быстрый старт с чистого клона
+## Быстрый старт: Docker
 
-Нужны Node.js 22.12+ (рекомендуется 24 LTS — нижняя граница задана требованиями Vite 7), npm и запущенный
-PostgreSQL 18. Роль БД должна уметь создавать базы (или базы создаются вручную).
+Основной путь для демонстрации и проверки. Нужны Docker Engine 27+ и Compose v2 (плагин `docker compose`).
+Файл `.env` не нужен: все значения имеют дефолты, база и секрет сессии создаются внутри контейнеров.
+
+```bash
+git clone <URL-репозитория> metrika
+cd metrika
+docker compose up --build -d
+docker compose ps
+curl -fsS http://127.0.0.1:3000/health
+```
+
+Приложение слушает только `127.0.0.1:3000`, PostgreSQL наружу не публикуется. `docker compose up` применяет
+миграции и сеет демо-данные только на пустой БД; повторный запуск данные не перезаписывает.
+
+Демо-вход: `admin@metrika.by` / `Metrika2026!`. Остановка и сброс:
+
+```bash
+docker compose down       # контейнеры удалены, named volumes с БД и секретом сохранены
+docker compose down -v    # полный сброс: БД, секрет сессии и бэкапы
+```
+
+Если команда `docker compose` не найдена, установите плагин по
+[руководству по развёртыванию](docs/deployment.md#21-предусловие-плагин-compose). Windows/Docker Desktop и
+резервные копии описаны там же.
+
+## Быстрый старт: native
+
+Нужны Node.js 24 LTS (`engines.node` — `>=24`), npm и запущенный PostgreSQL 18. Роль БД должна уметь создавать
+базы (или базы создаются вручную).
 
 ```bash
 git clone <URL-репозитория> metrika
@@ -196,21 +238,31 @@ React-острова собираются Vite в `public/assets` (хеширо�
 нет: страницы всегда рендерит Express, поэтому CSP и поведение совпадают с production. `public/assets` — артефакт
 сборки и в git не попадает, `package-lock.json` коммитится.
 
-Docker-этап (multi-stage сборка, копирование `public/assets`, резервное копирование) отложен на M6; M5
-документирует только локальный путь с PostgreSQL.
+Docker-сборка (multi-stage, non-root, read-only rootfs, копирование `public/assets`) и Compose-стенд описаны в
+[руководстве по развёртыванию](docs/deployment.md). Образ не содержит тестов, документации и `.env`.
 
 Бюджет сборки проверяется тестом `tests/integration/build-output.test.js`: вход каждой страницы — не больше
-210 KB gzip, вся страница (entry + общие чанки) — не больше 250 KB gzip. В M5 страница алертов занимает
-195,7 KiB gzip, сценариев — 217,4 KiB. Остров не импортирует CSS, не делает `fetch` и не содержит inline-стилей;
-графики идут через Recharts, а их данные дублируются таблицей внутри `<details>`. Один общий чанк React + Recharts
-кэшируется между страницами, поэтому вес `npm run build` меньше суммы входов.
+210 KB gzip, вся страница (entry + общие чанки) — не больше 250 KB gzip. В M6 страницы занимают 200–223 KB gzip;
+самая тяжёлая часть — общий React + Recharts чанк. Остров не импортирует CSS, не делает `fetch` и не содержит
+inline-стилей; графики идут через Recharts, а их данные дублируются таблицей внутри `<details>`. Один общий чанк
+React + Recharts кэшируется между страницами, поэтому вес `npm run build` меньше суммы входов.
 
 `db:setup` создаёт только пустые базы. Схему дают миграции `001`–`006`, данные — `seed`. Пароль из сида не
-логируется. Повторный `npm run seed` очищает `sessions` и `media_assets` (кроме детерминированной OG-обложки),
-поэтому всех, кто уже вошёл на стенд, разлогинит, а загруженные аватары исчезнут: запускайте сид до входа или
-предупредите пользователей.
+логируется. `npm run seed` — **разрушительная операция**: он выполняет
+`TRUNCATE … RESTART IDENTITY CASCADE` для всех демо-таблиц, кроме `schema_migrations`, и заново вставляет
+детерминированный набор. Очищаются:
 
-Проверка: `http://localhost:3000/health` возвращает `{"status":"ok","db":"up","version":"0.1.0"}`.
+`users`, `sessions`, `channels`, `campaigns`, `daily_stats`, `customers`, `touchpoints`, `orders`, `goals`,
+`alerts`, `scenarios`, `audit_log`, `import_batches`, `media_assets`.
+
+Практические последствия: всех уже вошедших разлогинит (сессии удалены), пропадут загруженные аватары и
+пользовательские медиа, история аудита, скрытые алерты, сохранённые сценарии, импорты, цели и все данные. OG-обложка
+восстанавливается из committed `public/img/og-cover.png`. **Никогда не запускайте `npm run seed` на живом стенде**;
+он нужен только для чистой демонстрационной базы.
+
+Проверка: `http://localhost:3000/health` возвращает `{"status":"ok","db":"up","version":"0.1.0"}`. При недоступной
+БД тот же маршрут отвечает `503` с `{"status":"error","db":"down","version":"0.1.0"}`; Compose-контейнер становится
+`unhealthy`.
 
 ## Демо-аккаунты
 
@@ -222,11 +274,11 @@ Docker-этап (multi-stage сборка, копирование `public/assets
 
 Пароль всех трёх аккаунтов: **`Metrika2026!`**
 
-**Что уже работает в M5:** все экраны приложения заменяют заглушки. Дашборд, каналы, паспорт канала, когорты и
-атрибуция считают CAC, ROMI, LTV и удержание по данным выбранного периода; алерты и сценарии бюджета описаны
-выше. Аналитик управляет каналами, кампаниями, целями, сценариями, алертами, импортом и экспортом;
-администратор — пользователями и аудитом; наблюдатель видит аналитику, алерты и сохранённые сценарии, но не
-меняет данные и не запускает пересчёт.
+Все экраны приложения работают на демо-данных: дашборд, каналы, паспорт канала, кампании, когорты, атрибуция,
+алерты, сценарии и цели. Аналитик управляет каналами, кампаниями, целями, сценариями, алертами, импортом и
+экспортом; администратор дополнительно управляет пользователями, OG-обложкой и смотрит аудит; наблюдатель видит
+аналитику, алерты, сохранённые сценарии и экспорт, но не меняет данные и не запускает пересчёт. Подробно —
+[руководство пользователя](docs/user-guide.md).
 
 > Это демонстрационный стенд с вымышленными данными. Пароль опубликован намеренно и для production не годится:
 > перед любым публичным запуском смените пароли, `SESSION_SECRET`, включите `COOKIE_SECURE=true` и HTTPS.
@@ -273,7 +325,9 @@ Docker-этап (multi-stage сборка, копирование `public/assets
 | `npm run build:watch` | пересобирает острова при изменении `client/**` в отдельном терминале |
 | `npm run db:setup` | идемпотентно создаёт базы из `DATABASE_URL` и `TEST_DATABASE_URL` |
 | `npm run migrate` | применяет миграции из `db/migrations` |
-| `npm run seed` | пересоздаёт детерминированный демо-набор |
+| `npm run seed` | **очищает все демо-таблицы** и пересоздаёт детерминированный набор; только для чистой БД |
+| `npm run backup` | `pg_dump -Fc` + AES-256-GCM в `metrika-*.dump.enc`; retention и ключ — `docs/deployment.md` |
+| `npm run restore -- --file …` | расшифровка и `pg_restore` в scratch-базу; `--verify` сравнивает row-count + key checksum |
 | `npm test` | Vitest: юнит- и интеграционные тесты на `TEST_DATABASE_URL` |
 | `npm run test:watch` | Vitest в режиме наблюдения |
 
@@ -302,24 +356,37 @@ db/
   migrations/                001–006: схема, данные M2, MIME, индексы метрик, алерты и сценарии
   migrate.js, setup.js       раннер миграций и bootstrap баз
   seed/                      детерминированный генератор демо-данных
+scripts/
+  backup.js, restore.js      шифрованные копии, retention, восстановление и --verify
+  seed-demo.js               сид только при пустых users/channels/daily_stats
+  lib/backup-format.js       формат AES-256-GCM и работа с ключом
+  explain-queries.js         EXPLAIN для отчёта о производительности
+docker/
+  entrypoint.sh              секрет сессии, миграции, автосид, exec сервера
 public/
   css/app.css                единственный stylesheet
   assets/                    артефакт `npm run build`, в git не входит
   js/                        острова загрузки файлов без фреймворка
-  fonts/, img/               локальные шрифты и SVG
+  fonts/, img/               локальные шрифты и PNG-обложка
 tests/
-  unit/, integration/        Vitest + Supertest
+  unit/, integration/        Vitest + Supertest, включая docs-links
 docs/
+  deployment.md              Docker, native, Windows 10, TLS, бэкапы, диагностика
+  user-guide.md              роли и все экраны с актуальными снимками
+  security-audit.md          маршруты, RBAC, CSRF, заголовки и остаточные риски
+  performance.md             EXPLAIN, бюджеты запросов и размеры бандлов
   superpowers/specs/         архитектура, метрики, трассировка требований
   superpowers/plans/         дорожная карта и планы этапов
-  screenshots/m1/            скриншоты и журнал браузерной проверки M1
-  screenshots/m2/            снимки, CSV-фикстуры и журнал M2
-  screenshots/m4/            снимки пяти аналитических экранов и журнал M4
-  screenshots/m5/            алерты, сценарии, границы бюджета и журнал E2E M5
+  screenshots/m1–m5/         журналы браузерной проверки этапов
+  screenshots/m6/            E2E, a11y, ошибки и снимки для руководства
 ```
 
 ## Документация
 
+- [Руководство пользователя](docs/user-guide.md)
+- [Развёртывание: Docker, native Linux, Windows 10, TLS, бэкапы](docs/deployment.md)
+- [Аудит безопасности](docs/security-audit.md)
+- [Производительность и размеры бандлов](docs/performance.md)
 - [Архитектура и границы](docs/superpowers/specs/2026-11-21-marketing-analytics-design.md)
 - [Формулы CAC, LTV, ROMI и краевые случаи](docs/superpowers/specs/2026-11-21-metrics-spec.md)
 - [Трассировка требований задания](docs/superpowers/specs/2026-11-21-assignment-traceability.md)
@@ -329,24 +396,29 @@ docs/
 - [План этапа M3](docs/superpowers/plans/2026-11-22-metrika-m3-metrics.md)
 - [План этапа M4](docs/superpowers/plans/2026-11-23-metrika-m4-analytics-ui.md)
 - [План этапа M5](docs/superpowers/plans/2026-11-24-metrika-m5-decisions.md)
+- [План этапа M6](docs/superpowers/plans/2026-11-25-metrika-m6-delivery.md)
 - [Журнал E2E и скриншоты M1](docs/screenshots/m1/README.md)
 - [Журнал E2E и скриншоты M2](docs/screenshots/m2/README.md)
 - [Журнал E2E и скриншоты M4](docs/screenshots/m4/README.md)
 - [Журнал E2E и скриншоты M5](docs/screenshots/m5/README.md)
+- [Журнал M6: Docker, бэкапы, a11y, E2E и снимки для руководства](docs/screenshots/m6/README.md)
 - [Отложенные улучшения](IMPROVEMENTS.md)
 
 ## Windows 10
 
-Короткая версия; полная инструкция с Docker и резервным копированием появится в M6.
+Полная пошаговая инструкция — [docs/deployment.md §5](docs/deployment.md#5-windows-10). Короткая версия:
 
-1. Установите Node.js 24 LTS и PostgreSQL 18 (установщик с официального сайта).
-2. Добавьте `bin` PostgreSQL в `PATH` или запускайте `createdb`/`psql` из каталога установки.
-3. В PowerShell: `Copy-Item .env.example .env`, затем отредактируйте URL и `SESSION_SECRET`.
-4. `npm ci`, `npm run db:setup`, `npm run migrate`, `npm run seed`, `npm run dev` (собирает острова и запускает
-   сервер). Для запуска без наблюдения: `npm run build` и затем `npm start`.
-5. Откройте `http://localhost:3000`.
+1. Установите Node.js 24 LTS и PostgreSQL 18 (официальные установщики); новый PowerShell должен видеть
+   `node -v` и `psql --version`.
+2. Добавьте `C:\Program Files\PostgreSQL\18\bin` в `PATH` или задайте `PG_DUMP`/`PG_RESTORE` абсолютными путями.
+3. `Copy-Item .env.example .env`, заполните URL, `SESSION_SECRET` и пути бэкапов; пароль БД с `@ : / ?`
+   percent-encode.
+4. `npm ci`, `npm run db:setup`, `npm run migrate`, `npm run seed`, `npm run build`, `npm start`.
+5. Проверьте `http://localhost:3000/health` и вход. Docker Desktop — альтернатива в §5.5, Планировщик заданий —
+   в §5.7.
 
-Если `db:setup` не может подключиться, проверьте службу PostgreSQL и пароль роли в `ADMIN_DATABASE_URL`.
+> Windows-путь в этом репозитории **не проверялся**: у агента нет Windows-машины. Инструкция готова, но результат
+> подтверждает владелец и дописывает в журнал M6.
 
 ## Если что-то не запускается
 
@@ -360,11 +432,19 @@ docs/
 | `EADDRINUSE: address already in use :::3000` | порт занят: `PORT=3001 npm run dev` и `APP_URL=http://localhost:3001` (PowerShell: `$env:PORT=3001`) |
 | Миграции «уже применены», но таблиц нет | проверьте, что `DATABASE_URL` указывает на нужную базу; `migrate` идемпотентен |
 | Тесты падают на подключении | PostgreSQL не запущен или `TEST_DATABASE_URL` смотрит не на тестовую базу |
+| `docker compose` не найден | установите плагин Compose v2; без него Docker-путь не считается проверенным |
+| `/health` = `503` | PostgreSQL недоступен; контейнер `unhealthy`, проверьте `docker compose logs db` |
+| Бэкап: неверный ключ или права файла | ключ ровно 32 байта, файл `0600`; Windows ACL проверяется через `icacls` |
+
+Полная таблица диагностики, включая ошибки Windows, бэкапов и restore, — в
+[docs/deployment.md §9](docs/deployment.md#9-диагностика).
 
 ## Данные и лицензия
 
 Все компании, каналы, клиенты, заказы и суммы в демо — вымышленные и сгенерированы детерминированно для
 демонстрации. Совпадения с реальными организациями случайны; использовать эти цифры для бизнес-решений нельзя.
+Демо-пароль опубликован намеренно и не годится для production.
 
 Учебный проект БГУИР. Сторонние шрифты распространяются по своим лицензиям, тексты лицензий лежат в
-`public/fonts/`.
+`public/fonts/`. Лицензия на код пока не выбрана: до решения владельца права не предоставлены, файл `LICENSE`
+не добавлен. Это осознанный плейсхолдер, а не забытая лицензия.

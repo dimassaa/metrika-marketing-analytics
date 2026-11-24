@@ -1003,3 +1003,22 @@ Still open:
   was taken right after the login redirect and showed empty Recharts cards, although the console and page-error
   buffers were empty. The island had simply not hydrated yet. Evidence capture now waits for
   `.recharts-line-curve`; future E2E scripts should use a chart-specific selector, not a text wait on the SSR shell.
+
+## M6 Task 7 — руководства и финальный README
+
+- **Landing copy is stale after the login-card removal (priority: medium).** The landing still says «Демо-доступ и
+  тестовые роли указаны на странице входа», but `3906f21` removed the demo-accounts card; the login page now shows
+  only the form. The user guide and README list the accounts, so the information exists, but the landing promise is
+  wrong. Fixing the sentence is a product-copy change, outside this documentation task; the owner should either
+  restore a short demo hint on `/login` or change the landing line.
+- **Windows 10, Docker Desktop, Firefox and public TLS remain unverified (priority: high, owner-only).** The guides
+  mark them «не проверено здесь» and do not claim a passed run. A Windows smoke (native path, import, backup,
+  Task Scheduler, restore) and a TLS/HSTS check are still required before a release tag.
+- **`docs-links.test.js` checks relative files, not anchors or external URLs (priority: low).** Fenced and inline
+  code is stripped before extraction so command examples cannot create false broken links. Cross-file anchors
+  (`docs/deployment.md#5-windows-10`) and external links are outside the test; a dead GitHub anchor will not fail
+  CI. The test also cannot prove that no author username appears in prose — the one leaked DB role in the M6 log was
+  redacted manually and noted there.
+- **Guide screenshots reuse Task 4/6 captures (priority: low, process).** The user guide references earlier M6
+  screenshots for screens that did not change. They were taken on the same UI; if a later change touches those
+  screens, the guide must be recaptured together with the new E2E evidence, not left on old images.

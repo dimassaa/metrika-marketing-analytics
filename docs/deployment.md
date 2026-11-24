@@ -1,12 +1,14 @@
 # Развёртывание «Метрики»
 
-Руководство для двух путей: Docker-стенд (демонстрация и проверка) и native Linux (разработка и стенд без
-контейнеров). Windows, TLS/reverse proxy и резервные копии описаны в §5–§7; фактический прогон на Windows
-подтверждает владелец отдельно.
+Руководство для двух путей: Docker-стенд (демонстрация и проверка) и native-установка (разработка и стенд без
+контейнеров). Windows 10 разобран отдельно в §5, TLS/reverse proxy — в §6, резервное копирование — в §7,
+обновление — в §8, диагностика — в §9. Фактический прогон на Windows и Docker Desktop подтверждает владелец
+отдельно (§10): агент эти пути не выполнял и не выдаёт их за проверенные.
 
 Состояние на 24.11.2026: Docker-путь проверен реальным `docker compose config/up` на Docker Engine 29.9.2 и
-Docker Compose v5.8.0; native-путь ранее проверен на Node.js 26 и PostgreSQL 18.6. Подробный журнал с выводом
-команд — `docs/screenshots/m6/README.md`.
+Docker Compose v5.8.0; native-путь проверен на Node.js 26 (`engines.node` — `>=24`) и PostgreSQL 18.6.
+Подробный журнал с выводом команд — `docs/screenshots/m6/README.md`. Windows-команды ниже не выполнялись в этом
+репозитории: это инструкция для прогона владельцем, а не отчёт о прогоне.
 
 ## 1. Требования
 
@@ -96,20 +98,66 @@ docker compose down -v          # полный сброс: БД, секрет с
 ```
 
 Порт PostgreSQL наружу не публикуется. Порт приложения привязан к `127.0.0.1`; для публичного доступа нужен
-reverse proxy с TLS (раздел 5) и `COOKIE_SECURE=true`.
+reverse proxy с TLS (раздел 6) и `COOKIE_SECURE=true`.
+
+### 2.5. Контракт проверки
+
+```bash
+curl -fsS http://127.0.0.1:3000/health
+# {"status":"ok","db":"up","version":"0.1.0"}
+```
+
+`/health` проверяет БД запросом `SELECT 1`. Если PostgreSQL недоступен, приложение отвечает `503` с
+`{"status":"error","db":"down","version":"0.1.0"}`, а Compose-контейнер становится `unhealthy`: это ожидаемое
+поведение, а не падение процесса. Демо-вход — `admin@metrika.by` / `Metrika2026!`; данные появляются только при
+пустой БД, повторный `docker compose up` их не перезаписывает.
 
 ## 3. Native Linux
 
+### 3.1. Первый запуск
+
+Понадобятся Node.js 24 LTS, npm и PostgreSQL 18. Проверьте версии до установки пакетов:
+
 ```bash
-cp .env.example .env
-# отредактируйте DATABASE_URL, TEST_DATABASE_URL, SESSION_SECRET, APP_URL
-npm ci
-npm run db:setup      # создаёт dev/test БД идемпотентно
-npm run migrate
-npm run seed           # детерминированный демо-набор «Зёрна»
-npm run build          # Vite: public/assets
-npm start              # http://localhost:3000
+node -v       # v24.x или новее
+npm -v
+psql --version
 ```
+
+```bash
+git clone <URL-репозитория> metrika
+cd metrika
+npm ci
+cp .env.example .env
+```
+
+Сгенерируйте `SESSION_SECRET` (не короче 32 символов) и заполните `.env`:
+
+```bash
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+```
+
+```bash
+npm run db:setup      # создаёт dev/test БД идемпотентно
+npm run migrate       # применяет SQL-миграции 001–006
+npm run seed          # детерминированный демо-набор «Зёрна»
+npm run build         # Vite: public/assets
+npm start             # http://localhost:3000
+```
+
+`npm start` не собирает острова. Без `public/assets/.vite/manifest.json` production-режим останавливается с
+подсказкой выполнить `npm run build`. Для разработки удобнее `npm run dev`: он собирает острова один раз и
+перезапускает сервер при изменении файлов.
+
+### 3.2. Проверка
+
+```bash
+curl -fsS http://localhost:3000/health
+curl -sSI http://localhost:3000/login | head -1
+```
+
+Ожидается `200` и JSON из §2.5. Войдите демо-учётной записью и откройте дашборд; в шапке должна быть подпись
+«Данные по …» — это фактический data anchor, а не системная дата.
 
 `DATABASE_URL` и `TEST_DATABASE_URL` должны указывать на разные базы. Тесты используют только
 `TEST_DATABASE_URL`; интеграционные тесты очищают её схему. Для production задайте `NODE_ENV=production`,
@@ -123,7 +171,8 @@ npm start              # http://localhost:3000
 | Переменная | По умолчанию | Назначение |
 |---|---|---|
 | `NODE_ENV` | `development` | `production` включает guard'ы секрета и cookie |
-| `PORT` | `3000` | HTTP-порт приложения внутри контейнера |
+| `PORT` | `3000` | HTTP-порт приложения внутри контейнера и native-процесса |
+| `APP_PORT` | `3000` | только Compose: порт на loopback-хосте (`127.0.0.1:APP_PORT`) |
 | `DATABASE_URL` | — | `postgres://…`; в Compose собирается из `POSTGRES_*` |
 | `TEST_DATABASE_URL` | — | только для интеграционных тестов |
 | `POSTGRES_USER` | `postgres` | только Compose: пользователь и владелец БД |
@@ -162,22 +211,68 @@ Production-guard: при `NODE_ENV=production` и `COOKIE_SECURE=false` прил
 
 ## 5. Windows 10
 
-Раздел описывает native-путь без Docker Desktop. **Фактический прогон на Windows в этом репозитории не
-выполнялся** — все команды ниже проверены только на Linux; владелец подтверждает их на своей машине и дописывает
-результат в журнал `docs/screenshots/m6/README.md`. Непроверенный Windows-путь не считается закрытым.
+> **Статус:** на Windows 10 этот раздел **не проверялся** в текущем репозитории. Команды составлены по
+> требованиям Node.js и PostgreSQL и по проверенному Linux-пути; владелец выполняет их на своей машине и
+> дописывает результат в `docs/screenshots/m6/README.md`. Без этого прогона Windows-путь считается открытым,
+> а не «работает, потому что написано».
 
-### 5.1. Установка
+### 5.1. Node.js 24 LTS
 
-1. Node.js 24 LTS с nodejs.org; `node -v` и `npm -v` должны работать в новой консоли.
-2. PostgreSQL 18 с enterprisedb.com; запомните пароль суперпользователя. Клиенты `pg_dump.exe` и `pg_restore.exe`
-   лежат в `C:\Program Files\PostgreSQL\18\bin`. Либо добавьте этот каталог в `PATH`, либо задайте абсолютные пути
-   в `.env` (надёжнее для Планировщика).
-3. Репозиторий, например `C:\Metrika`. Скопируйте `.env.example` в `.env`.
+1. Установите Node.js 24 LTS с nodejs.org (MSI x64) или командой `winget install OpenJS.NodeJS.LTS`.
+2. Откройте **новое** окно PowerShell и проверьте версии. Старое окно не увидит обновлённый `PATH`.
+
+```powershell
+node -v      # v24.x
+npm -v
+```
+
+### 5.2. PostgreSQL 18, служба и PATH
+
+1. Установите PostgreSQL 18 с enterprisedb.com. Порт оставьте `5432`, пароль роли `postgres` сохраните: он нужен
+   в строке подключения.
+2. Клиенты `pg_dump.exe` и `pg_restore.exe` лежат в `C:\Program Files\PostgreSQL\18\bin`. Добавьте этот каталог
+   в `PATH` через «Параметры системы → Переменные среды → Path → Изменить → Создать» либо задайте абсолютные
+   пути в `.env` (надёжнее для Планировщика заданий).
+3. Проверьте, что служба запущена, а новый PowerShell видит клиент:
+
+```powershell
+Get-Service postgresql* | Format-Table Name, Status
+psql --version
+```
+
+Если `psql` не найден, вернитесь к шагу 2 или используйте полный путь
+`& 'C:\Program Files\PostgreSQL\18\bin\psql.exe' --version`.
+
+### 5.3. Роль, базы и `.env`
+
+Роль `postgres` из установщика имеет право создавать БД, поэтому `db:setup` может создать `metrika_dev` и
+`metrika_test` сам. Если используется отдельная роль, выдайте ей `CREATEDB` или создайте базы вручную:
+
+```powershell
+createuser -h localhost -U postgres --pwprompt metrika
+createdb -h localhost -U postgres -O metrika metrika_dev
+createdb -h localhost -U postgres -O metrika metrika_test
+```
+
+Скопируйте шаблон и откройте его в редакторе:
+
+```powershell
+cd C:\Metrika
+Copy-Item .env.example .env
+notepad .env
+```
+
+Минимальный Windows-набор (значения замените на свои):
 
 ```ini
+NODE_ENV=development
+PORT=3000
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/metrika_dev
 TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/metrika_test
 ADMIN_DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres
+SESSION_SECRET=<32-байтная-hex-строка>
+APP_URL=http://localhost:3000
+COOKIE_SECURE=false
 BACKUP_KEY_FILE=C:\ProgramData\Metrika\backup.key
 BACKUP_DIR=C:\MetrikaBackups
 BACKUP_RETENTION_DAYS=7
@@ -186,10 +281,73 @@ PG_DUMP=C:\Program Files\PostgreSQL\18\bin\pg_dump.exe
 PG_RESTORE=C:\Program Files\PostgreSQL\18\bin\pg_restore.exe
 ```
 
-Путь с пробелами задаётся в `.env` без кавычек: значение читает Node, а не shell. Если пароль PostgreSQL содержит
-`@`, `:`, `/` или `?`, percent-encode его в URL (см. §4).
+В `.env.example` блок `BACKUP_*` закомментирован: раскомментируйте нужные строки. Путь с пробелами задаётся без
+кавычек — значение читает Node, а не PowerShell. Если пароль содержит `@`, `:`, `/` или `?`, percent-encode его
+в URL (см. §4); проще выбрать пароль из букв, цифр, `-` и `_`.
 
-### 5.2. Ключ бэкапа и ACL
+`SESSION_SECRET` генерируется один раз и копируется в `.env`:
+
+```powershell
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+Для локальной демонстрации оставьте `NODE_ENV=development` и `COOKIE_SECURE=false`. Для стенда, открытого по
+HTTPS, обязательны `NODE_ENV=production`, `COOKIE_SECURE=true` и `APP_URL=https://…` (§6).
+
+### 5.4. Установка, миграции и запуск
+
+```powershell
+cd C:\Metrika
+npm ci
+npm run db:setup
+npm run migrate
+npm run seed
+npm run build
+npm start
+```
+
+`npm run db:setup` идемпотентен. Если он отвечает `permission denied to create database`, роль из
+`ADMIN_DATABASE_URL` не имеет `CREATEDB`: создайте базы вручную (см. §5.3) и повторите с `npm run migrate`.
+`npm start` требует готового `public/assets`: без `npm run build` production-режим остановится с подсказкой.
+Для разработки вместо пары `build` + `start` можно запустить `npm run dev`.
+
+Проверка в другом окне PowerShell:
+
+```powershell
+Invoke-RestMethod http://localhost:3000/health
+# status  db  version
+# ------  --  -------
+# ok      up  0.1.0
+Start-Process http://localhost:3000/login
+```
+
+Войдите как `admin@metrika.by` / `Metrika2026!` и откройте дашборд. На системном стенде с реальными данными
+сразу смените пароли и `SESSION_SECRET`.
+
+### 5.5. Docker Desktop как альтернатива
+
+Docker Desktop для Windows 10 требует WSL2. После установки и перезапуска проверьте, что доступен Compose v2:
+
+```powershell
+docker compose version
+cd C:\Metrika
+docker compose up --build -d
+docker compose ps
+Invoke-RestMethod http://127.0.0.1:3000/health
+```
+
+Compose-путь не требует `.env`: логин, пароль БД и секрет сессии создаются внутри контейнера. Для сброса стенда
+используйте `docker compose down -v` (удаляет БД, секрет и бэкапы). Бэкап запускается внутри контейнера:
+
+```powershell
+docker compose exec -T app node scripts/backup.js
+docker compose cp app:/backup/<file>.dump.enc .
+```
+
+Docker Desktop в этом репозитории не запускался; это альтернативная инструкция для прогона владельцем. Если
+Docker Desktop не установлен, native-путь выше полностью самодостаточен.
+
+### 5.6. Ключ бэкапа и ACL
 
 Ключ создаётся один раз, в PowerShell 5.1:
 
@@ -214,7 +372,7 @@ icacls 'C:\ProgramData\Metrika\backup.key' /grant:r 'METRIKA\svc-metrika:(R)'
 Ключ не кладётся в репозиторий, `.env` или аргументы командной строки. Права проверяются через
 `icacls 'C:\ProgramData\Metrika\backup.key'`: лишние записи (`Users`, `Everyone`) недопустимы.
 
-### 5.3. Задача Планировщика
+### 5.7. Задача Планировщика
 
 Задача запускает абсолютный `node.exe`, а не `npm`, иначе `npm` станет лишним родителем и код выхода потеряется.
 Рабочий каталог — корень репозитория, чтобы `dotenv` нашёл `.env`. PowerShell (запуск от администратора):
@@ -231,13 +389,14 @@ Register-ScheduledTask -TaskName 'Metrika backup' -Action $action -Trigger $trig
 
 Для выделенной учётной записи вместо SYSTEM: `-UserId 'METRIKA\svc-metrika' -LogonType Password` и регистрация
 с паролем (или GUI-переключатель «Выполнять независимо от того, вошёл ли пользователь в систему»). SYSTEM не
-требует пароля и всегда работает без входа пользователя.
+требует пароля и всегда работает без входа пользователя. В задаче должен быть тот же `BACKUP_KEY_FILE`, что и в
+`.env`: не передавайте ключ аргументом.
 
-### 5.4. Проверка после прогона
+### 5.8. Проверка после прогона
 
 1. В Планировщике: «Последний результат» (`Last Run Result`) = `0x0`.
 2. В `C:\MetrikaBackups` появился `metrika-YYYY-MM-DDTHH-mm-ssZ.dump.enc`, размер больше нуля.
-3. Файл расшифровывается и восстанавливается:
+3. Файл расшифровывается и восстанавливается в отдельную базу:
 
 ```powershell
 cd C:\Metrika
@@ -247,6 +406,8 @@ node scripts\restore.js --file C:\MetrikaBackups\<file>.dump.enc `
 
 4. `--verify` печатает «row-count + key checksum: совпадает». Scratch-базу после проверки удалите:
 `dropdb -h localhost -U postgres metrika_restore_check`.
+5. Повторно проверьте `/health` и вход после восстановления. Копия, которая ни разу не восстанавливалась, не
+   считается проверенной.
 
 Копирование бэкапа на другой диск/в сетевое хранилище — только `Copy-Item` или `robocopy`:
 
@@ -258,9 +419,6 @@ robocopy 'C:\MetrikaBackups' '\\nas\backups\Metrika' *.dump.enc /COPY:DAT /R:2 /
 Нельзя использовать `>` и `Out-File`: PowerShell перекодирует поток и испортит бинарный файл. Скрипты сами не
 используют shell-редиректы и текстовые режимы, поэтому `spawn` с массивом аргументов работает одинаково на
 Windows и Linux.
-
-Docker Desktop — альтернатива native-пути; тогда действуют §2 и §7, а Планировщик запускает
-`docker compose exec app node scripts/backup.js` с абсолютным путём к `docker.exe`.
 
 ## 6. TLS и reverse proxy
 
@@ -355,8 +513,7 @@ curl -sSI https://metrika.example.by/app/dashboard | grep -Ei 'x-robots-tag|cach
 ```
 
 Ожидается `noindex, nofollow` и `no-store`: приватные страницы не должны попадать в кэш прокси или поисковик.
-Публичный стенд без HTTPS — ошибка развёртывания, даже если приложение technically отвечает по HTTP на loopback.
-
+Публичный стенд без HTTPS — ошибка развёртывания, даже если приложение технически отвечает по HTTP на loopback.
 
 ### 6.3. Политика кэширования
 
@@ -382,7 +539,7 @@ curl -sSI https://metrika.example.by/app/dashboard | grep -Ei 'cache-control|x-r
 
 Регрессионный тест политики — `tests/integration/cache-headers.test.js`; он не зависит от локальной сборки.
 
-## 7. Резервные копии
+## 7. Резервное копирование и восстановление
 
 ### 7.1. Формат и ключ
 
@@ -406,7 +563,7 @@ MTRKBK1\0 | uint32BE длина заголовка | JSON {"v":1,"alg":"aes-256-
 защищает от случайного ключа, созданного с umask `022`. Осознанное исключение — явный флаг
 `--allow-loose-key`, который печатает предупреждение и продолжает. На Windows POSIX-биты не имеют смысла,
 поэтому проверка не блокирует запуск: скрипт предупреждает, что ACL нужно проверить через `icacls`
-(docs/deployment.md §5.2).
+(docs/deployment.md §5.6).
 
 Linux/macOS, один раз:
 
@@ -416,7 +573,7 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))" > 
 chmod 600 backups/backup.key
 ```
 
-`backups/` и `*.dump.enc` уже в `.gitignore`. Windows — §5.2. Один и тот же ключ нужен для восстановления: без
+`backups/` и `*.dump.enc` уже в `.gitignore`. Windows — §5.6. Один и тот же ключ нужен для восстановления: без
 него файл не расшифровать, восстановление невозможно.
 
 ### 7.2. Создание копии
@@ -480,7 +637,39 @@ npm run restore -- --file ./backups/<file>.dump.enc --database metrika_restore_c
 - Повреждённый файл (подменённый байт, битый тег, неверный ключ) завершается кодом `1` на этапе расшифровки;
   `pg_restore` не запускается, scratch-база не создаётся.
 
-### 7.4. Docker/Compose
+### 7.4. Runbook оператора
+
+| Когда | Что сделать | Проверка |
+|---|---|---|
+| Ежедневно, 02:30 | `npm run backup` по расписанию (Linux cron/systemd или Планировщик Windows, §5.7) | код выхода `0`, новый `metrika-*.dump.enc` ненулевого размера |
+| Ежедневно после копии | скопировать `*.dump.enc` на другой диск/в хранилище (`rsync`, `Copy-Item`, `robocopy`) | файл на приёмнике совпадает по размеру и контрольной сумме |
+| Еженедельно | проверить, что retention не удалил последнюю копию и свободного места хватает | минимум один файл, дата свежая |
+| Ежемесячно | восстановить последнюю копию в scratch-базу с `--verify` | «row-count + key checksum: совпадает» |
+| Перед обновлением | сделать ручную копию `npm run backup -- --out ./backups/before-update.dump.enc` | файл `before-update.dump.enc` существует |
+| При инциденте | остановить приложение, сохранить текущую БД, восстановить копию, запустить приложение | `/health` = 200, вход работает, контрольные суммы совпали |
+
+Ключ `BACKUP_KEY_FILE` хранится отдельно от каталога с дампами и резервируется своей процедурой. Без ключа
+зашифрованные файлы бесполезны: `restore.js` не сможет их расшифровать. Не храните ключ рядом с копиями на том же
+диске.
+
+Восстановление поверх рабочей БД — только осознанная операция:
+
+```bash
+# 1. Остановить приложение, чтобы никто не писал в БД во время restore.
+# 2. Сделать аварийную копию текущего состояния.
+npm run backup -- --out ./backups/before-restore.dump.enc
+# 3. Восстановить выбранную копию в рабочую базу. Имя базы возьмите из DATABASE_URL:
+#    без --database скрипт по умолчанию пишет в metrika_restore_check, а не в рабочую базу.
+#    --force обязателен: без него скрипт откажется писать в базу из DATABASE_URL.
+npm run restore -- --file ./backups/<file>.dump.enc --database <имя_базы_из_DATABASE_URL> --force
+# 4. Запустить приложение и проверить /health и вход.
+```
+
+`--force` вместе с `--verify` сравнивает живую базу с самой собой и всегда зелёный; для доказательной проверки
+восстанавливайте в отдельную базу, как в §7.3. Для публичного стенда сначала снимите трафик с reverse proxy,
+затем останавливайте приложение.
+
+### 7.5. Docker/Compose
 
 В Compose уже заданы `BACKUP_KEY_FILE=/app/data/backup.key`, `BACKUP_DIR=/backup`,
 `RESTORE_TMP_DIR=/app/data/tmp`; `BACKUP_KEY` в окружении отсутствует. Ключ создаётся один раз внутри контейнера
@@ -507,9 +696,46 @@ docker compose exec -T db psql -U postgres -d postgres -c 'DROP DATABASE metrika
 `/app/data/tmp` в volume. Не меняйте его на `/tmp` без увеличения tmpfs. Забирать бэкап с контейнера — только
 `docker compose cp`; bind-mount `./backups` оставляет файлы принадлежащими хосту и может быть недоступен uid 1000.
 
-## 8. Диагностика
+## 8. Обновление стенда
 
-Заглушка. Базовые команды уже проверены:
+Миграции `001`–`006` применяются по порядку и идемпотентно. Перед обновлением всегда есть свежая копия: схема
+меняется только вперёд, автоматического отката миграций нет.
+
+### 8.1. Native Linux
+
+```bash
+npm run backup -- --out ./backups/before-update.dump.enc
+git pull
+npm ci
+npm run migrate
+npm run build
+# перезапустите процесс, которым запущен сервер (systemd, pm2 или терминал с npm start)
+curl -fsS http://localhost:3000/health
+```
+
+Если обновление ломает приложение, откатите код (`git checkout <предыдущий-коммит>`, `npm ci`, `npm run build`) и
+восстановите копию, снятую до обновления. Откат только кода без отката схемы допустим, пока миграции совместимы;
+при сомнении восстанавливайте БД целиком.
+
+### 8.2. Docker/Compose
+
+```bash
+docker compose exec -T app node scripts/backup.js
+git pull
+docker compose build --pull
+docker compose up -d
+docker compose ps
+curl -fsS http://127.0.0.1:3000/health
+docker compose logs app --tail=100
+```
+
+Entrypoint применит новые миграции до старта приложения. `docker compose down` без `-v` сохраняет тома; `down -v`
+удаляет БД, секрет сессии и бэкапы и для обновления не используется. Если после `up` контейнер `unhealthy`,
+смотрите §9 и не удаляйте volume: данные всё ещё на месте.
+
+## 9. Диагностика
+
+Сначала проверьте факты, а не догадки:
 
 ```bash
 docker compose ps
@@ -519,6 +745,44 @@ curl -i http://127.0.0.1:3000/health
 docker compose exec app id -u      # 1000, не 0
 ```
 
-Частые причины: занятый `APP_PORT`, неприменённые миграции, недоступная БД (тогда `/health` отдаёт 503, а
-контейнер — `unhealthy`), неверный `SESSION_SECRET` (короче 32 символов), `COOKIE_SECURE=false` в production без
-демо-исключения.
+| Симптом | Вероятная причина | Действие |
+|---|---|---|
+| `docker: unknown command: docker compose` | не установлен плагин Compose v2 | установить pinned-релиз по §2.1, проверить `docker compose version` |
+| `port is already allocated` / `EADDRINUSE` | порт 3000 занят другим стендом | остановить старый контейнер или задать `APP_PORT`/`PORT` и `APP_URL` |
+| `/health` = `503`, контейнер `unhealthy` | PostgreSQL недоступен или перезапускается | `docker compose ps`, `docker compose logs db`, дождаться `healthy`; не считать это падением Node |
+| `permission denied to create database` | у роли из `ADMIN_DATABASE_URL` нет `CREATEDB` | выдать право или создать базы вручную через `createdb` |
+| `password authentication failed` | неверный пароль, URL или `pg_hba.conf` | проверить `psql "$DATABASE_URL"`, percent-encoding пароля, роль и `pg_hba.conf` |
+| `TEST_DATABASE_URL is not set` | не заполнен `.env` или тестовая база | скопировать `.env.example`, создать `metrika_test` |
+| Миграции «уже применены», таблиц нет | `DATABASE_URL` указывает не на ту базу | проверить имя БД и `schema_migrations`, не запускать `seed` вслепую |
+| `Asset manifest not found` | `npm start` без `npm run build` | выполнить `npm run build` или запускать `npm run dev` |
+| `SESSION_SECRET must be at least 32 characters` | плейсхолдер или короткая строка | сгенерировать 32 байта и перезапустить |
+| `COOKIE_SECURE must be true in production` | production без HTTPS | включить HTTPS/reverse proxy и `COOKIE_SECURE=true`; демо-исключение только для loopback |
+| Бэкап: `файл ключа доступен группе` | права шире `0600` на POSIX | `chmod 600`, либо осознанно `--allow-loose-key` |
+| Бэкап: `pg_dump` старше сервера | клиент PostgreSQL ниже 18 | указать `PG_DUMP` от PostgreSQL 18 или обновить клиент |
+| Restore: `отказывается писать в DATABASE_URL` | защита от затирания рабочей БД | восстановить в scratch-базу; `--force` только по runbook §7.4 |
+| Windows: `psql`/`pg_dump` не найден | каталог `bin` не в `PATH` | добавить `C:\Program Files\PostgreSQL\18\bin` или задать `PG_DUMP`/`PG_RESTORE` |
+| Windows: задача Планировщика `0x1` | неверный рабочий каталог, `.env` или ключ | запустить `node scripts\backup.js` вручную из корня репозитория и прочитать stderr |
+| Импорт: `413` / `Файл превышает 2 МБ` | сработал лимит загрузки | уменьшить файл или разбить его; лимит не поднимать без пересмотра безопасности |
+| Импорт: `400` про MIME/расширение | загружен не CSV | сохранить файл как `.csv` в UTF-8 и повторить |
+| Страница 500 | отказ БД или ошибка шаблона | посмотреть `requestId` в логе и `docker compose logs app`; не показывать stack пользователю |
+
+Для native-стенда те же проверки выполняются без Docker: `psql "$DATABASE_URL" -c 'select 1'`,
+`curl -i http://localhost:3000/health`, `npm run migrate`, проверка `SESSION_SECRET`.
+
+## 10. Что проверяет владелец (не проверено здесь)
+
+Следующие пункты агент не выполнял: в окружении не было Windows 10, Docker Desktop, публичного HTTPS-стенда и
+Firefox. Они не считаются закрытыми, пока владелец не прогонит сценарий и не допишет результат в
+`docs/screenshots/m6/README.md`.
+
+- **Windows 10, native:** установка Node 24 и PostgreSQL 18, `npm ci`, `db:setup`, `migrate`, `seed`, `build`,
+  `start`, вход, импорт, `/health`, ключ бэкапа и ACL, Планировщик (`0x0`), restore в scratch-базу.
+- **Docker Desktop:** `docker compose version`, `up --build -d`, `ps`, `/health`, вход, `down`/`down -v`.
+- **TLS/публичный HTTPS:** Caddy или nginx, `COOKIE_SECURE=true`, HSTS, редирект HTTP→HTTPS, `X-Robots-Tag` на
+  `/app`.
+- **Firefox/Opera/Yandex:** smoke-сценарий входа, дашборда, каналов, атрибуции, сценариев и импорта; Chromium
+  уже покрыт E2E-матрицей M6.
+- **Восстановление на Windows:** расшифровка копии, `pg_restore`, `--verify`, удаление scratch-базы.
+
+Пока эти пункты не отмечены владельцем, README и журнал доказательств должны прямо говорить «не проверено здесь»,
+а не «работает везде».
