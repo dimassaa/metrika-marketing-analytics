@@ -15,6 +15,11 @@ coverage/
 .DS_Store
 tmp/
 
+# encrypted dumps and the backup key are local state, never repository material
+backups/
+*.dump.enc
+*.dump.enc.staged
+
 # local course materials (not part of the product)
 бланк.docx
 Design.md

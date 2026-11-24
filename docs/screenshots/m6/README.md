@@ -265,13 +265,112 @@ Tests       1132 passed (1132)
 Duration    87.42s
 ```
 
+## Task 2 — бэкапы и восстановление
+
+Дата прогона: 24.11.2026. База: коммит `4afe303` (T1) + рабочее дерево Task 2. Linux (CachyOS), локальный
+PostgreSQL 18.6 и Compose-стенд; Windows недоступен.
+
+### 1. Тесты
+
+```text
+$ npx vitest run tests/unit/backup-format.test.js tests/integration/backup-restore.test.js
+✓ tests/unit/backup-format.test.js (35 tests)
+✓ tests/integration/backup-restore.test.js (3 tests)
+Tests  38 passed (38)
+```
+
+Unit: потоковый round-trip (включая проверку, что `.tmp` растёт до конца входного потока), ровно `v/alg/iv` в
+заголовке, неверный ключ, подмена ciphertext/IV/версии/тега, обрезанные header/tag, ключи 0/16/31/33/64 байта,
+плейсхолдер, retention (только `metrika-*.dump.enc`, минимум один, `--keep`), имена БД и отказ писать в
+`DATABASE_URL` без `--force`. Integration: дамп `metrika_test` → шифрование → расшифровка → restore в
+`metrika_test_restore_check` → `--verify` зелёный → scratch удалён; отдельный прогон на пустой мигрированной БД;
+повреждённая копия → код 1.
+
+### 2. Локальный стенд (`metrika_dev`)
+
+```text
+$ node scripts/backup.js   # BACKUP_KEY_FILE=…/backup.key, BACKUP_DIR=…/backups
+pg_dump (PostgreSQL) 18.6; сервер PostgreSQL 18.6; БД metrika_dev
+Бэкап создан: …/metrika-2026-11-24T08-49-45Z.dump.enc
+  размер: 709.6 КиБ (726533 байт дампа), AES-256-GCM
+$ file …dump.enc
+…: data
+$ stat -c '%a %s' …dump.enc
+600 726612
+$ strings …dump.enc | grep -E 'CREATE TABLE|PostgreSQL|INSERT INTO'
+(пусто)
+```
+
+```text
+$ node scripts/restore.js --file …dump.enc --database metrika_restore_check --create --verify
+Таблица        строк   восстановлено   md5 (первые 12)
+users              3              3   55b84a9d3171 ok
+channels           8              8   b5ca3ba695d8 ok
+campaigns         32             32   8d65c605aa11 ok
+customers       4000           4000   4389e1a10681 ok
+orders          9436           9436   f946520fec47 ok
+daily_stats    12691          12691   ab578525f37e ok
+audit_log          1              1   c4ca4238a0b9 ok
+Проверка row-count + key checksum: совпадает (7 таблиц).
+restore_exit=0
+restore_tmp_entries=0
+```
+
+Повреждённая копия (перевёрнут байт ciphertext):
+
+```text
+Восстановление не выполнено: Не удалось расшифровать бэкап: неверный ключ или файл повреждён (не совпал тег GCM).
+damaged_restore_exit=1
+tamper_db_count=0
+```
+
+### 3. Контейнерный путь
+
+Образ пересобран (`metrika-app:latest`, ID `71626cc17d5d`), `docker compose up -d app` → healthy. Ключ создан
+внутри контейнера, права проверены:
+
+```text
+$ docker compose exec -T app stat -c '%a %s %n' /app/data/backup.key /app/data/tmp
+600 65 /app/data/backup.key
+700 /app/data/tmp
+$ docker compose exec -T app node scripts/backup.js
+pg_dump (PostgreSQL) 18.7; сервер PostgreSQL 18.7; БД metrika
+Бэкап создан: /backup/metrika-2026-11-24T08-50-51Z.dump.enc
+  размер: 695.6 КиБ, AES-256-GCM, ключ из файла /app/data/backup.key
+```
+
+```text
+$ docker compose exec -T -e ADMIN_DATABASE_URL=postgres://postgres:postgres@db:5432/postgres \
+    app node scripts/restore.js --file /backup/<file> --database metrika_restore_check --create --verify
+users 3/3, channels 8/8, campaigns 32/32, customers 4000/4000,
+orders 9446/9446, daily_stats 12723/12723, audit_log 0/0
+Проверка row-count + key checksum: совпадает (7 таблиц).
+container_restore_exit=0
+container_tmp_entries=0
+```
+
+`docker compose cp app:/backup/<file>` + `docker compose cp app:/app/data/backup.key` на хост: файл 712329 байт,
+локальный `restore.js --create` восстановил `metrika_copy_check` (users 3, orders 9446) и удалил временный каталог.
+Scratch-базы `metrika_restore_check`, `metrika_copy_check`, `metrika_tamper_check` после проверок удалены.
+
+### 4. Мелкие правки по ревью T1
+
+- `docker/entrypoint.sh` получил executable-бит (`100755`); содержимое не менялось.
+- В `docs/deployment.md` добавлена сверка SHA-256 для скачиваемого Compose-плагина.
+- Задокументировано расхождение дефолтов `RUN_MIGRATIONS` (`env.js` — `false`, entrypoint — `true`): это разные
+  точки входа, а не разная трактовка значения.
+- В таблицу переменных добавлены `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB` и предупреждение о символах
+  `@ : / ?` в неpercent-encoded `DATABASE_URL`.
+
 ## Не проверено здесь — закрывает владелец
 
-- **Windows 10** и **Docker Desktop**: у агента нет Windows-машины; Linux-прогон их не заменяет.
+- **Windows 10** и **Docker Desktop**: у агента нет Windows-машины; Linux-прогон их не заменяет. Для Task 2 это
+  значит, что Windows-ветка `docs/deployment.md` §5 (ACL ключа, Планировщик, `0x0`) написана, но не выполнена.
 - **Firefox**: доступен только Chromium через `agent-browser`; кросс-браузерная матрица — прогон владельца.
 - **TLS**: публичный HTTPS-стенд за reverse proxy в этой задаче не поднимался.
 
 ## Verdict
 
 Compose установлен и проверен реальным выводом `docker compose config/up`; Docker-путь Task 1 **закрыт**.
+Task 2 **закрыт на Linux и в контейнере** (row-count + key checksum), Windows-прогон остаётся за владельцем.
 Ограничения выше относятся к T6/T8 и не выдаются за выполненные.

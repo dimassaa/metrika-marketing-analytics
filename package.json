@@ -11,6 +11,8 @@
     "db:setup": "node db/setup.js",
     "migrate": "node db/migrate.js",
     "seed": "node db/seed/seed.js",
+    "backup": "node scripts/backup.js",
+    "restore": "node scripts/restore.js",
     "test:watch": "vitest"
   },
   "type": "module",

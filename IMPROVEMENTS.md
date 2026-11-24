@@ -917,3 +917,19 @@ Still open:
 - **The local builder is the classic Docker builder, so `COPY --chmod` is unavailable.** The Dockerfile uses a plain
   `COPY` plus `chmod` in a later `RUN`; this works on both builders. If the owner's environment has BuildKit enabled,
   the explicit `chmod` can be folded back into `COPY --chmod=0755` without changing the contract.
+
+## M6 Task 2 — encrypted backups and restore
+
+- **Demo seeding is a TOCTOU race under `--scale app>1`.** `entrypoint.sh` checks that `users`, `channels` and
+  `daily_stats` are empty, then seeds; two replicas starting together can both pass the check and collide on unique
+  demo rows. The stand runs one `app` replica, so this is latent, not a current failure. A serialised guard
+  (`pg_advisory_lock` around check-and-seed, or `INSERT … ON CONFLICT DO NOTHING`) is required before scaling the app
+  service is supported.
+- **Retention trusts file mtime, not the timestamp in the file name.** A backup copied with a new mtime, or restored
+  from an archive, looks freshly created and is retained longer; an old file touched by a sync tool survives too.
+  Parsing the UTC stamp from `metrika-*.dump.enc` would make the policy independent of filesystem metadata. Kept on
+  mtime because `--out` files have arbitrary names and still need a deterministic age rule.
+- **`--verify` compares against the live `DATABASE_URL`, not the dump's source database.** The header deliberately
+  carries no database name, so the operator must run `--verify` immediately after `backup`; a later comparison after
+  normal writes reports a mismatch that is not a restore failure. Recording the source name in a sidecar file would
+  solve this, but it would also add metadata outside the encrypted envelope.
