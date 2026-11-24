@@ -69,6 +69,10 @@ export function requireAuth(req, res, next) {
   res.redirect(`/login?next=${encodeURIComponent(req.originalUrl)}`);
 }
 
+// Non-removable introspection mark: `tests/integration/route-audit.test.js` walks the router tree and must see that
+// a route is guarded without importing every controller chain. Adding a route without a guard is then a test failure.
+requireAuth.auth = true;
+
 /**
  * Rejects authenticated users whose role lacks the permission. The check is deliberately server-side: hiding a
  * sidebar link is presentation, not access control.
@@ -76,7 +80,7 @@ export function requireAuth(req, res, next) {
  * @returns {import('express').RequestHandler}
  */
 export function requirePermission(permission) {
-  return (req, res, next) => {
+  const guard = (req, res, next) => {
     if (!req.session?.user) {
       requireAuth(req, res, next);
       return;
@@ -95,4 +99,8 @@ export function requirePermission(permission) {
       year: new Date().getFullYear(),
     });
   };
+  // Both marks are read by the route audit; `auth` also covers a route whose only check is a login.
+  guard.auth = true;
+  guard.permission = permission;
+  return guard;
 }

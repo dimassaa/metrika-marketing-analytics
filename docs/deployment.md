@@ -1,8 +1,8 @@
 # Развёртывание «Метрики»
 
 Руководство для двух путей: Docker-стенд (демонстрация и проверка) и native Linux (разработка и стенд без
-контейнеров). Windows, TLS и резервные копии — разделы-заглушки: они наполняются в задачах M6, которые отвечают за
-эти сценарии, и до этого не считаются проверенными.
+контейнеров). Windows, TLS/reverse proxy и резервные копии описаны в §5–§7; фактический прогон на Windows
+подтверждает владелец отдельно.
 
 Состояние на 24.11.2026: Docker-путь проверен реальным `docker compose config/up` на Docker Engine 29.9.2 и
 Docker Compose v5.8.0; native-путь ранее проверен на Node.js 26 и PostgreSQL 18.6. Подробный журнал с выводом
@@ -264,9 +264,99 @@ Docker Desktop — альтернатива native-пути; тогда дейс
 
 ## 6. TLS и reverse proxy
 
-Заглушка. Публичный стенд обязан работать по HTTPS: reverse proxy (Caddy/nginx) завершает TLS, приложение слушает
-loopback, `COOKIE_SECURE=true`, `DEMO_INSECURE_COOKIES=false`, `TRUST_PROXY` соответствует числу прокси. Раздел
-наполняется вместе с аудитом безопасности.
+Публичный стенд обязан работать только по HTTPS. Приложение само TLS не завершает: оно слушает loopback (или
+внутреннюю сеть Docker), а сертификат и HTTP→HTTPS редирект обеспечивает reverse proxy. Production с
+`COOKIE_SECURE=false` не стартует (кроме явного loopback-демо с `DEMO_INSECURE_COOKIES=true`), поэтому забыть
+флаг на публичном стенде нельзя.
+
+Обязательные значения для публичного стенда:
+
+```dotenv
+NODE_ENV=production
+APP_URL=https://metrika.example.by
+COOKIE_SECURE=true
+DEMO_INSECURE_COOKIES=false
+TRUST_PROXY=1
+```
+
+`TRUST_PROXY=1` означает ровно один прокси-хоп перед приложением. Если цепочка длиннее (CDN → nginx → app),
+укажите число хопов или доверенные подсети (`TRUST_PROXY=loopback, 10.0.0.0/8`). `TRUST_PROXY=true` доверяет
+всему `X-Forwarded-For` и допустим только когда приложение недоступно напрямую. При `false` подделанный заголовок
+не влияет ни на `req.ip`, ни на ключ лимитера, ни на `audit_log.ip` — это безопасный дефолт, но за прокси он
+запишет в аудит адрес прокси.
+
+Проверка после настройки (замените домен):
+
+```bash
+curl -sSI https://metrika.example.by/login | grep -Ei 'strict-transport|content-security|permissions-policy|referrer-policy'
+curl -sSI http://metrika.example.by/login | head -1     # ожидается 301/308 на https
+curl -sS https://metrika.example.by/health              # {"status":"ok","db":"up",…}
+```
+
+`Strict-Transport-Security` появляется только при `COOKIE_SECURE=true`. Если его нет на HTTPS-стенде — проверьте
+`COOKIE_SECURE` и перезапуск контейнера.
+
+### 6.1. Caddy
+
+Caddy сам получает и продлевает сертификат Let's Encrypt. Пример `Caddyfile`:
+
+```caddyfile
+metrika.example.by {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:3000 {
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-For {remote_host}
+    }
+}
+```
+
+HTTP→HTTPS редирект Caddy делает автоматически. Приложение публикуется только на loopback
+(`APP_PORT=3000`, привязка `127.0.0.1:3000` в `docker-compose.yml`); порт 3000 не открывается наружу. После
+изменения DNS и запуска проверьте оба `curl` выше и отсутствие в логах Caddy ошибок ACME.
+
+### 6.2. nginx
+
+Сертификат выпускается отдельно (certbot или корпоративный CA). Минимальный server-блок:
+
+```nginx
+server {
+    listen 80;
+    server_name metrika.example.by;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name metrika.example.by;
+
+    ssl_certificate     /etc/letsencrypt/live/metrika.example.by/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/metrika.example.by/privkey.pem;
+
+    client_max_body_size 3m;   # CSV 2 MB + multipart overhead
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+    }
+}
+```
+
+`client_max_body_size` должен быть не меньше лимита импорта (2 MB) плюс запас на multipart; иначе nginx ответит
+413 раньше, чем приложение проверит файл. HSTS приложение отправляет само, дублировать его в nginx не нужно:
+два заголовка с разными `max-age` дают непредсказуемый результат.
+
+После настройки:
+
+```bash
+curl -sSI https://metrika.example.by/app/dashboard | grep -Ei 'x-robots-tag|cache-control'
+```
+
+Ожидается `noindex, nofollow` и `no-store`: приватные страницы не должны попадать в кэш прокси или поисковик.
+Публичный стенд без HTTPS — ошибка развёртывания, даже если приложение technically отвечает по HTTP на loopback.
+
 
 ## 7. Резервные копии
 

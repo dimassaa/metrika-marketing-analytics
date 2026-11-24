@@ -7,6 +7,11 @@ import { safeRedirectTarget } from './auth.js';
 /** Brute-force window fixed by the design spec: five attempts per e-mail and address in fifteen minutes. */
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_ATTEMPT_LIMIT = 5;
+/**
+ * A wider per-address ceiling catches credential spraying: one attacker cycles e-mail addresses, so the pair key never
+ * reaches its limit. Thirty failed attempts per address still leaves room for a shared office IP.
+ */
+const LOGIN_IP_ATTEMPT_LIMIT = 30;
 const RATE_LIMIT_MESSAGE = 'Слишком много попыток входа. Попробуйте снова через 15 минут.';
 
 /** Import quota from the spec: twenty files per person per fifteen minutes. */
@@ -22,6 +27,41 @@ const IMPORT_RATE_LIMIT_MESSAGE = 'Слишком много импортов. �
  */
 function rateLimitAddress(req) {
   return clientIp(req) ?? req.socket?.remoteAddress ?? 'unknown';
+}
+
+/**
+ * The login limiter expects the same styled 429 page from both ceilings.
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
+ */
+function renderLoginRateLimited(req, res) {
+  renderLoginPage(req, res, {
+    status: 429,
+    error: RATE_LIMIT_MESSAGE,
+    email: typeof req.body?.email === 'string' ? req.body.email : '',
+    next: safeRedirectTarget(req.body?.next),
+  });
+}
+
+/**
+ * Builds the per-address login limiter with its own in-memory store.
+ *
+ * It runs before the `ip+email` pair and is deliberately wider: the pair stops guessing one account, this stops one
+ * source from spraying many accounts. Keying only by address keeps a rotated e-mail from resetting the count, and
+ * `clientIp` keeps a forged `X-Forwarded-For` from doing the same unless a proxy is trusted.
+ *
+ * @returns {import('express').RequestHandler}
+ */
+export function createLoginIpRateLimiter() {
+  return rateLimit({
+    windowMs: LOGIN_WINDOW_MS,
+    limit: LOGIN_IP_ATTEMPT_LIMIT,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    keyGenerator: rateLimitAddress,
+    handler: renderLoginRateLimited,
+  });
 }
 
 /**
@@ -44,14 +84,7 @@ export function createLoginRateLimiter() {
     // Keying by address alone would let one office IP exhaust every account; keying by e-mail alone would let an
     // attacker lock a known account from anywhere. The pair limits both vectors.
     keyGenerator: (req) => `${rateLimitAddress(req)}:${normalizeEmail(req.body?.email).slice(0, 254)}`,
-    handler: (req, res) => {
-      renderLoginPage(req, res, {
-        status: 429,
-        error: RATE_LIMIT_MESSAGE,
-        email: typeof req.body?.email === 'string' ? req.body.email : '',
-        next: safeRedirectTarget(req.body?.next),
-      });
-    },
+    handler: renderLoginRateLimited,
   });
 }
 

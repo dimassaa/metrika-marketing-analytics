@@ -50,3 +50,6 @@ export function csrfProtection(req, res, next) {
 
   next();
 }
+
+// The route audit requires this mark on a non-safe route chain; the global mount in `app.js` is the only instance.
+csrfProtection.csrf = true;

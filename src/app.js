@@ -45,6 +45,7 @@ import { createMetricsModule } from './services/metrics/index.js';
 import { createDecisionsModule } from './services/decisions/index.js';
 import { ASSETS_DIR, createAssetManifest } from './lib/assets.js';
 import { dataProps } from './lib/serialize-props.js';
+import { observeDb, withRequestUser } from './lib/slow-query.js';
 
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const viewsDir = fileURLToPath(new URL('./views', import.meta.url));
@@ -61,18 +62,31 @@ const publicDir = fileURLToPath(new URL('../public', import.meta.url));
  *   } & Partial<import('pg').Pool>,
  *   sessionStore?: import('express-session').Store,
  *   trustProxy?: false | true | number | string,
+ *   hsts?: boolean,
  *   assets?: { assets: (entryNames: string | string[]) => { scripts: string[], preloads: string[] } },
  * }} deps `db.connect` backs `withTransaction`: the import writes data, its batch and its audit row in one
  *   transaction. Integration tests pass a pool pointed at the test database, never the shared one.
  *   `trustProxy` defaults to `TRUST_PROXY`; tests inject it to exercise the forged `X-Forwarded-For` path.
+ *   `hsts` defaults to `COOKIE_SECURE`: HSTS is sent only on an HTTPS stand, and the integration suite injects `true`
+ *   to assert the production header without building a TLS proxy.
  *   `assets` is a ready asset manifest; tests inject a stub so a missing `public/assets` directory does not change
  *   what the page renders.
  * @returns {import('express').Express}
  */
-export function createApp({ db, sessionStore, trustProxy = env.trustProxy, assets } = {}) {
-  if (!db || typeof db.query !== 'function') {
+export function createApp({
+  db: database,
+  sessionStore,
+  trustProxy = env.trustProxy,
+  hsts = env.cookieSecure,
+  assets,
+} = {}) {
+  if (!database || typeof database.query !== 'function') {
     throw new TypeError('createApp requires a db object with a query(text, params) method');
   }
+
+  // Every repository and the session store receive the observed pool, so a slow statement is logged once with the
+  // request's user id. The proxy forwards identity, transaction clients and the connection counters unchanged.
+  const db = observeDb(database);
 
   const usersRepository = createUsersRepository(db);
   const referenceRepository = createReferenceRepository(db);
@@ -129,6 +143,8 @@ export function createApp({ db, sessionStore, trustProxy = env.trustProxy, asset
 
   app.use(
     helmet({
+      // HSTS is a promise about HTTPS; the zero-edit demo runs on plain HTTP and must not send it.
+      hsts,
       contentSecurityPolicy: {
         // Explicit full directive list: helmet's defaults relax style-src with 'unsafe-inline', which we avoid.
         useDefaults: false,
@@ -140,7 +156,8 @@ export function createApp({ db, sessionStore, trustProxy = env.trustProxy, asset
           'script-src': ["'self'", (req, res) => `'nonce-${res.locals.nonce}'`],
           'script-src-attr': ["'none'"],
           'style-src': ["'self'"],
-          // Recharts sets inline style attributes, which are not covered by style-src.
+          // Recharts sets inline style attributes, which are not covered by style-src. This is a style-only
+          // relaxation: script-src keeps the nonce and script-src-attr stays 'none'.
           'style-src-attr': ["'unsafe-inline'"],
           'img-src': ["'self'", 'data:'],
           'font-src': ["'self'"],
@@ -150,6 +167,21 @@ export function createApp({ db, sessionStore, trustProxy = env.trustProxy, asset
       },
     }),
   );
+
+  // Helmet 8.3 has no `permissionsPolicy` option, so the allowlist is set manually. Every response, including static
+  // files and errors, carries the same value; a new browser feature is denied by default.
+  app.use((req, res, next) => {
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    next();
+  });
+
+  // `/app` and `/api` are private surfaces even when a response is a redirect or a JSON 401. The header duplicates the
+  // meta tag, and `no-store` is set here rather than in each router so an error page cannot be cached either.
+  app.use(['/app', '/api'], (req, res, next) => {
+    res.set('X-Robots-Tag', 'noindex, nofollow');
+    res.set('Cache-Control', 'no-store');
+    next();
+  });
 
   // Custom serializers keep `set-cookie` (the live session id) and `x-csrf-token` out of the log stream; the
   // pino-http defaults log every response header. See `src/lib/logger.js`.
@@ -167,6 +199,9 @@ export function createApp({ db, sessionStore, trustProxy = env.trustProxy, asset
   // Session → CSRF → locals → routes is the required order: the token lives in the session, the templates read the
   // token and the current user, and only then can a route guard redirect or render.
   app.use(createSessionMiddleware({ store }));
+  // The observer reads the signed-in user id from this context; it sits after the session and before any repository
+  // query, so slow statements are attributed to a person instead of `anon` when one is known.
+  app.use(withRequestUser);
   app.use(csrfProtection);
   app.use((req, res, next) => {
     res.locals.currentUser = req.session?.user ?? null;
@@ -178,11 +213,8 @@ export function createApp({ db, sessionStore, trustProxy = env.trustProxy, asset
   });
 
   // HTML is the one document that must never be cached: it names the current bundle hash, and a stale copy would
-  // pair an old page with a removed asset after a deploy.
-  app.use('/app', (req, res, next) => {
-    res.set('Cache-Control', 'no-store');
-    next();
-  });
+  // pair an old page with a removed asset after a deploy. `/app` and `/api` already carry `no-store` from the private
+  // surface middleware above, which also covers redirects and error responses.
 
   app.use('/', createPublicRouter({ mediaController }));
   app.use(createAuthRouter({ authController }));

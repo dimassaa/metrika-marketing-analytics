@@ -933,3 +933,24 @@ Still open:
   carries no database name, so the operator must run `--verify` immediately after `backup`; a later comparison after
   normal writes reports a mismatch that is not a restore failure. Recording the source name in a sidecar file would
   solve this, but it would also add metadata outside the encrypted envelope.
+
+## M6 Task 3 — security headers, limits and access audit
+
+- **Media uploads still have no dedicated rate limiter (priority: medium).** Avatar and OG-cover routes are capped at
+  1 MB per request and require a session, but an authenticated account can churn BYTEA writes. Import has its own
+  limiter; media should get the same per-user counter when those routes are next touched. Recorded as R1 in
+  `docs/security-audit.md`.
+- **Alert recalculation writes no audit row (priority: medium).** Both `/app/alerts/recalculate` and
+  `/api/v1/alerts/recalculate` mutate `alerts` (`detected_at`, statuses) but only dismissal is audited. Decide whether
+  a recalculation is a “significant action” for this project; if it is, add `alert.recalculate` to `AUDIT_ACTIONS`
+  and write it in the same transaction. Recorded as R2.
+- **Login limiter stores are per process (priority: medium).** Both ceilings are in-memory and reset on restart; two
+  app replicas do not share counters. Acceptable for the single-container stand, but scaling needs a shared store.
+  Recorded as R3.
+- **Slow statements from the session store are logged as `anon` (priority: low).** The request context is installed
+  after the session middleware, so the session load/save query cannot name a user. It is also the correct reading: the
+  user is not known before the session row is fetched. Recorded as R5.
+- **HSTS has a test seam instead of a child-process test.** `createApp({ hsts })` defaults to `COOKIE_SECURE`; the
+  integration suite injects `true` to assert the production header without standing up a TLS proxy. The option drives
+  only HSTS, not the session cookie (`sessionCookieOptions()` still reads `env.cookieSecure`). If a future refactor
+  unifies cookie and header policy, pass the same value into both.

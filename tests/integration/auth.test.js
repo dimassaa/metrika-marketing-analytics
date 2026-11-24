@@ -243,6 +243,50 @@ describe('POST /login', () => {
     expect(statuses[5]).toBe(429);
   });
 
+  it('stops an address that sprays failures across different e-mails', async () => {
+    const agent = newAgent();
+    const csrf = await getCsrf(agent);
+    const attempt = (index) =>
+      agent
+        .post('/login')
+        .type('form')
+        .send({ email: `nobody-${index}@metrika.by`, password: 'definitely-not-the-password', _csrf: csrf });
+
+    const statuses = [];
+    for (let index = 0; index < 31; index += 1) {
+      statuses.push((await attempt(index)).status);
+    }
+
+    expect(statuses.slice(0, 30)).toEqual(Array.from({ length: 30 }, () => 401));
+    // The per-address ceiling is 30 failed attempts; the pair limit cannot see this vector because every e-mail is new.
+    expect(statuses[30]).toBe(429);
+  });
+
+  it('does not spend the failed-attempt quota on successful logins', async () => {
+    for (let index = 0; index < 5; index += 1) {
+      const agent = newAgent();
+      const login = await loginAs(agent, VIEWER);
+      expect(login.status).toBe(302);
+    }
+
+    const agent = newAgent();
+    const csrf = await getCsrf(agent);
+    const attempt = () =>
+      agent
+        .post('/login')
+        .type('form')
+        .send({ email: VIEWER, password: 'definitely-not-the-password', _csrf: csrf });
+
+    const statuses = [];
+    for (let index = 0; index < 6; index += 1) {
+      statuses.push((await attempt()).status);
+    }
+
+    // If successful logins had consumed the pair quota, the first failure would already be 429.
+    expect(statuses.slice(0, 5)).toEqual([401, 401, 401, 401, 401]);
+    expect(statuses[5]).toBe(429);
+  });
+
   it('ignores rotated forged X-Forwarded-For values when counting failed attempts', async () => {
     // Even with a hop trusted, a non-IP header is not a key: every attempt falls back to the same socket address.
     const trustedApp = makeApp({ trustProxy: 1 });
