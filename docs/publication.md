@@ -79,7 +79,8 @@ git push origin v1.0.0
 | Полный `npm test` на чистом дереве | готово | 108 файлов / 1406 тестов, все зелёные; два прогона — 99,85 и 100,82 с (журнал M6, Task 8) |
 | `npm run build` без новых предупреждений кроме известного чанка Vite > 500 кБ | готово | журнал M6, раздел Task 8 |
 | `docker compose config` валиден; реальный `up` записан | готово | журнал M6, раздел Docker (Engine 29.9.2, Compose v5.8.0) |
-| Чистый клон от коммита: `npm ci` → env → БД → migrate/seed/build/start → вход | готово | `npm run check:fresh`, журнал M6, раздел Task 8 |
+| Чистый клон от коммита: `npm ci` → env → БД → migrate/seed/build/start → вход | готово | `npm run check:fresh` на `be91b0d`: PASS за 4,4 с; журнал M6, Task 8 |
+| Docker с чистого дерева без `.env`: `docker compose up --build` → healthy → `/health` 1.0.0 | готово | журнал M6, Task 8 (образ `metrika-t8-app`, `down -v` после прогона) |
 | Гигиена индекса: нет `.env`, `public/assets`, `node_modules`, логов, бэкапов, файлов > 5 МБ, домашних путей | готово | `tests/unit/repo-hygiene.test.js` |
 | Относительные ссылки документации ведут на существующие файлы | готово | `tests/unit/docs-links.test.js` |
 | Лицензия выбрана и `LICENSE` заменён | **блокер: владелец** | §4 |

@@ -847,8 +847,61 @@ triage `IMPROVEMENTS.md`.
 Версия и `/health` проверяются не только юнит-тестом: чистый клон ниже сравнивает `version` из `package.json` с
 ответом запущенного сервера.
 
-### 2. Чистый клон
+### 2. Чистый клон и Docker с чистого дерева
 
-Заполняется результатом `npm run check:fresh` **после** коммита задачи T8: скрипт берёт зафиксированный SHA, а не
-рабочее дерево, поэтому его нельзя запускать до коммита. Итог (SHA, длительность, URL, удаление БД и каталога)
-записан отдельным `docs:`-коммитом — без правки задним числом.
+**Native-путь.** Команда `npm run check:fresh` на коммите `be91b0dd2365b50525c3b26cf755a0e762582d6c`
+(`chore: prepare repository for publication`), рабочее дерево чистое:
+
+```text
+Fresh-clone check at be91b0dd2365b50525c3b26cf755a0e762582d6c in /tmp/metrika-clone-mqooys/repo
+  ok   git worktree add --detach (0.0 s)
+  ok   npm ci --prefer-offline (1.1 s)
+  ok   database create (db:setup) (0.1 s)
+  ok   npm run migrate (0.2 s)
+  ok   npm run seed (0.8 s)
+  ok   npm run build (1.7 s)
+       checked: GET /, GET /login, GET /health, GET /app/dashboard (anonymous redirect), POST /login (admin), GET /app/dashboard (admin)
+  ok   npm start + HTTP checks (0.4 s)
+
+Fresh-clone check PASS
+  sha: be91b0dd2365b50525c3b26cf755a0e762582d6c
+  duration: 4.4 s
+  url: http://127.0.0.1:46159
+  database: metrika_clone_check (dropped)
+```
+
+Скрипт взял detached worktree зафиксированного коммита (не рабочее дерево), сгенерировал `.env` из `.env.example`
+со случайным `SESSION_SECRET`, создал отдельную БД `metrika_clone_check`, сравнил `version` из `package.json` клона
+с ответом `/health`, проверил `/`, `/login`, редирект анонимного `/app/dashboard`, вход admin и дашборд под ним.
+После прогона каталог, worktree и БД удалены (`git worktree list` — только основной каталог, `pg_database` без
+`%clone%`). Время `npm ci` (1,1 с) объясняется тёплым кэшем npm и `--prefer-offline`; на холодной машине шаг дольше,
+но проверяется тот же контракт: `package-lock.json` в индексе и установка с нуля.
+
+**Docker-путь без `.env`.** Чистое дерево того же коммита получено `git archive be91b0d | tar -x`, `.env`
+отсутствует. Порт 3000 и 3100 на хосте заняты (на 3000 работает стенд Task 1, на 3100 — чужой процесс), поэтому
+взят свободный `APP_PORT=41777`; это переменная окружения, файлы Compose не правились. Проект запущен отдельно
+(`-p metrika-t8`), чтобы не трогать тома стенда Task 1:
+
+```text
+$ APP_PORT=41777 docker compose -p metrika-t8 up --build -d
+ Image metrika-t8-app Built
+ Container metrika-t8-db-1 Healthy
+ Container metrika-t8-app-1 Started
+
+$ docker compose -p metrika-t8 ps
+metrika-t8-app-1   Up 12 seconds (healthy)   127.0.0.1:41777->3000/tcp
+metrika-t8-db-1    Up 38 seconds (healthy)   5432/tcp
+
+$ curl -fsS http://127.0.0.1:41777/health
+{"status":"ok","db":"up","version":"1.0.0"}
+
+$ curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:41777/login
+200
+```
+
+В логах `app`: `demo stand was empty: seeded users, channels and daily stats`, затем
+`server listening` с `nodeEnv: "production"`. После проверки `docker compose -p metrika-t8 down -v` удалил
+контейнеры, тома и сеть; `docker ps -a`, `docker volume ls`, `docker network ls` не содержат `t8`.
+
+Итог: оба пути — native и Docker — поднимаются с зафиксированного коммита без локальных файлов; версия в `/health`
+равна `1.0.0`. Результаты записаны этим `docs:`-коммитом, а не правкой предыдущего.
