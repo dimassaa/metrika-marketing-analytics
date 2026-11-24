@@ -1123,3 +1123,7 @@ deferred», это значит, что каждый пункт раздела �
   OG-обложка из БД.
 - **Владелец:** лицензия, Firefox, Windows 10, Docker Desktop, публичный TLS-стенд, push и тег `v1.0.0` —
   см. `docs/publication.md` §8.
+- **Scenario snapshot and import batch screenshots are not in the user guide (priority: low).** The guide shows the
+  scenario builder and the import result, but not `/app/scenarios/:id` or `/app/import/batches/:id`. Both screens
+  exist and are covered by E2E; adding captures would require creating a saved scenario and opening a batch on the
+  guide stand, which was outside the docs-only fix round. Recorded here instead of claiming full coverage.

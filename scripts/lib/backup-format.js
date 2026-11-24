@@ -159,7 +159,7 @@ export function backupFileName(date = new Date()) {
  * POSIX: a key readable by group or others is refused, because the whole point of a key file is that only the
  * service account can read it. `--allow-loose-key` is the explicit override for a platform that cannot express
  * 0600. Windows has no meaningful POSIX mode bits, so the check degrades to a warning and the ACL must be verified
- * with `icacls` (docs/deployment.md §5.2).
+ * with `icacls` (docs/deployment.md §5.6).
  *
  * @param {string | undefined} keyFile
  * @param {{ allowLooseKey?: boolean, platform?: NodeJS.Platform }} [options] `platform` is injectable for tests.
@@ -181,7 +181,7 @@ export async function assertKeyFileMode(keyFile, { allowLooseKey = false, platfo
     if (!allowLooseKey) {
       console.warn(
         `Внимание: на Windows права POSIX для "${keyFile}" не проверяются; ACL задайте через icacls ` +
-          '(docs/deployment.md §5.2).',
+          '(docs/deployment.md §5.6).',
       );
     }
     return;

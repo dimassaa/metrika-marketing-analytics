@@ -337,7 +337,8 @@ Invoke-RestMethod http://127.0.0.1:3000/health
 ```
 
 Compose-путь не требует `.env`: логин, пароль БД и секрет сессии создаются внутри контейнера. Для сброса стенда
-используйте `docker compose down -v` (удаляет БД, секрет и бэкапы). Бэкап запускается внутри контейнера:
+используйте `docker compose down -v` (удаляет БД, секрет и бэкапы). **Сначала создайте ключ по §7.5** — без него
+`backup.js` завершится ошибкой `BACKUP_KEY_FILE`. После этого бэкап запускается внутри контейнера:
 
 ```powershell
 docker compose exec -T app node scripts/backup.js
@@ -565,7 +566,7 @@ MTRKBK1\0 | uint32BE длина заголовка | JSON {"v":1,"alg":"aes-256-
 поэтому проверка не блокирует запуск: скрипт предупреждает, что ACL нужно проверить через `icacls`
 (docs/deployment.md §5.6).
 
-Linux/macOS, один раз:
+Linux/macOS, один раз. Сначала создайте ключ, затем укажите его в `.env`:
 
 ```bash
 install -d -m 700 backups
@@ -573,8 +574,14 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))" > 
 chmod 600 backups/backup.key
 ```
 
-`backups/` и `*.dump.enc` уже в `.gitignore`. Windows — §5.6. Один и тот же ключ нужен для восстановления: без
-него файл не расшифровать, восстановление невозможно.
+```dotenv
+BACKUP_KEY_FILE=./backups/backup.key
+```
+
+Без этой строки `npm run backup` не найдёт ключ и завершится ошибкой; переменную можно экспортировать в
+оболочке вместо `.env`, но для Планировщика и повторных запусков надёжнее файл. `backups/` и `*.dump.enc` уже в
+`.gitignore`. Windows — §5.6. Один и тот же ключ нужен для восстановления: без него файл не расшифровать,
+восстановление невозможно.
 
 ### 7.2. Создание копии
 
@@ -672,8 +679,9 @@ npm run restore -- --file ./backups/<file>.dump.enc --database <имя_базы_
 ### 7.5. Docker/Compose
 
 В Compose уже заданы `BACKUP_KEY_FILE=/app/data/backup.key`, `BACKUP_DIR=/backup`,
-`RESTORE_TMP_DIR=/app/data/tmp`; `BACKUP_KEY` в окружении отсутствует. Ключ создаётся один раз внутри контейнера
-(файл в volume `app_data`, не в образе):
+`RESTORE_TMP_DIR=/app/data/tmp`; `BACKUP_KEY` в окружении отсутствует. Сначала ключ, потом бэкап: без файла ключа
+`scripts/backup.js` откажется работать. Ключ создаётся один раз внутри контейнера (файл в volume `app_data`, не в
+образе):
 
 ```bash
 docker compose exec -T app node -e "require('node:fs').writeFileSync('/app/data/backup.key', require('node:crypto').randomBytes(32).toString('hex')+'\n', {mode:0o600})"
