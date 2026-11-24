@@ -154,22 +154,103 @@ export function backupFileName(date = new Date()) {
 }
 
 /**
- * Warns when a POSIX key file is readable by group or others. The scripts keep working (Windows has no meaningful
- * mode bits), but an operator should fix the ACL before the next scheduled run.
+ * Enforces the key-file permission contract.
+ *
+ * POSIX: a key readable by group or others is refused, because the whole point of a key file is that only the
+ * service account can read it. `--allow-loose-key` is the explicit override for a platform that cannot express
+ * 0600. Windows has no meaningful POSIX mode bits, so the check degrades to a warning and the ACL must be verified
+ * with `icacls` (docs/deployment.md §5.2).
  *
  * @param {string | undefined} keyFile
+ * @param {{ allowLooseKey?: boolean, platform?: NodeJS.Platform }} [options] `platform` is injectable for tests.
  * @returns {Promise<void>}
+ * @throws {BackupKeyError} On POSIX when the file is group/other accessible and the override is absent.
  */
-export async function warnIfKeyFileIsLoose(keyFile) {
-  if (!keyFile || process.platform === 'win32') return;
+export async function assertKeyFileMode(keyFile, { allowLooseKey = false, platform = process.platform } = {}) {
+  if (!keyFile) return;
+
+  let info;
   try {
-    const info = await stat(keyFile);
-    if ((info.mode & 0o077) !== 0) {
-      console.warn(`Внимание: файл ключа "${keyFile}" доступен группе или остальным (нужно chmod 600).`);
-    }
+    info = await stat(keyFile);
   } catch {
     // The caller reads the key next and reports a missing/unreadable file with a proper error.
+    return;
   }
+
+  if (platform === 'win32') {
+    if (!allowLooseKey) {
+      console.warn(
+        `Внимание: на Windows права POSIX для "${keyFile}" не проверяются; ACL задайте через icacls ` +
+          '(docs/deployment.md §5.2).',
+      );
+    }
+    return;
+  }
+
+  const mode = info.mode & 0o777;
+  if ((info.mode & 0o077) === 0) return;
+
+  if (allowLooseKey) {
+    console.warn(
+      `Внимание: файл ключа "${keyFile}" доступен группе или остальным (${mode.toString(8)}), ` +
+        'продолжаю из-за --allow-loose-key.',
+    );
+    return;
+  }
+
+  throw new BackupKeyError(
+    `Файл ключа "${keyFile}" доступен группе или остальным (режим ${mode.toString(8)}). ` +
+      'Выполните chmod 600 или передайте --allow-loose-key, если это осознанное решение.',
+  );
+}
+
+/**
+ * Splits a PostgreSQL URL into the password-free form safe for `argv`/`ps` and the decoded password for
+ * `PGPASSWORD`. Child processes therefore never receive the password as a command-line argument.
+ *
+ * @param {string} connectionString
+ * @returns {{ connectionString: string, password: string | null }}
+ * @throws {BackupUsageError}
+ */
+export function childConnection(connectionString) {
+  let url;
+  try {
+    url = new URL(connectionString);
+  } catch {
+    throw new BackupUsageError('Строка подключения не является корректным URL.');
+  }
+
+  const encodedPassword = url.password;
+  let password = null;
+  if (encodedPassword) {
+    try {
+      password = decodeURIComponent(encodedPassword);
+    } catch {
+      // A malformed escape is still usable by libpq verbatim; it is better than dropping the credential.
+      password = encodedPassword;
+    }
+  }
+  url.password = '';
+  return { connectionString: url.toString(), password };
+}
+
+/**
+ * Builds the environment for `pg_dump`/`pg_restore`. The connection URLs and application secrets are removed so the
+ * child cannot inherit the same password (or the backup key) through its environment; the credential it needs is
+ * supplied only as `PGPASSWORD`.
+ *
+ * @param {string | null} password
+ * @param {Record<string, string | undefined>} [source]
+ * @returns {Record<string, string | undefined>}
+ */
+export function childEnvironment(password, source = process.env) {
+  const environment = { ...source };
+  for (const name of ['DATABASE_URL', 'TEST_DATABASE_URL', 'ADMIN_DATABASE_URL', 'BACKUP_KEY', 'SESSION_SECRET']) {
+    delete environment[name];
+  }
+  if (password) environment.PGPASSWORD = password;
+  else delete environment.PGPASSWORD;
+  return environment;
 }
 
 /**
@@ -231,9 +312,9 @@ export function assertRestoreTarget({ targetDatabase, databaseUrl, force = false
 
   let sourceDatabase;
   try {
-    sourceDatabase = new URL(databaseUrl).pathname.replace(/^\//, '');
+    sourceDatabase = decodeURIComponent(new URL(databaseUrl).pathname.replace(/^\//, ''));
   } catch {
-    throw new BackupUsageError('DATABASE_URL не является корректным URL.');
+    throw new BackupUsageError('DATABASE_URL не является корректным URL или содержит неверное имя базы.');
   }
   if (!sourceDatabase) {
     throw new BackupUsageError('DATABASE_URL не содержит имя базы данных.');

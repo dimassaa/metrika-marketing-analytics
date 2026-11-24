@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
@@ -12,7 +12,10 @@ import {
   MAGIC,
   TAG_LENGTH,
   assertBackupKey,
+  assertKeyFileMode,
   assertRestoreTarget,
+  childConnection,
+  childEnvironment,
   decryptDump,
   encryptDump,
   loadBackupKey,
@@ -313,6 +316,99 @@ describe('key handling', () => {
   });
 });
 
+describe('child connection and key file mode', () => {
+  it('removes the password from the argv URL and decodes it for PGPASSWORD', () => {
+    const connection = childConnection(
+      'postgres://user:p%40ss%3Aword@localhost:5432/metrika?sslmode=require',
+    );
+
+    expect(connection.password).toBe('p@ss:word');
+    expect(connection.connectionString).toBe('postgres://user@localhost:5432/metrika?sslmode=require');
+    expect(connection.connectionString).not.toContain('p@ss');
+    expect(connection.connectionString).not.toContain('p%40ss');
+  });
+
+  it('returns a null password when the URL has none', () => {
+    expect(childConnection('postgres://user@localhost:5432/metrika')).toEqual({
+      connectionString: 'postgres://user@localhost:5432/metrika',
+      password: null,
+    });
+  });
+
+  it('strips connection URLs, the backup key and inherited PGPASSWORD from the child environment', () => {
+    const environment = childEnvironment('new-secret', {
+      PATH: '/bin',
+      DATABASE_URL: 'postgres://user:old@localhost/db',
+      TEST_DATABASE_URL: 'postgres://user:old@localhost/test',
+      ADMIN_DATABASE_URL: 'postgres://user:old@localhost/postgres',
+      BACKUP_KEY: 'a'.repeat(64),
+      SESSION_SECRET: 'session-secret',
+      PGPASSWORD: 'stale',
+    });
+
+    expect(environment).toEqual({ PATH: '/bin', PGPASSWORD: 'new-secret' });
+  });
+
+  it('accepts a 0600 key file', async () => {
+    const keyFile = path('mode-0600.key');
+    await writeFile(keyFile, KEY.toString('hex'), { mode: 0o600 });
+    await expect(assertKeyFileMode(keyFile)).resolves.toBeUndefined();
+  });
+
+  it('refuses a group-readable key file on POSIX', async () => {
+    const keyFile = path('mode-0644.key');
+    await writeFile(keyFile, KEY.toString('hex'), { mode: 0o644 });
+    await expect(assertKeyFileMode(keyFile)).rejects.toThrow(/chmod 600|allow-loose-key/);
+  });
+
+  it('continues with --allow-loose-key and warns', async () => {
+    const keyFile = path('mode-0640.key');
+    await writeFile(keyFile, KEY.toString('hex'), { mode: 0o640 });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(assertKeyFileMode(keyFile, { allowLooseKey: true })).resolves.toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/allow-loose-key/));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('warns instead of refusing on Windows, where POSIX mode bits are meaningless', async () => {
+    const keyFile = path('mode-windows.key');
+    await writeFile(keyFile, KEY.toString('hex'), { mode: 0o644 });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(assertKeyFileMode(keyFile, { platform: 'win32' })).resolves.toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/icacls/));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('refuses a loose key file in both CLIs before any connection', async () => {
+    const keyFile = path('cli-loose.key');
+    await writeFile(keyFile, KEY.toString('hex'), { mode: 0o644 });
+    const environment = {
+      ...process.env,
+      DATABASE_URL: 'postgres://nobody:nobody@127.0.0.1:1/metrika_source',
+      ADMIN_DATABASE_URL: 'postgres://nobody:nobody@127.0.0.1:1/postgres',
+      BACKUP_KEY_FILE: keyFile,
+    };
+
+    for (const [script, args] of [
+      ['scripts/backup.js', []],
+      ['scripts/restore.js', ['--file', path('loose-key.dump.enc'), '--database', 'metrika_key_check']],
+    ]) {
+      // The dump path only has to exist; the key-mode check runs before decryption.
+      await writeFile(path('loose-key.dump.enc'), 'not-an-encrypted-backup');
+      const result = spawnSync(process.execPath, [script, ...args], { cwd: ROOT, env: environment, encoding: 'utf8' });
+      expect(result.status, script).toBe(1);
+      expect(`${result.stdout}${result.stderr}`, script).toMatch(/chmod 600|allow-loose-key/);
+      expect(`${result.stdout}${result.stderr}`, script).not.toMatch(/ECONNREFUSED/);
+    }
+  });
+});
+
 describe('retention', () => {
   const DAY = 24 * 60 * 60 * 1000;
 
@@ -399,6 +495,13 @@ describe('restore target validation', () => {
     expect(() =>
       assertRestoreTarget({ targetDatabase: 'metrika_test_restore_check', databaseUrl, force: false }),
     ).not.toThrow();
+  });
+
+  it('decodes a percent-encoded database name before the --force comparison', () => {
+    const databaseUrl = 'postgres://user:secret@localhost:5432/metrika%5Ftest';
+    expect(() =>
+      assertRestoreTarget({ targetDatabase: 'metrika_test', databaseUrl, force: false }),
+    ).toThrow(/--force/);
   });
 
   it('rejects an invalid --database name before the script opens any connection', () => {

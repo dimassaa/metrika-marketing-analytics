@@ -7,27 +7,30 @@ import pg from 'pg';
 import {
   BackupError,
   BackupUsageError,
+  assertKeyFileMode,
   backupFileName,
+  childConnection,
+  childEnvironment,
   encryptDump,
   loadBackupKey,
   pruneBackups,
   redactConnectionString,
-  warnIfKeyFileIsLoose,
 } from './lib/backup-format.js';
 
 /**
  * Creates one encrypted backup of `DATABASE_URL` and applies the retention policy.
  *
  * Everything is passed to child processes as an argument array with `shell: false`; no redirection or shell
- * expansion is involved, which is what makes the same code safe on Linux and Windows. The password never appears
- * in output because every embedded child stderr is redacted with the connection string's own password.
+ * expansion is involved, which is what makes the same code safe on Linux and Windows. The password is removed from
+ * the URL before it reaches `argv` (visible in `ps`) and passed to `pg_dump` through `PGPASSWORD` instead.
  */
 
 const USAGE = [
-  'Использование: node scripts/backup.js [--keep N] [--out PATH]',
+  'Использование: node scripts/backup.js [--keep N] [--out PATH] [--allow-loose-key]',
   '',
-  '  --keep N   сколько последних бэкапов сохранять независимо от возраста (по умолчанию 1)',
-  '  --out PATH записать в конкретный файл и не применять retention',
+  '  --keep N           сколько последних бэкапов сохранять независимо от возраста (по умолчанию 1)',
+  '  --out PATH         записать в конкретный файл и не применять retention',
+  '  --allow-loose-key  разрешить файл ключа с правами шире 0600 (POSIX)',
   '',
   'Переменные: DATABASE_URL, BACKUP_KEY_FILE или BACKUP_KEY, BACKUP_DIR,',
   'BACKUP_RETENTION_DAYS, PG_DUMP.',
@@ -35,16 +38,20 @@ const USAGE = [
 
 /**
  * @param {string[]} argv
- * @returns {{ keep: number, out: string | null, help: boolean }}
+ * @returns {{ keep: number, out: string | null, allowLooseKey: boolean, help: boolean }}
  * @throws {BackupUsageError}
  */
 function parseArgs(argv) {
-  const result = { keep: 1, out: null, help: false };
+  const result = { keep: 1, out: null, allowLooseKey: false, help: false };
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--help' || argument === '-h') {
       result.help = true;
+      continue;
+    }
+    if (argument === '--allow-loose-key') {
+      result.allowLooseKey = true;
       continue;
     }
 
@@ -83,9 +90,9 @@ function parseArgs(argv) {
  * @param {string[]} args
  * @returns {Promise<{ code: number | null, stdout: string, stderr: string }>}
  */
-function capture(binary, args) {
+function capture(binary, args, environment = process.env) {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(binary, args, { shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(binary, args, { shell: false, stdio: ['ignore', 'pipe', 'pipe'], env: environment });
     let stdout = '';
     let stderr = '';
     child.stdout.setEncoding('utf8');
@@ -109,7 +116,7 @@ function capture(binary, args) {
 async function binaryVersion(binary) {
   let result;
   try {
-    result = await capture(binary, ['--version']);
+    result = await capture(binary, ['--version'], childEnvironment(null));
   } catch (error) {
     throw new BackupError(
       `Не удалось запустить "${binary}": ${error.code ?? error.message}. Укажите путь в PG_DUMP.`,
@@ -131,7 +138,11 @@ async function binaryVersion(binary) {
  * @throws {BackupError}
  */
 async function serverVersion(databaseUrl) {
-  const client = new pg.Client({ connectionString: databaseUrl });
+  const connection = childConnection(databaseUrl);
+  const client = new pg.Client({
+    connectionString: connection.connectionString,
+    ...(connection.password ? { password: connection.password } : {}),
+  });
   try {
     await client.connect();
     const { rows } = await client.query(
@@ -160,13 +171,13 @@ async function serverVersion(databaseUrl) {
 function assertDumpDirection(dump, server) {
   if (dump.major < server.major) {
     throw new BackupError(
-      `pg_dump ${dump.version} старше сервера PostgreSQL ${server.version}. Дамп может быть несовместим; ` +
+      `${dump.version} старше сервера PostgreSQL ${server.version}. Дамп может быть несовместим; ` +
         'установите клиент той же или более новой мажорной версии и повторите запуск.',
     );
   }
   if (dump.major > server.major) {
     console.warn(
-      `Внимание: pg_dump ${dump.version} новее сервера PostgreSQL ${server.version}. ` +
+      `Внимание: ${dump.version} новее сервера PostgreSQL ${server.version}. ` +
         'Архив будет создан; для восстановления понадобится pg_restore не старше клиента.',
     );
   }
@@ -200,7 +211,7 @@ function parseRetentionDays(raw) {
  * @returns {string}
  */
 function databaseName(connectionString) {
-  return new URL(connectionString).pathname.replace(/^\//, '');
+  return decodeURIComponent(new URL(connectionString).pathname.replace(/^\//, ''));
 }
 
 /** @returns {Promise<void>} */
@@ -221,14 +232,14 @@ async function main() {
   const retentionDays = args.out ? null : parseRetentionDays(process.env.BACKUP_RETENTION_DAYS);
 
   const keyFile = process.env.BACKUP_KEY_FILE;
+  await assertKeyFileMode(keyFile, { allowLooseKey: args.allowLooseKey });
   const key = await loadBackupKey({ source: process.env });
-  await warnIfKeyFileIsLoose(keyFile);
 
   const pgDump = process.env.PG_DUMP || 'pg_dump';
   const dumpVersion = await binaryVersion(pgDump);
   const database = await serverVersion(databaseUrl);
   assertDumpDirection(dumpVersion, database);
-  console.log(`pg_dump ${dumpVersion.version}; сервер PostgreSQL ${database.version}; БД ${databaseName(databaseUrl)}`);
+  console.log(`${dumpVersion.version}; сервер PostgreSQL ${database.version}; БД ${databaseName(databaseUrl)}`);
 
   const backupDir = resolve(process.env.BACKUP_DIR || './backups');
   const outputPath = args.out
@@ -239,10 +250,16 @@ async function main() {
   // replace an existing manual `--out` file with a partial archive.
   const stagedPath = `${outputPath}.staged`;
 
+  // Password-free argv: `ps` shows the arguments, so the credential travels only in PGPASSWORD.
+  const dumpConnection = childConnection(databaseUrl);
   const child = spawn(
     pgDump,
-    ['--format=custom', '--no-owner', '--no-acl', '--dbname', databaseUrl],
-    { shell: false, stdio: ['ignore', 'pipe', 'pipe'] },
+    ['--format=custom', '--no-owner', '--no-acl', '--dbname', dumpConnection.connectionString],
+    {
+      shell: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: childEnvironment(dumpConnection.password),
+    },
   );
   let stderr = '';
   child.stderr.setEncoding('utf8');

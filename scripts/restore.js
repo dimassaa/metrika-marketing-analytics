@@ -1,20 +1,22 @@
 #!/usr/bin/env node
 import 'dotenv/config';
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import pg from 'pg';
 import {
   BackupError,
   BackupUsageError,
+  assertKeyFileMode,
   assertRestoreTarget,
+  childConnection,
+  childEnvironment,
   decryptDump,
   loadBackupKey,
   quoteIdentifier,
   redactConnectionString,
   validateDatabaseName,
-  warnIfKeyFileIsLoose,
 } from './lib/backup-format.js';
 
 /**
@@ -37,15 +39,17 @@ const VERIFIED_TABLES = [
   'audit_log',
 ];
 const MAX_CHILD_OUTPUT = 64 * 1024;
+const STALE_RESTORE_DIR_MS = 24 * 60 * 60 * 1000;
 
 const USAGE = [
-  'Использование: node scripts/restore.js --file PATH [--database NAME] [--create] [--verify] [--force]',
+  'Использование: node scripts/restore.js --file PATH [--database NAME] [--create] [--verify] [--force] [--allow-loose-key]',
   '',
   '  --file PATH        зашифрованный файл metrika-*.dump.enc (обязательно)',
   `  --database NAME    целевая база, по умолчанию ${DEFAULT_RESTORE_DATABASE}`,
   '  --create           создать базу через ADMIN_DATABASE_URL, если её нет',
   '  --verify           сравнить row-count + key checksum с DATABASE_URL',
   '  --force            разрешить восстановление в базу из DATABASE_URL (разрушительно)',
+  '  --allow-loose-key  разрешить файл ключа с правами шире 0600 (POSIX)',
   '',
   'Переменные: DATABASE_URL, BACKUP_KEY_FILE или BACKUP_KEY, ADMIN_DATABASE_URL,',
   'RESTORE_TMP_DIR, PG_RESTORE.',
@@ -53,7 +57,10 @@ const USAGE = [
 
 /**
  * @param {string[]} argv
- * @returns {{ file: string | null, database: string, create: boolean, verify: boolean, force: boolean, help: boolean }}
+ * @returns {{
+ *   file: string | null, database: string, create: boolean, verify: boolean, force: boolean,
+ *   allowLooseKey: boolean, help: boolean,
+ * }}
  * @throws {BackupUsageError}
  */
 function parseArgs(argv) {
@@ -63,6 +70,7 @@ function parseArgs(argv) {
     create: false,
     verify: false,
     force: false,
+    allowLooseKey: false,
     help: false,
   };
 
@@ -74,6 +82,10 @@ function parseArgs(argv) {
     }
     if (argument === '--create' || argument === '--verify' || argument === '--force') {
       result[argument.slice(2)] = true;
+      continue;
+    }
+    if (argument === '--allow-loose-key') {
+      result.allowLooseKey = true;
       continue;
     }
 
@@ -110,6 +122,40 @@ function withDatabase(connectionString, databaseName) {
 }
 
 /**
+ * Removes `metrika-restore-*` directories older than a day. A killed restore or a power loss can leave the
+ * decrypted dump behind; the `finally` cleanup cannot run in those cases. The age threshold prevents deleting a
+ * concurrent restore's working directory, and only the exact prefix under `RESTORE_TMP_DIR` is touched.
+ *
+ * @param {string} root
+ * @param {{ now?: number, maxAgeMs?: number }} [options]
+ * @returns {Promise<void>}
+ */
+async function cleanStaleRestoreDirs(root, { now = Date.now(), maxAgeMs = STALE_RESTORE_DIR_MS } = {}) {
+  let entries;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.warn(`Внимание: не удалось проверить ${root}: ${error.message}`);
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith('metrika-restore-')) continue;
+    const directory = join(root, entry.name);
+    try {
+      const info = await stat(directory);
+      if (now - info.mtimeMs < maxAgeMs) continue;
+      await rm(directory, { recursive: true, force: true });
+      console.log(`Удалён устаревший временный каталог: ${directory}`);
+    } catch (error) {
+      if (error.code !== 'ENOENT') {
+        console.warn(`Внимание: не удалось удалить ${directory}: ${error.message}`);
+      }
+    }
+  }
+}
+
+/**
  * Creates the scratch database when `--create` was passed. An existing database is reused: `pg_restore --clean`
  * removes the objects it is about to recreate, but it never drops the database itself.
  *
@@ -117,7 +163,11 @@ function withDatabase(connectionString, databaseName) {
  * @throws {BackupUsageError | BackupError}
  */
 async function ensureScratchDatabase({ name, adminUrl }) {
-  const client = new pg.Client({ connectionString: adminUrl });
+  const connection = childConnection(adminUrl);
+  const client = new pg.Client({
+    connectionString: connection.connectionString,
+    ...(connection.password ? { password: connection.password } : {}),
+  });
   try {
     await client.connect();
   } catch (error) {
@@ -164,16 +214,28 @@ async function ensureScratchDatabase({ name, adminUrl }) {
  * Runs `pg_restore --clean --if-exists` with an argument array (no shell). Both streams are captured so a failure
  * can name the child's own error without echoing the password.
  *
- * @param {{ binary: string, dumpPath: string, targetUrl: string, databaseUrl: string }} options
+ * @param {{ binary: string, dumpPath: string, targetConnection: { connectionString: string, password: string | null }, databaseUrl: string }} options
  * @returns {Promise<void>}
  * @throws {BackupError}
  */
-function runPgRestore({ binary, dumpPath, targetUrl, databaseUrl }) {
+function runPgRestore({ binary, dumpPath, targetConnection, databaseUrl }) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(
       binary,
-      ['--clean', '--if-exists', '--no-owner', '--no-acl', '--dbname', targetUrl, dumpPath],
-      { shell: false, stdio: ['ignore', 'pipe', 'pipe'] },
+      [
+        '--clean',
+        '--if-exists',
+        '--no-owner',
+        '--no-acl',
+        '--dbname',
+        targetConnection.connectionString,
+        dumpPath,
+      ],
+      {
+        shell: false,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: childEnvironment(targetConnection.password),
+      },
     );
     let stdout = '';
     let stderr = '';
@@ -233,13 +295,23 @@ async function tableFingerprint(client, table) {
  * Prints a per-table table and throws when any count or checksum differs. This is a "row-count + key checksum"
  * check, not a byte-for-byte comparison of the whole database.
  *
- * @param {{ sourceUrl: string, targetUrl: string, databaseUrl: string }} options
+ * @param {{
+ *   sourceConnection: { connectionString: string, password: string | null },
+ *   targetConnection: { connectionString: string, password: string | null },
+ *   databaseUrl: string,
+ * }} options
  * @returns {Promise<void>}
  * @throws {BackupError}
  */
-async function verifyRestore({ sourceUrl, targetUrl, databaseUrl }) {
-  const source = new pg.Client({ connectionString: sourceUrl });
-  const target = new pg.Client({ connectionString: targetUrl });
+async function verifyRestore({ sourceConnection, targetConnection, databaseUrl }) {
+  const source = new pg.Client({
+    connectionString: sourceConnection.connectionString,
+    ...(sourceConnection.password ? { password: sourceConnection.password } : {}),
+  });
+  const target = new pg.Client({
+    connectionString: targetConnection.connectionString,
+    ...(targetConnection.password ? { password: targetConnection.password } : {}),
+  });
 
   try {
     try {
@@ -327,15 +399,25 @@ async function main() {
   }
 
   const keyFile = process.env.BACKUP_KEY_FILE;
+  await assertKeyFileMode(keyFile, { allowLooseKey: args.allowLooseKey });
   const key = await loadBackupKey({ source: process.env });
-  await warnIfKeyFileIsLoose(keyFile);
 
   const pgRestore = process.env.PG_RESTORE || 'pg_restore';
   const adminUrl = process.env.ADMIN_DATABASE_URL || DEFAULT_ADMIN_DATABASE_URL;
   const targetUrl = withDatabase(databaseUrl, targetDatabase);
+  const sourceConnection = childConnection(databaseUrl);
+  const targetConnection = childConnection(targetUrl);
   const tempRoot = process.env.RESTORE_TMP_DIR || tmpdir();
 
+  if (args.verify && targetDatabase === sourceDatabase) {
+    console.warn(
+      'Внимание: --force с целью, совпадающей с DATABASE_URL, и --verify сравнивает живую базу с самой собой; ' +
+        'такая проверка всегда зелёная и не подтверждает корректность восстановления.',
+    );
+  }
+
   await mkdir(tempRoot, { recursive: true, mode: 0o700 });
+  await cleanStaleRestoreDirs(tempRoot);
   const workDir = await mkdtemp(join(tempRoot, 'metrika-restore-'));
   try {
     const dumpPath = join(workDir, 'backup.dump');
@@ -349,10 +431,10 @@ async function main() {
     console.log(
       `pg_restore → база "${targetDatabase}" (${targetDatabase === sourceDatabase ? 'источник DATABASE_URL' : `источник ${sourceDatabase}`})`,
     );
-    await runPgRestore({ binary: pgRestore, dumpPath, targetUrl, databaseUrl });
+    await runPgRestore({ binary: pgRestore, dumpPath, targetConnection, databaseUrl });
 
     if (args.verify) {
-      await verifyRestore({ sourceUrl: databaseUrl, targetUrl, databaseUrl });
+      await verifyRestore({ sourceConnection, targetConnection, databaseUrl });
     }
 
     console.log(`Восстановление завершено: база "${targetDatabase}".`);

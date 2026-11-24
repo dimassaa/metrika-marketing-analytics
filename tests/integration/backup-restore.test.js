@@ -142,7 +142,49 @@ function backupFile(dir, name) {
   return join(dir, name);
 }
 
+/**
+ * Adds a password to the child URL when the local test URL has none. Local `trust`/peer auth ignores the value,
+ * but it makes the argv assertion meaningful: the secret must appear only in `PGPASSWORD`, never in `ps`.
+ *
+ * @param {string} connectionString
+ * @returns {string}
+ */
+function withReviewPassword(connectionString) {
+  const url = new URL(connectionString);
+  if (!url.password) url.password = 'review-secret';
+  return url.toString();
+}
+
+/**
+ * Writes a POSIX wrapper that records the argument list and whether PGPASSWORD was set, then execs the real binary.
+ * The log contains only the argv and a boolean, never the password value.
+ *
+ * @param {string} filePath
+ * @returns {Promise<void>}
+ */
+async function writeArgvWrapper(filePath) {
+  const script = [
+    '#!/bin/sh',
+    'if [ -n "$PGPASSWORD" ]; then printf "PGPASSWORD_SET\\n" >> "$ARGV_LOG"; else printf "PGPASSWORD_UNSET\\n" >> "$ARGV_LOG"; fi',
+    'printf "%s\\n" "$*" >> "$ARGV_LOG"',
+    'exec "$REAL_BINARY" "$@"',
+    '',
+  ].join('\n');
+  await writeFile(filePath, script, { mode: 0o755 });
+}
+
+const canTraceArgv = process.platform !== 'win32';
 const testDatabase = env.testDatabaseUrl ? databaseName(env.testDatabaseUrl) : '';
+const childDatabaseUrl = env.testDatabaseUrl ? withReviewPassword(env.testDatabaseUrl) : '';
+const childPassword = childDatabaseUrl
+  ? (() => {
+      try {
+        return decodeURIComponent(new URL(childDatabaseUrl).password);
+      } catch {
+        return new URL(childDatabaseUrl).password;
+      }
+    })()
+  : '';
 const restoreDatabase = `${testDatabase}_restore_check`;
 const emptyRestoreDatabase = `${testDatabase}_restore_empty_check`;
 
@@ -151,6 +193,10 @@ let backupDir = '';
 let keyFile = '';
 let restoreTmpRoot = '';
 let backupPath = '';
+let dumpWrapper = '';
+let restoreWrapper = '';
+let dumpArgvLog = '';
+let restoreArgvLog = '';
 
 describe.skipIf(Boolean(skipReason))('backup and restore', () => {
   beforeAll(async () => {
@@ -205,16 +251,27 @@ describe.skipIf(Boolean(skipReason))('backup and restore', () => {
     restoreTmpRoot = join(workDir, 'restore-tmp');
     await writeFile(join(workDir, '.keep'), '');
 
+    if (canTraceArgv) {
+      dumpWrapper = join(workDir, 'pg_dump-wrapper.sh');
+      restoreWrapper = join(workDir, 'pg_restore-wrapper.sh');
+      dumpArgvLog = join(workDir, 'pg_dump-argv.log');
+      restoreArgvLog = join(workDir, 'pg_restore-argv.log');
+      await writeArgvWrapper(dumpWrapper);
+      await writeArgvWrapper(restoreWrapper);
+    }
+
     // backup.js creates BACKUP_DIR; restore.js creates RESTORE_TMP_DIR.
     keyFile = await writeKeyFile(workDir);
 
     const backup = await runScript('scripts/backup.js', [], {
       NODE_ENV: 'test',
-      DATABASE_URL: env.testDatabaseUrl,
+      DATABASE_URL: childDatabaseUrl,
       BACKUP_KEY_FILE: keyFile,
       BACKUP_DIR: backupDir,
       BACKUP_RETENTION_DAYS: '30',
-      PG_DUMP,
+      PG_DUMP: dumpWrapper || PG_DUMP,
+      REAL_BINARY: PG_DUMP,
+      ARGV_LOG: dumpArgvLog,
     });
     if (backup.code !== 0) throw new Error(`backup failed:\n${backup.stdout}\n${backup.stderr}`);
 
@@ -237,17 +294,29 @@ describe.skipIf(Boolean(skipReason))('backup and restore', () => {
       ['--file', backupPath, '--database', restoreDatabase, '--create', '--verify'],
       {
         NODE_ENV: 'test',
-        DATABASE_URL: env.testDatabaseUrl,
+        DATABASE_URL: childDatabaseUrl,
         BACKUP_KEY_FILE: keyFile,
         ADMIN_DATABASE_URL: ADMIN_URL,
         RESTORE_TMP_DIR: restoreTmpRoot,
-        PG_RESTORE,
+        PG_RESTORE: restoreWrapper || PG_RESTORE,
+        REAL_BINARY: PG_RESTORE,
+        ARGV_LOG: restoreArgvLog,
       },
     );
 
     expect(restore.code, `${restore.stdout}\n${restore.stderr}`).toBe(0);
     expect(restore.stdout).toMatch(/row-count \+ key checksum/);
     expect(restore.stdout).toMatch(/совпада/);
+
+    if (canTraceArgv) {
+      const logged = [await readFile(dumpArgvLog, 'utf8'), await readFile(restoreArgvLog, 'utf8')];
+      for (const argv of logged) {
+        expect(argv).toContain('PGPASSWORD_SET');
+        expect(argv).toContain('--dbname');
+        expect(argv).not.toContain(childPassword);
+        expect(argv).not.toContain(encodeURIComponent(childPassword));
+      }
+    }
 
     const target = new pg.Client({
       connectionString: (() => {
@@ -283,7 +352,7 @@ describe.skipIf(Boolean(skipReason))('backup and restore', () => {
     const emptyBackupPath = backupFile(backupDir, 'empty.dump.enc');
     const backup = await runScript('scripts/backup.js', ['--out', emptyBackupPath], {
       NODE_ENV: 'test',
-      DATABASE_URL: env.testDatabaseUrl,
+      DATABASE_URL: childDatabaseUrl,
       BACKUP_KEY_FILE: keyFile,
       BACKUP_RETENTION_DAYS: '30',
       PG_DUMP,
@@ -296,7 +365,7 @@ describe.skipIf(Boolean(skipReason))('backup and restore', () => {
       ['--file', emptyBackupPath, '--database', emptyRestoreDatabase, '--create', '--verify'],
       {
         NODE_ENV: 'test',
-        DATABASE_URL: env.testDatabaseUrl,
+        DATABASE_URL: childDatabaseUrl,
         BACKUP_KEY_FILE: keyFile,
         ADMIN_DATABASE_URL: ADMIN_URL,
         RESTORE_TMP_DIR: restoreTmpRoot,
@@ -324,7 +393,7 @@ describe.skipIf(Boolean(skipReason))('backup and restore', () => {
       ['--file', damagedPath, '--database', `${testDatabase}_tamper_check`, '--verify'],
       {
         NODE_ENV: 'test',
-        DATABASE_URL: env.testDatabaseUrl,
+        DATABASE_URL: childDatabaseUrl,
         BACKUP_KEY_FILE: keyFile,
         ADMIN_DATABASE_URL: ADMIN_URL,
         RESTORE_TMP_DIR: restoreTmpRoot,

@@ -353,7 +353,33 @@ container_tmp_entries=0
 локальный `restore.js --create` восстановил `metrika_copy_check` (users 3, orders 9446) и удалил временный каталог.
 Scratch-базы `metrika_restore_check`, `metrika_copy_check`, `metrika_tamper_check` после проверок удалены.
 
-### 4. Мелкие правки по ревью T1
+### 4. Review fixes
+
+- Пароль убран из `argv`: `pg_dump`/`pg_restore` получают URL без пароля, сам пароль — через `PGPASSWORD`.
+  Wrapper-лог реального прогона:
+
+```text
+PGPASSWORD_UNSET
+--version
+PGPASSWORD_SET
+--format=custom --no-owner --no-acl --dbname postgres://dimass@localhost:5432/metrika_dev
+no password in argv
+```
+
+  Интеграционный тест дополнительно проверяет, что `review-secret` из `DATABASE_URL` не встречается ни в одном
+  залогированном argv и что дочерний процесс видит `PGPASSWORD`.
+- Файл ключа с режимом `0644` отвергается на POSIX до подключения; `--allow-loose-key` продолжает с
+  предупреждением. Unit-тесты покрывают 0600, 0644, override и ветку `win32` (warning вместо отказа). Оба CLI
+  проверены отдельными запусками: код 1, сообщение про `chmod 600`/`--allow-loose-key`, без `ECONNREFUSED`.
+- Убрано дублирование `pg_dump pg_dump`, сравнение `--force` декодирует percent-encoded имя БД, а
+  `--force + --verify` печатает предупреждение о сравнении живой базы с самой собой.
+- Устаревший `metrika-restore-*` старше 24 часов удаляется при старте:
+
+```text
+Удалён устаревший временный каталог: …/tmp/metrika-restore-stale
+```
+
+### 5. Мелкие правки по ревью T1
 
 - `docker/entrypoint.sh` получил executable-бит (`100755`); содержимое не менялось.
 - В `docs/deployment.md` добавлена сверка SHA-256 для скачиваемого Compose-плагина.
