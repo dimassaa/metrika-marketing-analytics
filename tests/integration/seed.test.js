@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { minskYesterday } from '../../src/lib/dates.js';
 import { seed } from '../../db/seed/seed.js';
 import { closeTestPool, getTestPool, resetTestDatabase } from '../helpers/db.js';
@@ -46,6 +47,21 @@ describe('demo seed', () => {
     expect(await countRows('customers')).toBe(first.customers);
     expect(await countRows('orders')).toBe(first.orders);
     expect(await countRows('touchpoints')).toBe(first.touchpoints);
+  });
+
+  it('seeds the committed 1200×630 raster as the OG cover', async () => {
+    const { rows } = await pool.query(
+      "SELECT filename, mime_type, size_bytes, bytes FROM media_assets WHERE slug = 'og-cover'",
+    );
+    const committed = readFileSync(new URL('../../public/img/og-cover.png', import.meta.url));
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ filename: 'og-cover.png', mime_type: 'image/png' });
+    expect(rows[0].size_bytes).toBe(committed.length);
+    expect(rows[0].bytes.equals(committed)).toBe(true);
+    // A 1×1 placeholder used to be seeded here; the social card needs the real dimensions.
+    expect(committed.readUInt32BE(16)).toBe(1200);
+    expect(committed.readUInt32BE(20)).toBe(630);
   });
 
   it('creates three demo users with argon2id hashes', async () => {

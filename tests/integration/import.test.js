@@ -588,6 +588,33 @@ describe('file-level rejections', () => {
     expect(res.body.error.message).toBe('Файл превышает допустимый размер 2 МБ');
   });
 
+  it('rejects a non-CSV MIME type or a non-CSV extension before parsing', async () => {
+    const agent = await signedIn(ANALYST);
+    const token = await getAppCsrf(agent);
+
+    const upload = (filename, contentType) =>
+      agent
+        .post('/api/v1/import')
+        .set('X-CSRF-Token', token)
+        .field('kind', 'daily_stats')
+        .attach('file', Buffer.from([DAILY_HEADER, 'instagram_retarget;2024-08-02;1;1;1;1'].join('\n')), {
+          filename,
+          contentType,
+        });
+
+    // A PNG chosen in the file dialog: the extension and type both say it is not a CSV.
+    const png = await upload('cover.png', 'image/png');
+    expect(png.status).toBe(400);
+    expect(png.body.error).toMatchObject({ code: 'VALIDATION_ERROR' });
+    expect(png.body.error.message).toBe('Допустим только файл CSV с расширением .csv');
+
+    // A spoofed type on a .csv name and a CSV type on a non-CSV name are rejected too: both signals must agree.
+    const spoofed = await upload('import.csv', 'image/png');
+    expect(spoofed.status).toBe(400);
+    const wrongExtension = await upload('import.txt', 'text/csv');
+    expect(wrongExtension.status).toBe(400);
+  });
+
   it('stores only the base name of the uploaded file', async () => {
     const agent = await signedIn(ANALYST);
     const token = await getAppCsrf(agent);

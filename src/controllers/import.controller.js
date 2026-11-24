@@ -2,7 +2,7 @@ import { buildShellLocals } from './app.controller.js';
 import { ValidationError } from '../lib/errors.js';
 import { parseBigIntId } from '../lib/ids.js';
 import { buildSeo } from '../lib/seo.js';
-import { importUploadSchema } from '../validators/import.schema.js';
+import { assertCsvUploadFile, importUploadSchema } from '../validators/import.schema.js';
 import { RECENT_BATCH_LIMIT } from '../services/import.service.js';
 
 const NOT_FOUND_SEO = buildSeo({
@@ -108,6 +108,8 @@ export function createImportController({ importService, referenceRepository }) {
       if (!req.file) {
         throw new ValidationError('Выберите файл для загрузки');
       }
+      // Checked before the parser so a PNG or an XLSX gets a file-type message instead of "missing columns".
+      assertCsvUploadFile(req.file);
 
       const result = await importService.runImport({
         kind: parsed.data.kind,

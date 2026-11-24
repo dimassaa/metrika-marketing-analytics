@@ -485,3 +485,311 @@ Highlight-пара `#3398e1` на `#c1e1f7` — **2,29:1**, ниже AA даже
 Compose установлен и проверен реальным выводом `docker compose config/up`; Docker-путь Task 1 **закрыт**.
 Task 2 **закрыт на Linux и в контейнере** (row-count + key checksum, включая password-auth Compose-стенд); Windows-прогон
 остаётся за владельцем. Ограничения выше относятся к T6/T8 и не выдаются за выполненные.
+
+## Task 6 — E2E-матрица, ошибки и кросс-ролевая проверка
+
+Дата прогона: 24.11.2026. База: коммит `2e78bed` (T1–T5 закрыты); во время прогона владелец добавил `3906f21`
+(убрана карточка демо-аккаунтов на входе), поэтому финальный снимок входа снят уже на нём. Рабочее дерево Task 6 —
+финальный коммит задачи. Linux (CachyOS), нативный путь без Docker; браузер — Chromium через `agent-browser`.
+
+### 1. Окружение и стенд
+
+| Компонент | Значение |
+|---|---|
+| Node.js на хосте | `v26.13.0` (Docker-образ T1 — `v24.22.3`; `engines.node >= 24`) |
+| npm | `12.2.1` |
+| PostgreSQL | сервер `18.6`, `psql` `18.6` |
+| Chromium | `158.0.0.0` headless (`agent-browser 0.41.1`) |
+| Порт | `127.0.0.1:3100` (Docker-стенд T1 оставался на 3000 и в прогоне не участвовал) |
+| БД стенда | `metrika_e2e`, создана с нуля; Docker не использовался |
+
+Команды (вывод сокращён):
+
+```text
+$ npm run build
+✓ built in 1.42s
+public/assets/chunks/ChartTooltip-aqaNQ0-l.js  642.06 kB │ gzip: 193.70 kB
+(!) Some chunks are larger than 500 kB after minification
+
+$ DATABASE_URL=postgres://…/metrika_e2e ADMIN_DATABASE_URL=postgres://…/postgres npm run db:setup
+metrika_e2e: created
+metrika_test: already exists
+
+$ DATABASE_URL=…/metrika_e2e npm run migrate
+applied 001_init.sql … 006_decisions.sql      (6 migrations)
+
+$ DATABASE_URL=…/metrika_e2e npm run seed
+seeded anchor 2026-11-23, window 2025-10-01..2026-11-23:
+8 channels, 32 campaigns, 4000 customers, 9446 orders, 14042 touchpoints,
+12723 daily stat rows, 4 goals; spend 151 819,30 BYN, revenue 1 133 981,63 BYN
+
+$ DATABASE_URL=…/metrika_e2e PORT=3100 APP_URL=http://localhost:3100 npm start
+$ curl -fsS http://127.0.0.1:3100/health
+200 {"status":"ok","db":"up","version":"0.1.0"}
+```
+
+Пользователей на стенде — 3 (`admin@metrika.by`, `analyst@metrika.by`, `viewer@metrika.by`).
+Data anchor — `2026-11-23` («Данные по 23.11.2026» на всех экранах).
+
+### 2. Найденные дефекты и фиксы
+
+1. **Импорт не проверял MIME/расширение.** Спека §10 требует «проверка MIME/расширения», бриф Task 6 —
+   отдельный кейс «неверный MIME». Фактически PNG с расширением `.png` уходил в CSV-парсер и получал
+   `400 «В файле нет обязательных колонок: …»` — сообщение про колонки вместо типа файла. Добавлен
+   `assertCsvUploadFile` в `src/validators/import.schema.js`: расширение `.csv` и тип из
+   `text/csv`, `application/csv`, `text/plain`, `application/vnd.ms-excel` (последние два — то, что присылают
+   Windows/офисные клиенты). Регрессионный тест — `tests/integration/import.test.js`, «rejects a non-CSV MIME
+   type or a non-CSV extension before parsing» (PNG, подменённый `image/png` у `.csv`, `.txt` с `text/csv`).
+   В браузере после фикса: `«Файл не загружен — Допустим только файл CSV с расширением .csv»`; настоящий
+   `.csv` по-прежнему проходит (Chrome отправляет `text/csv`).
+2. **Сид клал в `media_assets` заглушку 1×1 вместо реальной OG-обложки.** Админ-страница показывала
+   растянутый пустой пиксель, `/media/slug/og-cover` отдавал 70 байт, хотя с T5 в репозитории лежит
+   `public/img/og-cover.png` 1200×630 (35 656 байт). Сид теперь читает этот committed PNG; байты и checksum
+   совпадают со статическим файлом. Регрессионный тест — `tests/integration/seed.test.js`, «seeds the committed
+   1200×630 raster as the OG cover» (байтовое равенство + IHDR 1200×630).
+   После повторного сида: `Content-Length: 35656`, `ETag "16ad8e47…"`, превью на `/app/admin/users` показывает
+   настоящую обложку.
+
+Оба фикса не меняют контрактов API, кроме нового 400 на не-CSV файл.
+
+### 3. Тесты
+
+Целевые прогоны во время работы:
+
+```text
+$ npx vitest run tests/integration/error-pages.test.js
+tests/integration/error-pages.test.js (7 tests) ✓
+
+$ npx vitest run tests/integration/import.test.js
+tests/integration/import.test.js (25 tests) ✓
+
+$ npx vitest run tests/integration/seed.test.js tests/integration/media.test.js tests/unit/seed-demo.test.js
+Test Files 3 passed (3), Tests 35 passed (35)
+
+$ npx vitest run tests/integration/page-queries.test.js
+Test Files 1 passed (1), Tests 10 passed (10)
+```
+
+Полный прогон на тихом дереве (никаких параллельных наборов), после всех правок:
+
+```text
+$ npm test
+Test Files  105 passed (105)
+Tests       1374 passed (1374)
+Duration    103.25s
+```
+
+`error-pages.test.js` собирает мини-приложение из `notFoundPage`, `requirePermission`, `notFound` и
+`errorHandler` и фиксирует контракт: HTML 404/403/500 — стилизованная страница с русским текстом, `noindex`,
+без stack trace; API 404/403/500 — `{error:{code,message}}`; 500 не пишет в лог тело запроса и куки.
+Стилизованная 500-страница уже существовала — тест закрепляет контракт, кода для неё не потребовалось.
+
+### 4. Матрица ролей (фактический результат)
+
+Каждый шаг шёл через реальный браузер; после каждого экрана `agent-browser console` и `agent-browser errors`
+возвращали пустой список. Счётчики и записи проверялись в PostgreSQL.
+
+**admin**
+
+| Поток | Результат |
+|---|---|
+| Вход | 302 → `/app/dashboard`; шапка «Администратор», в меню появились «Аудит» и «Пользователи» |
+| Дашборд, каналы, паспорт канала (`/app/channels/1`), кампании, когорты, атрибуция, сценарии, алерты, цели, импорт, профиль | 200, `h1` совпадает с экраном, горизонтального скролла нет, консоль пуста |
+| Пользователи | создан `e2e.viewer@metrika.by`; роль «Наблюдатель» → «Аналитик»; блокировка → «Заблокирован»; сброс пароля |
+| Каналы | создан `admin_check` → «Admin проверка» (`/app/channels/9`), затем заархивирован → статус «В архиве» |
+| Алерты | «Пересчитать» → «Последнее срабатывание: 24.11.2026 14:31» |
+| Сценарии | сохранён «Admin сценарий» → `/app/scenarios/1` |
+| Импорт | dry-run файла `daily_stats`: 2 строки, принято 2, дубликаты 0, ошибки 0 |
+| Аудит | журнал открылся; после пересида в нём 7 записей: `auth.login`/`auth.logout`, `export.csv`, `channel.create`, `channel.archive`, `scenario.create` |
+| Экспорт | `download channels.csv` — BOM, `code;name;kind;…` (кампании скачаны под analyst: 3 243 байта) |
+
+Пополнение `audit_log` до пересида (хвост журнала, id 5–19; всего 19 записей за первый проход):
+
+```text
+ id | action                | entity   | entity_id
+  5 | campaign.create       | campaign | 33
+  6 | campaign.update       | campaign | 33
+  7 | campaign.delete       | campaign | 33
+  8 | goal.create           | goal     | 5
+  9 | goal.delete           | goal     | 5
+ 10 | alert.dismiss         | alert    | 2
+ 11 | scenario.create       | scenario | 1
+ 12 | import.run            | import   | 1
+ 13 | export.csv            | campaigns|
+ 14 | auth.logout           | user     | 2
+ 15 | auth.login            | user     | 1
+ 16 | user.create           | user     | 4
+ 17 | user.role_change      | user     | 4
+ 18 | user.deactivate       | user     | 4
+ 19 | user.password_reset   | user     | 4
+```
+
+**analyst**
+
+| Поток | Результат |
+|---|---|
+| Вход, дашборд, каналы, кампании, цели, импорт, экспорт, алерты, сценарии | все экраны 200 |
+| Каналы: создать / изменить / архив | создан `e2e_check`, переименован в «E2E проверка 2», цель CAC 1000, заархивирован → статус «В архиве», канал пропал из формы кампаний, но остался в истории |
+| Кампании: создать / изменить / удалить | `e2e_campaign` → «E2E кампания 2», статус «На паузе», затем удалена; строка исчезла |
+| Цели | создана CAC 45 BYN на Email на 01.11–30.11.2026, затем удалена |
+| Алерты | «Пересчитать» → «Последнее срабатывание 13:53», активных 2; скрыт один алерт с причиной «E2E: шум в канале» → активно 1, скрыто 1 |
+| Сценарии | слайдер получил 3 нажатия `ArrowRight` (2 684,70 → 2 684,73 BYN), «Рассчитать», сохранён «E2E сценарий аналитика» → `/app/scenarios/1`, детальный экран 200 |
+| Импорт | dry-run 2 строки / принято 2 / дубликаты 0 / ошибки 0; commit — «Импорт сохранён» |
+| Экспорт | `download campaigns.csv` 3 243 байта |
+| `/app/admin/users`, `/app/audit` | стилизованная 403 (`h1 «Недостаточно прав»`, `meta robots noindex, nofollow`) |
+| CSRF без токена | `POST /api/v1/import` и `POST /api/v1/scenarios` → `403` JSON `{code:"FORBIDDEN",message:"CSRF token mismatch"}`; `POST /app/channels` → `403 text/plain "CSRF token mismatch"` |
+
+**viewer**
+
+| Поток | Результат |
+|---|---|
+| Вход, дашборд, каналы, кампании, когорты, атрибуция, сценарии, сохранённый сценарий `/app/scenarios/1`, алерты, цели, профиль | 200 |
+| Формы мутаций | на 8 экранах единственный POST — `/logout`; «Новый канал», «Архивировать», «Пересчитать»/«Скрыть» алертов, «Сохранить сценарий» отсутствуют; GET-кнопки рейтинга и экспорта остались |
+| Прямой POST | без токена — `403` JSON/text (CSRF); с валидным токеном `POST /api/v1/scenarios` → `403 JSON «Недостаточно прав»`, `POST /app/channels` → стилизованная 403 HTML |
+| Экспорт | `download campaigns.csv` 3 243 байта — работает |
+| `/app/admin/users`, `/app/audit` | 403; `/app/admin/users` снят как `403-viewer.png` |
+
+### 5. Ошибки: что реально вернулось
+
+| Кейс | Ответ |
+|---|---|
+| HTML 404 `/no-such-page` и `/app/scenarios/99999` | `404`, `errors/404`, «Страница не найдена», `noindex, nofollow`, без stack |
+| HTML 403 (viewer/analyst на admin-разделах) | `403`, `errors/403`, «Недостаточно прав», `noindex, nofollow` |
+| HTML 500 | `500`, `errors/500`, «Что-то сломалось», `noindex`, без текста ошибки. Снято на копии БД с переименованной `daily_stats`: настоящий отказ PostgreSQL, не подставной маршрут |
+| API 404 `/api/v1/no-such` | `404 application/json` `{error:{code:"NOT_FOUND",message:"Страница не найдена"}}` |
+| API 403 (viewer, с CSRF) | `403 application/json` `{error:{code:"FORBIDDEN",message:"Недостаточно прав"}}` |
+| API 500 `/api/v1/dashboard` при упавшей таблице | `500 application/json` `{error:{code:"INTERNAL_ERROR",message:"Внутренняя ошибка сервера"}}`, в теле нет stack |
+| Битый заголовок CSV | `400` «В файле нет обязательных колонок: stat_date, clicks, leads, spend» |
+| Дубликаты (customers, dry-run) | 3 строки → принято 1, дубликаты 2 (в браузере отдельный файл: 2 строки → 0/2/0) |
+| Файл > 2 МБ | `413` «Файл превышает допустимый размер 2 МБ» |
+| Файл > 10 000 строк | `400` «Превышен лимит 10 000 строк» |
+| Неверный MIME (PNG) | до фикса — ошибка про колонки; после фикса — `400` «Допустим только файл CSV с расширением .csv» |
+| Медиа: текст с именем `.png`, SVG, PNG с подменённым типом | `400` «Допустимы только изображения PNG, JPEG или WebP» |
+| Медиа > 1 МБ | `413` «Файл превышает допустимый размер 1 МБ» |
+| Медиа: несуществующий/некорректный id | `/media/999999` и `/media/not-an-id` → `404 text/plain «Изображение не найдено»` |
+| Медиа: чужой id | `/media/2` без авторизации → `200 image/png`: публичные ассеты (аватары и OG) отдаются по дизайну, приватности у них нет |
+| CSRF | см. матрицу: API — JSON 403, page POST — `403 text/plain` |
+| Rate-limit логина | 5 неверных паролей → `401`, шестой → `429` с «Слишком много попыток входа. Попробуйте снова через 15 минут.» (страница входа, не JSON) |
+| Rate-limit импорта | покрыт `tests/integration/import.test.js` (20 файлов → JSON 429); в браузере квоту не сжигали |
+
+ETag медиа на текущем сиде:
+
+```text
+GET /media/slug/og-cover
+200, Content-Type: image/png, Content-Length: 35656,
+ETag: "16ad8e47cb504f76f1ff1ffab982125d815f3f806b4de0ece6c6e203a90677d5",
+Cache-Control: public, max-age=86400, immutable
+If-None-Match: <etag> → 304, 0 bytes
+```
+
+### 6. 390×844 и клавиатура
+
+`documentElement.scrollWidth === clientWidth` на всех экранах (проверено в браузере после навигации):
+
+```text
+/login 390/390 · / 390/390 · /app/dashboard 390/390 · /app/channels 390/390 ·
+/app/channels/1 390/390 · /app/campaigns 390/390 · /app/cohorts 390/390 ·
+/app/attribution 390/390 · /app/scenarios 390/390 · /app/scenarios/1 390/390 ·
+/app/alerts 390/390 · /app/goals 390/390 · /app/profile 390/390 ·
+/app/admin/users (403) 390/390 · /app/audit (403) 390/390 · /no-such-page (404) 390/390
+```
+
+Порядок Tab на 390 (дашборд): «Перейти к содержанию» → переключатель меню → «Метрика» → профиль → «Выйти» →
+селектор периода → «Показать». Меню открывается пробелом, после этого Tab ведёт по пунктам «Дашборд», «Каналы»,
+«Кампании», «Когорты», «Атрибуция» — скрытые пункты не попадают в порядок фокуса, пока меню закрыто.
+
+### 7. Бюджеты запросов и размеры страниц
+
+Живой подсчёт обёрткой, которая считает и `pool.query`, и `client.query` (включая `BEGIN/COMMIT` снапшота):
+
+| Экран | Запросов | Потолок теста |
+|---|---:|---:|
+| `/app/dashboard` | 17 | 18 |
+| `/app/channels` | 15 | 16 |
+| `/app/channels/1` | 27 | 24 |
+| `/app/campaigns` | 5 | — |
+| `/app/cohorts` | 8 | 9 |
+| `/app/attribution` | 7 | 8 |
+| `/app/scenarios` | 12 | 12 |
+| `/app/alerts` | 26 | 32 |
+| `/app/goals` | 5 | — |
+| `/app/import` | 4 | — |
+| `/app/profile` | 5 | — |
+| `/api/v1/alerts` | 9 | 12 |
+| `/api/v1/scenarios` | 12 | 12 |
+
+Единственное расхождение — паспорт канала: 27 против тестового потолка 24. Разница ровно в трёх
+транзакционных операторах, которые `page-queries.test.js` не видит, потому что передаёт `pool.connect`
+напрямую. Тест зелёный, продукт не менялся; пробел записан в `IMPROVEMENTS.md`.
+
+Сжатие (`Accept-Encoding: gzip`, авторизованная сессия):
+
+| Страница | HTML | gzip |
+|---|---:|---:|
+| `/` | 14 875 | 4 231 |
+| `/login` (аноним) | 5 367 | 1 734 |
+| `/app/dashboard` | 35 890 | 6 335 |
+| `/app/channels` | 43 707 | 7 160 |
+| `/app/channels/1` | 63 435 | 8 818 |
+| `/app/campaigns` | 48 073 | 5 092 |
+| `/app/cohorts` | 112 150 | 9 289 |
+| `/app/attribution` | 25 795 | 4 677 |
+| `/app/scenarios` | 56 793 | 9 446 |
+| `/app/alerts` | 20 360 | 4 910 |
+| `/app/goals` | 17 959 | 3 480 |
+| `/app/import` | 13 306 | 3 627 |
+| `/app/admin/users` | 20 996 | 3 971 |
+| `/app/audit` | 25 729 | 3 836 |
+| `/app/profile` | 11 435 | 3 189 |
+
+Все ответы несут `Content-Encoding: gzip`; самая большая JS-часть — Recharts
+`ChartTooltip-*.js` 642,06 кБ / 193,70 кБ gzip (остров грузится только на экранах с графиками).
+
+### 8. Скриншоты
+
+Все сняты в Chromium 1440×1000, кроме `mobile-390.png` (390×844); в кадре — состояние после действий,
+описанных в матрице.
+
+| Файл | Что на снимке |
+|---|---|
+| `login.png` | форма входа с заполненным аналитиком (одна карточка, без списка демо-аккаунтов) |
+| `dashboard-analyst.png` | дашборд аналитика, KPI и отрисованный график CAC |
+| `channels-analyst.png` | каналы: веса рейтинга, форма нового канала, рейтинг |
+| `cohorts.png` | матрица удержания, неполные когорты помечены |
+| `attribution.png` | три модели и столбчатый график, «Последнее касание» выбрано |
+| `alerts.png` | сводка и график CAC TikTok |
+| `scenarios.png` | builder: слайдер, каналы, результат расчёта |
+| `admin-users.png` | пользователи, настоящая OG-обложка после фикса сида |
+| `audit.png` | журнал действий с фильтрами |
+| `import-error.png` | битый заголовок CSV, отчёт «Файл не загружен» |
+| `403-viewer.png` | viewer на `/app/admin/users` |
+| `404.png` | публичный 404 |
+| `500.png` | styled 500 при отказе БД |
+| `mobile-390.png` | дашборд аналитика на 390×844 |
+
+Первый снимок дашборда был сделан сразу после редиректа и показывал пустые карточки графиков — React-остров
+ещё не гидратировался, при пустых `console`/`errors`. Снимок переснят после ожидания `.recharts-line-curve`;
+процедура записана в `IMPROVEMENTS.md`. Перед финальными снимками дашборда/`admin-users`/`mobile-390` стенд
+пересижен начисто, чтобы в кадр не попали тестовые канал/пользователь; журнал и записи аудита выше сняты до
+этого пересида.
+
+### 9. Не проверено здесь — закрывает владелец
+
+- **Firefox** — в окружении агента только Chromium. Ручной сценарий для прогона владельцем: вход → дашборд →
+  каналы → атрибуция → сценарии (слайдер стрелками) → импорт dry-run. Скриншоты `firefox-*.png` не создавались.
+- **Opera/Yandex** — не установлены; результат не заявляется.
+- **Windows 10** — Windows-машины нет. Smoke по `docs/deployment.md`: native-путь, вход, импорт, backup+restore,
+  Планировщик заданий.
+- **Docker Desktop** — не запускался; Docker Engine на Linux проверен в Task 1, но Docker Desktop — отдельный
+  прогон владельца.
+- **TLS/публичный HTTPS-стенд** — не поднимался; HSTS-ветка проверена интеграционным тестом с `hsts: true`.
+- **Бэкап** — в Task 6 не перезапускался; доказательства Task 2 (создание, AES-256-GCM, restore в scratch-БД,
+  row-count + key checksum, повреждённый файл → код 1) остаются в разделе Task 2 выше.
+
+### Verdict Task 6
+
+Матрица трёх ролей пройдена в Chromium на чистом нативном стенде; RBAC, CSRF, 403/404/500, импорт, медиа,
+алерты, сценарии и экспорт подтверждены фактическими ответами и записями `audit_log`. Полный `npm test` —
+105 файлов / 1374 теста. Найдены и закрыты два дефекта (MIME/расширение импорта, OG-заглушка в сиде) с
+регрессионными тестами. Firefox, Opera/Yandex, Windows 10, Docker Desktop и TLS остаются за владельцем и здесь
+не заявляются.

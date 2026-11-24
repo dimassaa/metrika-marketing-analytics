@@ -14,6 +14,7 @@
  */
 
 import { pathToFileURL } from 'node:url';
+import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import pg from 'pg';
 import { hash } from '@node-rs/argon2';
@@ -45,13 +46,13 @@ const TOUCHPOINT_SHARE_OF_ACQUISITION_CHANNEL = 0.7;
 const ORDER_SHARE_OF_ACQUISITION_CHANNEL = 0.75;
 
 /**
- * Deterministic 1×1 RGBA PNG used as the site's OG cover until an admin uploads a real one. Kept as a base64
- * constant so a fresh `npm run seed` produces `/media/slug/og-cover` with byte-identical content on every run.
+ * The site's OG cover, read from the committed raster rather than a placeholder.
+ *
+ * Social crawlers reject SVG, so the PNG is the source of truth for both `<meta og:image>` and
+ * `/media/slug/og-cover`; seeding the same bytes keeps the admin preview and the public cover URL identical to the
+ * file that ships with the repository. Reading a local asset is still deterministic and needs no network.
  */
-const OG_COVER_PNG = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
-  'base64',
-);
+const OG_COVER_PNG = readFileSync(new URL('../../public/img/og-cover.png', import.meta.url));
 
 /**
  * Tables owned by the demo data. `sessions`, `audit_log`, `import_batches`, `scenarios`, `alerts` and

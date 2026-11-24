@@ -278,6 +278,41 @@ export function parseImportFile(kind, input) {
 }
 
 /**
+ * MIME types that a browser or an office suite reports for a CSV attachment.
+ *
+ * Windows Chrome sends `application/vnd.ms-excel` for `.csv`; Firefox and Chromium on Linux send `text/csv`. The
+ * list stays closed: the upload is parsed as UTF-8 CSV, so an image or an XLSX is rejected before the parser turns
+ * its bytes into confusing column errors.
+ */
+const CSV_UPLOAD_MIME_TYPES = Object.freeze([
+  'text/csv',
+  'application/csv',
+  'text/plain',
+  'application/vnd.ms-excel',
+]);
+
+/**
+ * Checks the uploaded file's extension and declared type before the buffer is parsed.
+ *
+ * The declared MIME comes from the client and can be spoofed; it is not a security boundary. The extension and the
+ * content check (the CSV parser rejects binary garbage) are what keep a wrong file from producing a misleading
+ * "missing columns" report. Together they satisfy the design spec's MIME/extension requirement.
+ *
+ * @param {{ originalname?: unknown, mimetype?: unknown }} file Multer file object.
+ * @throws {ValidationError} When the name does not end in `.csv` or the type is not a CSV type.
+ */
+export function assertCsvUploadFile(file) {
+  const filename = String(file?.originalname ?? '').toLowerCase();
+  const mimeType = String(file?.mimetype ?? '')
+    .toLowerCase()
+    .split(';')[0]
+    .trim();
+  if (!filename.endsWith('.csv') || !CSV_UPLOAD_MIME_TYPES.includes(mimeType)) {
+    throw new ValidationError('Допустим только файл CSV с расширением .csv');
+  }
+}
+
+/**
  * Shape of the multipart upload fields. `multer` gives every field as a string; the checkbox may arrive as `on`
  * from a native form or `true` from the island's `FormData`, so both spellings mean dry-run.
  */
