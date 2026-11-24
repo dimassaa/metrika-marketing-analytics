@@ -22,18 +22,18 @@
     <div class="app-nav__group">
       <p class="app-nav__title">Аналитика</p>
       <ul class="app-nav__list">
-        <li><a class="<%= linkClass('dashboard') %>" href="/app/dashboard"<%= current('dashboard') %>>Дашборд</a></li>
+        <li><a class="<%= linkClass('dashboard') %>" href="/app/dashboard"<%- current('dashboard') %>>Дашборд</a></li>
         <% if (can('channels:view')) { %>
-        <li><a class="<%= linkClass('channels') %>" href="/app/channels"<%= current('channels') %>>Каналы</a></li>
+        <li><a class="<%= linkClass('channels') %>" href="/app/channels"<%- current('channels') %>>Каналы</a></li>
         <% } %>
         <% if (can('campaigns:view')) { %>
-        <li><a class="<%= linkClass('campaigns') %>" href="/app/campaigns"<%= current('campaigns') %>>Кампании</a></li>
+        <li><a class="<%= linkClass('campaigns') %>" href="/app/campaigns"<%- current('campaigns') %>>Кампании</a></li>
         <% } %>
         <% if (can('cohorts:view')) { %>
-        <li><a class="<%= linkClass('cohorts') %>" href="/app/cohorts"<%= current('cohorts') %>>Когорты</a></li>
+        <li><a class="<%= linkClass('cohorts') %>" href="/app/cohorts"<%- current('cohorts') %>>Когорты</a></li>
         <% } %>
         <% if (can('attribution:view')) { %>
-        <li><a class="<%= linkClass('attribution') %>" href="/app/attribution"<%= current('attribution') %>>Атрибуция</a></li>
+        <li><a class="<%= linkClass('attribution') %>" href="/app/attribution"<%- current('attribution') %>>Атрибуция</a></li>
         <% } %>
       </ul>
     </div>
@@ -42,13 +42,13 @@
       <p class="app-nav__title">Решения</p>
       <ul class="app-nav__list">
         <% if (can('scenarios:view')) { %>
-        <li><a class="<%= linkClass('scenarios') %>" href="/app/scenarios"<%= current('scenarios') %>>Сценарии</a></li>
+        <li><a class="<%= linkClass('scenarios') %>" href="/app/scenarios"<%- current('scenarios') %>>Сценарии</a></li>
         <% } %>
         <% if (can('alerts:view')) { %>
-        <li><a class="<%= linkClass('alerts') %>" href="/app/alerts"<%= current('alerts') %>>Алерты</a></li>
+        <li><a class="<%= linkClass('alerts') %>" href="/app/alerts"<%- current('alerts') %>>Алерты</a></li>
         <% } %>
         <% if (can('goals:view')) { %>
-        <li><a class="<%= linkClass('goals') %>" href="/app/goals"<%= current('goals') %>>Цели</a></li>
+        <li><a class="<%= linkClass('goals') %>" href="/app/goals"<%- current('goals') %>>Цели</a></li>
         <% } %>
       </ul>
     </div>
@@ -58,10 +58,10 @@
       <p class="app-nav__title">Данные</p>
       <ul class="app-nav__list">
         <% if (can('import:run')) { %>
-        <li><a class="<%= linkClass('import') %>" href="/app/import"<%= current('import') %>>Импорт</a></li>
+        <li><a class="<%= linkClass('import') %>" href="/app/import"<%- current('import') %>>Импорт</a></li>
         <% } %>
         <% if (can('audit:view')) { %>
-        <li><a class="<%= linkClass('audit') %>" href="/app/audit"<%= current('audit') %>>Аудит</a></li>
+        <li><a class="<%= linkClass('audit') %>" href="/app/audit"<%- current('audit') %>>Аудит</a></li>
         <% } %>
       </ul>
     </div>
@@ -71,14 +71,16 @@
     <div class="app-nav__group">
       <p class="app-nav__title">Администрирование</p>
       <ul class="app-nav__list">
-        <li><a class="<%= linkClass('users') %>" href="/app/admin/users"<%= current('users') %>>Пользователи</a></li>
+        <li><a class="<%= linkClass('users') %>" href="/app/admin/users"<%- current('users') %>>Пользователи</a></li>
       </ul>
     </div>
     <% } %>
   </nav>
 
   <div class="app-sidebar__footer">
-    <a class="app-sidebar__user" href="/app/profile">
+    <%# Raw output is required here: the fragment contains quotes, and escaped output would turn them into entities,
+         leaving a broken attribute that screen readers ignore. %>
+    <a class="app-sidebar__user" href="/app/profile"<%- current('profile') %>>
       <span class="app-sidebar__user-name"><%= currentUser.fullName %></span>
       <span class="app-sidebar__user-role"><%= roleLabel %></span>
     </a>

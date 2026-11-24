@@ -38,7 +38,7 @@
     <% } else { %>
 
     <% if (model.builderError) { %>
-    <div class="alert alert--error" role="alert">
+    <div class="alert alert--error" role="alert" id="scenario-budget-error">
       <p class="alert__title">Расчёт не выполнен</p>
       <p><%= model.error %></p>
       <% if (model.controls.budgetEntry) { %>
@@ -77,7 +77,8 @@
             min="<%= model.controls.budgetMinInput %>"
             max="<%= model.controls.budgetMaxInput %>"
             step="0.01"
-            aria-describedby="budget-hint"
+            aria-invalid="true"
+            aria-describedby="scenario-budget-error budget-hint"
             required
           >
           <span class="field__hint" id="budget-hint">
@@ -119,7 +120,7 @@
             <a
               class="btn btn--ghost btn--sm"
               href="<%= preset.href %>"
-              <%= preset.active ? 'aria-current="true"' : '' %>
+              <%- preset.active ? 'aria-current="true"' : '' %>
             ><%= preset.label %></a>
             <% } %>
           </div>
@@ -128,7 +129,7 @@
         <fieldset class="field">
           <legend class="field__label">Каналы</legend>
           <% for (const channel of model.controls.channels) { %>
-          <label class="cluster">
+          <label class="cluster choice">
             <input type="checkbox" name="channelIds" value="<%= channel.value %>"<%= channel.selected ? ' checked' : '' %>>
             <span><%= channel.label %></span>
           </label>

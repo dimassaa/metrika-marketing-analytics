@@ -56,7 +56,7 @@
       </div>
 
       <% if (createError) { %>
-      <div class="alert alert--error" role="alert">
+      <div class="alert alert--error" role="alert" id="goal-create-error">
         <p class="alert__title">Цель не создана</p>
         <%= createError %>
       </div>
@@ -67,7 +67,12 @@
 
         <label class="field">
           <span class="field__label">Метрика</span>
-          <select class="select" name="metric" required>
+          <select
+            class="select"
+            name="metric"
+            required
+            <% if (createError) { %>aria-invalid="true" aria-describedby="goal-create-error"<% } %>
+          >
             <% metricOptions.forEach((option) => { %>
             <option value="<%= option.value %>" <%= createValues.metric === option.value ? 'selected' : '' %>>
               <%= option.label %> (<%= option.unit %>)
@@ -78,7 +83,11 @@
 
         <label class="field">
           <span class="field__label">Канал</span>
-          <select class="select" name="channelId">
+          <select
+            class="select"
+            name="channelId"
+            <% if (createError) { %>aria-invalid="true" aria-describedby="goal-create-error"<% } %>
+          >
             <option value="" <%= createValues.channelId === '' ? 'selected' : '' %>>Вся компания</option>
             <% channels.forEach((channel) => { %>
             <option value="<%= channel.id %>" <%= createValues.channelId === channel.id ? 'selected' : '' %>>
@@ -100,6 +109,7 @@
             inputmode="decimal"
             autocomplete="off"
             required
+            <% if (createError) { %>aria-invalid="true" aria-describedby="goal-create-error"<% } %>
           >
           <span class="field__hint">
             CAC — BYN, ROMI — %, LTV:CAC — коэффициент, Payback — месяцы, новые клиенты — целое число
@@ -108,12 +118,26 @@
 
         <label class="field">
           <span class="field__label">Начало периода</span>
-          <input class="input" type="date" name="periodStart" value="<%= createValues.periodStart %>" required>
+          <input
+            class="input"
+            type="date"
+            name="periodStart"
+            value="<%= createValues.periodStart %>"
+            required
+            <% if (createError) { %>aria-invalid="true" aria-describedby="goal-create-error"<% } %>
+          >
         </label>
 
         <label class="field">
           <span class="field__label">Окончание периода</span>
-          <input class="input" type="date" name="periodEnd" value="<%= createValues.periodEnd %>" required>
+          <input
+            class="input"
+            type="date"
+            name="periodEnd"
+            value="<%= createValues.periodEnd %>"
+            required
+            <% if (createError) { %>aria-invalid="true" aria-describedby="goal-create-error"<% } %>
+          >
         </label>
 
         <div class="cluster">
@@ -137,7 +161,7 @@
       </div>
 
       <% if (editError) { %>
-      <div class="alert alert--error" role="alert">
+      <div class="alert alert--error" role="alert" id="goal-edit-error">
         <p class="alert__title">Изменение не применено</p>
         <%= editError %>
       </div>
@@ -156,17 +180,32 @@
             inputmode="decimal"
             autocomplete="off"
             required
+            <% if (editError) { %>aria-invalid="true" aria-describedby="goal-edit-error"<% } %>
           >
         </label>
 
         <label class="field">
           <span class="field__label">Начало периода</span>
-          <input class="input" type="date" name="periodStart" value="<%= edit.values.periodStart %>" required>
+          <input
+            class="input"
+            type="date"
+            name="periodStart"
+            value="<%= edit.values.periodStart %>"
+            required
+            <% if (editError) { %>aria-invalid="true" aria-describedby="goal-edit-error"<% } %>
+          >
         </label>
 
         <label class="field">
           <span class="field__label">Окончание периода</span>
-          <input class="input" type="date" name="periodEnd" value="<%= edit.values.periodEnd %>" required>
+          <input
+            class="input"
+            type="date"
+            name="periodEnd"
+            value="<%= edit.values.periodEnd %>"
+            required
+            <% if (editError) { %>aria-invalid="true" aria-describedby="goal-edit-error"<% } %>
+          >
         </label>
 
         <div class="cluster">
@@ -193,8 +232,9 @@
       </div>
     </div>
     <% } else { %>
-    <div class="table-wrap">
+    <div class="table-wrap" role="region" aria-label="Цели по каналам" tabindex="0">
       <table class="table">
+        <caption class="u-visually-hidden">Цели и плановые показатели по выбранным фильтрам</caption>
         <thead>
           <tr>
             <th scope="col">Метрика</th>

@@ -954,3 +954,16 @@ Still open:
   integration suite injects `true` to assert the production header without standing up a TLS proxy. The option drives
   only HSTS, not the session cookie (`sessionCookieOptions()` still reads `env.cookieSecure`). If a future refactor
   unifies cookie and header policy, pass the same value into both.
+
+## M6 Task 4 — accessibility and mobile width
+
+- **Form errors name the form, not the field (priority: medium).** Controllers return the first Zod message as a
+  single string, so a rejected create/update form marks every control `aria-invalid` and points each one at the same
+  error summary. That is honest about the submission but noisier than a field-level mapping. Returning
+  `{ path, message }` from validation and rendering one error node per field would let `aria-describedby` point at the
+  exact control. It changes the controller/service return shape, so it is recorded rather than folded into an
+  accessibility-only change.
+- **Focus ring uses a dedicated darker token (priority: low, recorded decision).** `--color-cyan-focus` (#2f8bd0)
+  replaces `--color-cyan-edge` on outlines because the brand cyan measures 2.99:1 on the stone canvas (3.13:1 on
+  white), below the 3:1 non-text floor. The deviation from the token list in `AGENTS.md` is deliberate and measured in
+  `docs/screenshots/m6/README.md`; chart lines and borders keep the brand cyan.

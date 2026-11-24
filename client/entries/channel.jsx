@@ -134,7 +134,12 @@ export function ChannelIsland({
             : 'Факт за период против цели; цвет — только у статуса, не у суммы.'
         }
       >
-        <div className="table-wrap">
+        <div
+          className="table-wrap"
+          role="region"
+          aria-label={`Цели канала: план и факт за ${period.label}`}
+          tabIndex={0}
+        >
           <table className="table">
             <caption className="u-visually-hidden">
               Цели канала: план и факт за {period.label}
@@ -274,7 +279,12 @@ export function ChannelIsland({
             У канала ещё нет кампаний. Когда они появятся, расход начнёт раскладываться по периодам.
           </EmptyState>
         ) : (
-          <div className="table-wrap">
+          <div
+            className="table-wrap"
+            role="region"
+            aria-label={`Кампании канала: расход, новые клиенты и CAC за ${period.label}`}
+            tabIndex={0}
+          >
             <table className="table">
               <caption className="u-visually-hidden">
                 Кампании канала: расход, новые клиенты и CAC за {period.label}

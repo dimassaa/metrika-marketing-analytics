@@ -117,7 +117,7 @@
       </div>
 
       <% if (passwordError) { %>
-      <div class="alert alert--error" role="alert">
+      <div class="alert alert--error" role="alert" id="profile-password-error">
         <p class="alert__title">Пароль не изменён</p>
         <%= passwordError %>
       </div>
@@ -135,6 +135,7 @@
             autocomplete="current-password"
             maxlength="1024"
             required
+            <% if (passwordError) { %>aria-invalid="true" aria-describedby="profile-password-error"<% } %>
           >
         </label>
 
@@ -148,6 +149,7 @@
             maxlength="128"
             autocomplete="new-password"
             required
+            <% if (passwordError) { %>aria-invalid="true" aria-describedby="profile-password-error"<% } %>
           >
           <span class="field__hint">Минимум 10 символов, без пробелов в начале и конце</span>
         </label>

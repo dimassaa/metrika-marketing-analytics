@@ -22,7 +22,7 @@
     <% } %>
 
     <% if (createError) { %>
-    <div class="alert alert--error" role="alert">
+    <div class="alert alert--error" role="alert" id="user-create-error">
       <p class="alert__title">Пользователь не создан</p>
       <%= createError %>
     </div>
@@ -52,6 +52,7 @@
             maxlength="254"
             autocomplete="off"
             required
+            <% if (createError) { %>aria-invalid="true" aria-describedby="user-create-error"<% } %>
           >
         </label>
 
@@ -66,12 +67,17 @@
             maxlength="120"
             autocomplete="off"
             required
+            <% if (createError) { %>aria-invalid="true" aria-describedby="user-create-error"<% } %>
           >
         </label>
 
         <label class="field">
           <span class="field__label">Роль</span>
-          <select class="select" name="role">
+          <select
+            class="select"
+            name="role"
+            <% if (createError) { %>aria-invalid="true" aria-describedby="user-create-error"<% } %>
+          >
             <option value="viewer" <%= createValues.role === 'viewer' ? 'selected' : '' %>>Наблюдатель</option>
             <option value="analyst" <%= createValues.role === 'analyst' ? 'selected' : '' %>>Аналитик</option>
             <option value="admin" <%= createValues.role === 'admin' ? 'selected' : '' %>>Администратор</option>
@@ -89,6 +95,7 @@
             maxlength="128"
             autocomplete="new-password"
             required
+            <% if (createError) { %>aria-invalid="true" aria-describedby="user-create-error"<% } %>
           >
           <span class="field__hint">Не короче 10 символов; не повторяйте пароль администратора</span>
         </label>
@@ -160,8 +167,9 @@
       </noscript>
     </div>
 
-    <div class="table-wrap">
+    <div class="table-wrap" role="region" aria-label="Пользователи стенда" tabindex="0">
       <table class="table">
+        <caption class="u-visually-hidden">Пользователи стенда</caption>
         <thead>
           <tr>
             <th scope="col">Почта</th>

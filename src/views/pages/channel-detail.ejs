@@ -20,8 +20,9 @@
           <p class="card__meta">Код и тип определяют, как кампании и импорт связываются с каналом.</p>
         </div>
 
-        <div class="table-wrap">
+        <div class="table-wrap" role="region" aria-label="Паспорт канала" tabindex="0">
           <table class="table">
+            <caption class="u-visually-hidden">Паспорт канала «<%= channel.name %>»</caption>
             <tbody>
               <tr>
                 <th scope="row">Код</th>
@@ -74,7 +75,7 @@
         </div>
 
         <% if (formError) { %>
-        <div class="alert alert--error" role="alert">
+        <div class="alert alert--error" role="alert" id="channel-form-error">
           <p class="alert__title">Изменение не применено</p>
           <%= formError %>
         </div>
@@ -93,12 +94,17 @@
               maxlength="100"
               autocomplete="off"
               required
+              <% if (formError) { %>aria-invalid="true" aria-describedby="channel-form-error"<% } %>
             >
           </label>
 
           <label class="field">
             <span class="field__label">Тип</span>
-            <select class="select" name="kind">
+            <select
+              class="select"
+              name="kind"
+              <% if (formError) { %>aria-invalid="true" aria-describedby="channel-form-error"<% } %>
+            >
               <option value="paid" <%= formValues.kind === 'paid' ? 'selected' : '' %>>Платный</option>
               <option value="owned" <%= formValues.kind === 'owned' ? 'selected' : '' %>>Собственный</option>
               <option value="earned" <%= formValues.kind === 'earned' ? 'selected' : '' %>>Заработанный</option>
@@ -115,6 +121,7 @@
               placeholder="38,50"
               inputmode="decimal"
               autocomplete="off"
+              <% if (formError) { %>aria-invalid="true" aria-describedby="channel-form-error"<% } %>
             >
             <span class="field__hint">В BYN; пустое поле означает «цель не задана»</span>
           </label>
@@ -129,6 +136,7 @@
               placeholder="115"
               inputmode="decimal"
               autocomplete="off"
+              <% if (formError) { %>aria-invalid="true" aria-describedby="channel-form-error"<% } %>
             >
             <span class="field__hint">В процентах, от 0 до 10 000</span>
           </label>
@@ -176,7 +184,7 @@
       </div>
 
       <% if (campaignCreateError) { %>
-      <div class="alert alert--error" role="alert">
+      <div class="alert alert--error" role="alert" id="channel-campaign-error">
         <p class="alert__title">Кампания не создана</p>
         <%= campaignCreateError %>
       </div>
@@ -190,8 +198,9 @@
         </p>
       </div>
       <% } else { %>
-      <div class="table-wrap">
+      <div class="table-wrap" role="region" aria-label="Кампании канала" tabindex="0">
         <table class="table">
+          <caption class="u-visually-hidden">Кампании канала «<%= channel.name %>»</caption>
           <thead>
             <tr>
               <th scope="col">Кампания</th>
@@ -264,6 +273,7 @@
             maxlength="60"
             autocomplete="off"
             required
+            <% if (campaignCreateError) { %>aria-invalid="true" aria-describedby="channel-campaign-error"<% } %>
           >
           <span class="field__hint">Строчные латинские буквы, цифры и подчёркивание</span>
         </label>
@@ -279,6 +289,7 @@
             maxlength="120"
             autocomplete="off"
             required
+            <% if (campaignCreateError) { %>aria-invalid="true" aria-describedby="channel-campaign-error"<% } %>
           >
         </label>
 
@@ -290,6 +301,7 @@
             name="startedOn"
             value="<%= campaignCreateValues.startedOn %>"
             required
+            <% if (campaignCreateError) { %>aria-invalid="true" aria-describedby="channel-campaign-error"<% } %>
           >
         </label>
 
@@ -303,6 +315,7 @@
             placeholder="1 500,00"
             inputmode="decimal"
             autocomplete="off"
+            <% if (campaignCreateError) { %>aria-invalid="true" aria-describedby="channel-campaign-error"<% } %>
           >
           <span class="field__hint">В BYN, можно оставить пустым</span>
         </label>

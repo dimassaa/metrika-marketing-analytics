@@ -89,7 +89,7 @@
       </div>
 
       <% if (createError) { %>
-      <div class="alert alert--error" role="alert">
+      <div class="alert alert--error" role="alert" id="campaign-create-error">
         <p class="alert__title">Кампания не создана</p>
         <%= createError %>
       </div>
@@ -100,7 +100,12 @@
 
         <label class="field">
           <span class="field__label">Канал</span>
-          <select class="select" name="channelId" required>
+          <select
+            class="select"
+            name="channelId"
+            required
+            <% if (createError) { %>aria-invalid="true" aria-describedby="campaign-create-error"<% } %>
+          >
             <option value="">Выберите канал</option>
             <% activeChannels.forEach((channel) => { %>
             <option value="<%= channel.id %>" <%= createValues.channelId === channel.id ? 'selected' : '' %>>
@@ -121,6 +126,7 @@
             maxlength="60"
             autocomplete="off"
             required
+            <% if (createError) { %>aria-invalid="true" aria-describedby="campaign-create-error"<% } %>
           >
           <span class="field__hint">Строчные латинские буквы, цифры и подчёркивание</span>
         </label>
@@ -136,12 +142,17 @@
             maxlength="120"
             autocomplete="off"
             required
+            <% if (createError) { %>aria-invalid="true" aria-describedby="campaign-create-error"<% } %>
           >
         </label>
 
         <label class="field">
           <span class="field__label">Статус</span>
-          <select class="select" name="status">
+          <select
+            class="select"
+            name="status"
+            <% if (createError) { %>aria-invalid="true" aria-describedby="campaign-create-error"<% } %>
+          >
             <option value="active" <%= createValues.status === 'active' ? 'selected' : '' %>>Активна</option>
             <option value="paused" <%= createValues.status === 'paused' ? 'selected' : '' %>>На паузе</option>
             <option value="finished" <%= createValues.status === 'finished' ? 'selected' : '' %>>Завершена</option>
@@ -150,12 +161,25 @@
 
         <label class="field">
           <span class="field__label">Старт</span>
-          <input class="input" type="date" name="startedOn" value="<%= createValues.startedOn %>" required>
+          <input
+            class="input"
+            type="date"
+            name="startedOn"
+            value="<%= createValues.startedOn %>"
+            required
+            <% if (createError) { %>aria-invalid="true" aria-describedby="campaign-create-error"<% } %>
+          >
         </label>
 
         <label class="field">
           <span class="field__label">Окончание</span>
-          <input class="input" type="date" name="endedOn" value="<%= createValues.endedOn %>">
+          <input
+            class="input"
+            type="date"
+            name="endedOn"
+            value="<%= createValues.endedOn %>"
+            <% if (createError) { %>aria-invalid="true" aria-describedby="campaign-create-error"<% } %>
+          >
           <span class="field__hint">Можно оставить пустым</span>
         </label>
 
@@ -169,6 +193,7 @@
             placeholder="1 500,00"
             inputmode="decimal"
             autocomplete="off"
+            <% if (createError) { %>aria-invalid="true" aria-describedby="campaign-create-error"<% } %>
           >
           <span class="field__hint">В BYN, можно оставить пустым</span>
         </label>
@@ -193,7 +218,7 @@
       </div>
 
       <% if (editError) { %>
-      <div class="alert alert--error" role="alert">
+      <div class="alert alert--error" role="alert" id="campaign-edit-error">
         <p class="alert__title">Изменение не применено</p>
         <%= editError %>
       </div>
@@ -212,12 +237,17 @@
             maxlength="120"
             autocomplete="off"
             required
+            <% if (editError) { %>aria-invalid="true" aria-describedby="campaign-edit-error"<% } %>
           >
         </label>
 
         <label class="field">
           <span class="field__label">Статус</span>
-          <select class="select" name="status">
+          <select
+            class="select"
+            name="status"
+            <% if (editError) { %>aria-invalid="true" aria-describedby="campaign-edit-error"<% } %>
+          >
             <option
               value="active"
               <%= edit.values.status === 'active' ? 'selected' : '' %>
@@ -233,12 +263,25 @@
 
         <label class="field">
           <span class="field__label">Старт</span>
-          <input class="input" type="date" name="startedOn" value="<%= edit.values.startedOn %>" required>
+          <input
+            class="input"
+            type="date"
+            name="startedOn"
+            value="<%= edit.values.startedOn %>"
+            required
+            <% if (editError) { %>aria-invalid="true" aria-describedby="campaign-edit-error"<% } %>
+          >
         </label>
 
         <label class="field">
           <span class="field__label">Окончание</span>
-          <input class="input" type="date" name="endedOn" value="<%= edit.values.endedOn %>">
+          <input
+            class="input"
+            type="date"
+            name="endedOn"
+            value="<%= edit.values.endedOn %>"
+            <% if (editError) { %>aria-invalid="true" aria-describedby="campaign-edit-error"<% } %>
+          >
         </label>
 
         <label class="field">
@@ -251,6 +294,7 @@
             placeholder="1 500,00"
             inputmode="decimal"
             autocomplete="off"
+            <% if (editError) { %>aria-invalid="true" aria-describedby="campaign-edit-error"<% } %>
           >
           <span class="field__hint">В BYN; пустое поле означает «бюджет не задан»</span>
         </label>
@@ -282,8 +326,9 @@
       </div>
     </div>
     <% } else { %>
-    <div class="table-wrap">
+    <div class="table-wrap" role="region" aria-label="Кампании" tabindex="0">
       <table class="table">
+        <caption class="u-visually-hidden">Кампании по выбранным фильтрам</caption>
         <thead>
           <tr>
             <th scope="col">Кампания</th>

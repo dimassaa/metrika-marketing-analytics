@@ -16,8 +16,9 @@
       </p>
     </div>
 
-    <div class="table-wrap">
+    <div class="table-wrap" role="region" aria-label="Итоги пакета импорта" tabindex="0">
       <table class="table">
+        <caption class="u-visually-hidden">Итоги пакета импорта №<%= batch.id %></caption>
         <thead>
           <tr>
             <th scope="col" class="u-right">Всего строк</th>
@@ -65,8 +66,9 @@
         </p>
       </div>
       <% } else { %>
-      <div class="table-wrap">
+      <div class="table-wrap" role="region" aria-label="Ошибки по строкам пакета импорта" tabindex="0">
         <table class="table">
+          <caption class="u-visually-hidden">Ошибки по строкам пакета импорта</caption>
           <thead>
             <tr>
               <th scope="col" class="u-right">Строка</th>

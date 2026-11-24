@@ -82,6 +82,9 @@
   --color-sky-wash: #c1e1f7;
   --color-cyan-signal: #3ba6f1;
   --color-cyan-edge: #3398e1;
+  /* Keyboard focus ring. Brand cyan-edge measures 3.13:1 on white but only 2.99:1 on the stone canvas, below the
+     3:1 non-text floor; this darker cyan measures 3.67:1 on white and 3.51:1 on the canvas. */
+  --color-cyan-focus: #2f8bd0;
 
   /* Data status — dots, text and thin bars only, never button fills */
   --color-status-healthy: #2f7d5f;
@@ -327,7 +330,7 @@ hr {
 }
 
 :focus-visible {
-  outline: 2px solid var(--color-cyan-edge);
+  outline: 2px solid var(--color-cyan-focus);
   outline-offset: 2px;
 }
 
@@ -360,7 +363,7 @@ hr {
 /* `#main` receives programmatic focus from the skip link; a ring confirms where the jump landed. */
 .app-content:focus-visible,
 main:focus-visible {
-  outline: 2px solid var(--color-cyan-edge);
+  outline: 2px solid var(--color-cyan-focus);
   outline-offset: -2px;
 }
 
@@ -626,8 +629,8 @@ main:focus-visible {
 .select:focus,
 .textarea:focus {
   border-color: var(--color-cyan-edge);
-  outline: 2px solid var(--color-cyan-edge);
-  outline-offset: 1px;
+  outline: 2px solid var(--color-cyan-focus);
+  outline-offset: 2px;
 }
 
 .input:disabled,
@@ -696,8 +699,8 @@ input[type='file'] {
 
 .file-input:focus-visible {
   border-color: var(--color-cyan-edge);
-  outline: 2px solid var(--color-cyan-edge);
-  outline-offset: 1px;
+  outline: 2px solid var(--color-cyan-focus);
+  outline-offset: 2px;
 }
 
 /* Upload report: a white card lifted with the one shared shadow, because it appears after the action and must read
@@ -1091,7 +1094,9 @@ input[type='file'] {
   user-select: all;
 }
 
-/* Highlight span — the single inline color treatment in a headline. */
+/* Highlight span — the single inline color treatment in a headline.
+   Owner exception: #3398e1 on #c1e1f7 measures 2.29:1, below WCAG AA even for large text. The owner chose to keep the
+   brand pair on the landing headline only; it is never used for body copy or UI text. Measured 2026-11-24. */
 .highlight {
   padding: 2px var(--spacing-8);
   border-radius: var(--radius-icon);
@@ -1760,7 +1765,7 @@ input[type='file'] {
 }
 
 .app-nav-toggle:focus-visible ~ .app-sidebar__head .app-nav__toggle {
-  outline: 2px solid var(--color-cyan-edge);
+  outline: 2px solid var(--color-cyan-focus);
   outline-offset: 2px;
 }
 
@@ -1955,7 +1960,8 @@ input[type='file'] {
 }
 
 .app-empty__icon {
-  color: var(--color-ash-gray);
+  /* Decorative, but still a non-text graphic: warm gray clears the 3:1 floor, ash gray does not. */
+  color: var(--color-warm-gray);
 }
 
 .app-steps {
@@ -2160,6 +2166,8 @@ input[type='file'] {
 }
 
 .chart__table summary {
+  /* 20 px of text is under the 24 px target floor; vertical padding grows the hit area without moving the card. */
+  padding-block: 2px;
   color: var(--color-warm-gray);
   cursor: pointer;
   font-size: 12px;
@@ -2256,6 +2264,7 @@ input[type='file'] {
    browser's focus ring, so keyboard navigation needs no extra script. */
 .range {
   width: 100%;
+  min-height: 24px;
   accent-color: var(--color-cyan-edge);
 }
 
@@ -2503,13 +2512,34 @@ input[type='file'] {
 }
 
 .table__row--clickable:focus-within {
-  outline: 2px solid var(--color-cyan-edge);
+  outline: 2px solid var(--color-cyan-focus);
   outline-offset: -2px;
 }
 
 .table__channel:focus-visible {
-  outline: 2px solid var(--color-cyan-edge);
+  outline: 2px solid var(--color-cyan-focus);
   outline-offset: 2px;
+}
+
+/* Dense tables put text links in every row. Vertical padding gives each link a 24 px hit area without changing the
+   row height or the typography; the generic rule skips pill buttons, which already carry their own padding. */
+.table th a:not(.btn),
+.table td a:not(.btn),
+.excluded__row .table__channel {
+  padding-block: 5px;
+}
+
+/* Choice rows expose the whole label as the target. The native box stays small so the text keeps its rhythm, while
+   the label itself clears the 24 px floor. */
+.choice {
+  align-items: center;
+  min-height: 28px;
+}
+
+.choice input[type='checkbox'],
+.choice input[type='radio'] {
+  width: 18px;
+  height: 18px;
 }
 
 /* Channel passport: target comparison, funnel and retention matrix. The colours are tokens only; heat cells mix the
@@ -2744,7 +2774,7 @@ input[type='file'] {
 }
 
 .segmented__item:focus-visible {
-  outline: 2px solid var(--color-cyan-edge);
+  outline: 2px solid var(--color-cyan-focus);
   outline-offset: 2px;
 }
 

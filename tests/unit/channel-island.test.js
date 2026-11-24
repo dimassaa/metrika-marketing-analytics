@@ -179,6 +179,27 @@ describe('channel island structure', () => {
     expect(html).toContain('Показаны первые 1 кампания');
   });
 
+  it('makes every table wrapper a named keyboard scroll region', () => {
+    const html = renderToStaticMarkup(
+      createElement(
+        ChannelIsland,
+        model({
+          campaigns: [
+            { id: '1', code: 'ig_warm', name: 'Instagram тёплый', spendCents: '100', newCustomers: 1, cacCents: '100' },
+          ],
+        }),
+      ),
+    );
+
+    const wrappers = [...html.matchAll(/<div class="table-wrap"[^>]*>/g)].map((match) => match[0]);
+    expect(wrappers.length).toBeGreaterThanOrEqual(2);
+    for (const wrapper of wrappers) {
+      expect(wrapper).toContain('role="region"');
+      expect(wrapper).toContain('tabindex="0"');
+      expect(wrapper).toMatch(/aria-label="[^"]+"/);
+    }
+  });
+
   it('names the retention money column with the actual horizon and its unit', () => {
     const html = renderToStaticMarkup(
       createElement(RetentionGrid, {

@@ -14,6 +14,7 @@
   const status = document.getElementById('import-status');
   const submit = document.getElementById('import-submit');
   const csrfInput = form?.querySelector('input[name="_csrf"]');
+  const fileInput = form?.querySelector('input[type="file"]');
   if (!form || !status || !submit || !csrfInput) return;
 
   const defaultSubmitLabel = submit.textContent;
@@ -54,7 +55,13 @@
   function renderErrors(errors) {
     const shown = errors.slice(0, MAX_INLINE_ERRORS);
     const wrap = element('div', 'table-wrap');
+    // Same contract as a server-rendered table: a named scroll region a keyboard user can enter, with a caption that
+    // names the report when the table is reached out of context.
+    wrap.setAttribute('role', 'region');
+    wrap.setAttribute('aria-label', 'Ошибки по строкам импорта');
+    wrap.tabIndex = 0;
     const table = element('table', 'table');
+    table.appendChild(element('caption', 'u-visually-hidden', 'Ошибки по строкам импорта'));
     const head = element('thead');
     const headRow = element('tr');
     ['Строка', 'Колонка', 'Причина'].forEach((label, index) => {
@@ -168,6 +175,12 @@
   function renderFailure(message) {
     clear(status);
     setState('error');
+    // The response rejected the submission itself, so the file control is the field to correct. The status region
+    // already carries the text, which keeps the pointer honest without inventing a second live message.
+    if (fileInput) {
+      fileInput.setAttribute('aria-invalid', 'true');
+      fileInput.setAttribute('aria-describedby', 'import-status');
+    }
     status.appendChild(element('p', 'upload-status__title', 'Файл не загружен'));
     status.appendChild(element('p', 'upload-status__meta', message));
   }
@@ -178,6 +191,10 @@
 
     clear(status);
     setState('loading');
+    if (fileInput) {
+      fileInput.removeAttribute('aria-invalid');
+      fileInput.removeAttribute('aria-describedby');
+    }
     status.appendChild(element('p', 'upload-status__title', 'Проверяем файл…'));
     submit.disabled = true;
     submit.textContent = 'Отправляем…';
