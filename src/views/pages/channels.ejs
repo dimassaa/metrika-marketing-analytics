@@ -110,7 +110,7 @@
       </div>
 
       <% if (createError) { %>
-      <div class="alert alert--error" role="alert">
+      <div class="alert alert--error" role="alert" id="channel-create-error">
         <p class="alert__title">Канал не создан</p>
         <%= createError %>
       </div>
@@ -130,6 +130,7 @@
             maxlength="40"
             autocomplete="off"
             required
+            <% if (createError) { %>aria-invalid="true" aria-describedby="channel-create-error"<% } %>
           >
           <span class="field__hint">Строчные латинские буквы, цифры и подчёркивание</span>
         </label>
@@ -145,12 +146,17 @@
             maxlength="100"
             autocomplete="off"
             required
+            <% if (createError) { %>aria-invalid="true" aria-describedby="channel-create-error"<% } %>
           >
         </label>
 
         <label class="field">
           <span class="field__label">Тип</span>
-          <select class="select" name="kind">
+          <select
+            class="select"
+            name="kind"
+            <% if (createError) { %>aria-invalid="true" aria-describedby="channel-create-error"<% } %>
+          >
             <option value="paid" <%= createValues.kind === 'paid' ? 'selected' : '' %>>Платный</option>
             <option value="owned" <%= createValues.kind === 'owned' ? 'selected' : '' %>>Собственный</option>
             <option value="earned" <%= createValues.kind === 'earned' ? 'selected' : '' %>>Заработанный</option>
@@ -167,6 +173,7 @@
             placeholder="38,50"
             inputmode="decimal"
             autocomplete="off"
+            <% if (createError) { %>aria-invalid="true" aria-describedby="channel-create-error"<% } %>
           >
           <span class="field__hint">В BYN, можно оставить пустым</span>
         </label>
@@ -181,6 +188,7 @@
             placeholder="115"
             inputmode="decimal"
             autocomplete="off"
+            <% if (createError) { %>aria-invalid="true" aria-describedby="channel-create-error"<% } %>
           >
           <span class="field__hint">В процентах, от 0 до 10 000</span>
         </label>

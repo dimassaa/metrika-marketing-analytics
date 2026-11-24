@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { createElement } from 'react';
@@ -188,6 +190,64 @@ function describedByProblems(html) {
   return problems;
 }
 
+/**
+ * Finds the form that posts to an exact action. Attribute order is not assumed: the opening tag is matched first,
+ * then the block is cut at the first closing tag because no app form nests another form.
+ *
+ * @param {string} html
+ * @param {string} action Exact `action` value.
+ * @returns {string | null} The form markup including its opening and closing tags.
+ */
+function formByAction(html, action) {
+  const opening = [...html.matchAll(/<form\b[^>]*>/gi)].find(
+    (match) => /method="post"/i.test(match[0]) && match[0].includes(`action="${action}"`),
+  );
+  if (!opening) return null;
+  const close = html.indexOf('</form>', opening.index);
+  return close === -1 ? null : html.slice(opening.index, close + '</form>'.length);
+}
+
+/**
+ * Asserts the shared error contract: a named alert and every visible control of the rejected form pointing at it.
+ *
+ * @param {string} html Rendered error page.
+ * @param {{ alertId: string, action: string }} input Expected summary id and the posting form.
+ */
+function expectErrorForm(html, { alertId, action }) {
+  expect(html).toContain(`id="${alertId}"`);
+  const form = formByAction(html, action);
+  expect(form, `form posting to ${action}`).toBeTruthy();
+  const controls = [...form.matchAll(/<(input|select|textarea)\b[^>]*>/gi)]
+    .map((match) => match[0])
+    .filter((tag) => !/type="hidden"/.test(tag));
+  expect(controls.length).toBeGreaterThan(0);
+  for (const control of controls) {
+    expect(control, control).toContain('aria-invalid="true"');
+    expect(control, control).toContain(`aria-describedby="${alertId}"`);
+  }
+  expect(describedByProblems(html)).toEqual([]);
+}
+
+/**
+ * The full page contract reused by pages that only exist after a detail row is created.
+ *
+ * @param {string} html
+ * @param {{ inlineStyles?: boolean }} [options]
+ */
+function expectPageContract(html, { inlineStyles = true } = {}) {
+  expect(h1Count(html)).toBe(1);
+  expect(html).toMatch(/<a class="skip-link" href="#main">/);
+  expect(html).toMatch(/<main id="main"[^>]*>/);
+  expect(html).toContain('src="/js/app-nav.js"');
+  expect(html).toMatch(/<a\b[^>]*aria-current="page"/);
+  expect(tableProblems(html)).toEqual([]);
+  expect(tableWrapProblems(html)).toEqual([]);
+  expect(unlabelledControls(html)).toEqual([]);
+  expect(imageProblems(html)).toEqual([]);
+  expect(describedByProblems(html)).toEqual([]);
+  if (inlineStyles) expect(html).not.toMatch(/\sstyle\s*=\s*["']/i);
+}
+
 describe.each(STATIC_PAGES)('a11y markup: %s', (path) => {
   /** @type {import('supertest').Response} */
   let response;
@@ -230,7 +290,8 @@ describe.each(STATIC_PAGES)('a11y markup: %s', (path) => {
   });
 
   it('uses no inline styles', () => {
-    expect(response.text).not.toMatch(/\sstyle="/);
+    // Accept single or double quotes and arbitrary whitespace around `=`: a minifier or a hand edit must not slip past.
+    expect(response.text).not.toMatch(/\sstyle\s*=\s*["']/i);
   });
 });
 
@@ -278,20 +339,259 @@ describe('a11y markup: form errors', () => {
       });
 
     expect(response.status).toBe(400);
-    expect(response.text).toMatch(/id="campaign-create-error"/);
-    const form = /<form class="inline-form" method="post" action="\/app\/campaigns">([\s\S]*?)<\/form>/.exec(
-      response.text,
-    )?.[1];
-    expect(form).toBeTruthy();
-    const controls = [...form.matchAll(/<(input|select|textarea)\b[^>]*>/gi)]
-      .map((match) => match[0])
-      .filter((tag) => !/type="hidden"/.test(tag));
-    expect(controls.length).toBeGreaterThan(0);
-    for (const control of controls) {
-      expect(control).toContain('aria-invalid="true"');
-      expect(control).toMatch(/aria-describedby="campaign-create-error"/);
-    }
-    expect(describedByProblems(response.text)).toEqual([]);
+    expectErrorForm(response.text, { alertId: 'campaign-create-error', action: '/app/campaigns' });
+  });
+
+  it('marks the rejected channel create form', async () => {
+    const csrf = await getAppCsrf(agent, '/app/channels');
+    const response = await agent
+      .post('/app/channels')
+      .type('form')
+      .send({
+        _csrf: csrf,
+        code: 'НЕ-КОД',
+        name: '',
+        kind: 'paid',
+        targetCacByn: 'abc',
+        targetRomiPct: '-5',
+      });
+
+    expect(response.status).toBe(400);
+    expectErrorForm(response.text, { alertId: 'channel-create-error', action: '/app/channels' });
+  });
+
+  it('marks the rejected admin user form', async () => {
+    const csrf = await getAppCsrf(agent, '/app/admin/users');
+    const response = await agent
+      .post('/app/admin/users')
+      .type('form')
+      .send({
+        _csrf: csrf,
+        email: 'not-an-email',
+        fullName: '',
+        role: 'viewer',
+        password: 'short',
+      });
+
+    expect(response.status).toBe(400);
+    expectErrorForm(response.text, { alertId: 'user-create-error', action: '/app/admin/users' });
+  });
+
+  it('marks the rejected goal create form', async () => {
+    const csrf = await getAppCsrf(agent, '/app/goals');
+    const response = await agent
+      .post('/app/goals')
+      .type('form')
+      .send({
+        _csrf: csrf,
+        metric: 'cac',
+        channelId: '',
+        targetValue: 'abc',
+        periodStart: '2027-01-01',
+        periodEnd: '2027-01-31',
+      });
+
+    expect(response.status).toBe(400);
+    expectErrorForm(response.text, { alertId: 'goal-create-error', action: '/app/goals' });
+  });
+
+  it('marks the rejected password form', async () => {
+    const csrf = await getAppCsrf(agent, '/app/profile');
+    const response = await agent
+      .post('/app/profile/password')
+      .type('form')
+      .send({
+        _csrf: csrf,
+        currentPassword: 'wrong-password',
+        newPassword: 'another-valid-password',
+      });
+
+    expect(response.status).toBe(400);
+    expectErrorForm(response.text, { alertId: 'profile-password-error', action: '/app/profile/password' });
+  });
+
+  it('marks the rejected channel settings form', async () => {
+    const { rows } = await pool.query('SELECT id::text AS id FROM channels ORDER BY code LIMIT 1');
+    const channelId = rows[0].id;
+    const csrf = await getAppCsrf(agent, `/app/channels/${channelId}`);
+    const response = await agent
+      .post(`/app/channels/${channelId}`)
+      .type('form')
+      .send({
+        _csrf: csrf,
+        name: '',
+        kind: 'broken',
+        targetCacByn: 'abc',
+        targetRomiPct: '-5',
+      });
+
+    expect(response.status).toBe(400);
+    expectErrorForm(response.text, {
+      alertId: 'channel-form-error',
+      action: `/app/channels/${channelId}`,
+    });
+  });
+
+  it('marks the rejected campaign edit form', async () => {
+    const { rows } = await pool.query('SELECT id::text AS id FROM campaigns ORDER BY id LIMIT 1');
+    const campaignId = rows[0].id;
+    const csrf = await getAppCsrf(agent, `/app/campaigns?edit=${campaignId}`);
+    const response = await agent
+      .post(`/app/campaigns/${campaignId}`)
+      .type('form')
+      .send({
+        _csrf: csrf,
+        name: '',
+        status: 'not-a-status',
+        startedOn: 'not-a-date',
+        endedOn: '',
+        budgetByn: '-1',
+      });
+
+    expect(response.status).toBe(400);
+    expectErrorForm(response.text, {
+      alertId: 'campaign-edit-error',
+      action: `/app/campaigns/${campaignId}`,
+    });
+  });
+
+  it('marks the rejected goal edit form', async () => {
+    const createCsrf = await getAppCsrf(agent, '/app/goals');
+    const created = await agent
+      .post('/app/goals')
+      .type('form')
+      .send({
+        _csrf: createCsrf,
+        metric: 'cac',
+        channelId: '',
+        targetValue: '42,50',
+        periodStart: '2031-01-01',
+        periodEnd: '2031-01-31',
+      });
+    expect(created.status).toBe(302);
+
+    const { rows } = await pool.query(
+      "SELECT id::text AS id FROM goals WHERE period_start = '2031-01-01' ORDER BY id DESC LIMIT 1",
+    );
+    const goalId = rows[0].id;
+    const csrf = await getAppCsrf(agent, `/app/goals?edit=${goalId}`);
+    const response = await agent
+      .post(`/app/goals/${goalId}`)
+      .type('form')
+      .send({
+        _csrf: csrf,
+        targetValue: 'abc',
+        periodStart: '2031-02-01',
+        periodEnd: '2031-01-01',
+      });
+
+    expect(response.status).toBe(400);
+    expectErrorForm(response.text, { alertId: 'goal-edit-error', action: `/app/goals/${goalId}` });
+    await pool.query('DELETE FROM goals WHERE id = $1::bigint', [goalId]);
+  });
+
+  it('marks the rejected campaign quick-add on the channel passport', async () => {
+    const { rows } = await pool.query('SELECT id::text AS id FROM channels ORDER BY code LIMIT 1');
+    const channelId = rows[0].id;
+    const csrf = await getAppCsrf(agent, `/app/channels/${channelId}`);
+    const response = await agent
+      .post('/app/campaigns')
+      .type('form')
+      .send({
+        _csrf: csrf,
+        channelId,
+        from: 'channel',
+        code: 'НЕ-КОД',
+        name: '',
+        status: 'active',
+        startedOn: 'not-a-date',
+        endedOn: '',
+        budgetByn: '-1',
+      });
+
+    expect(response.status).toBe(400);
+    expectErrorForm(response.text, {
+      alertId: 'channel-campaign-error',
+      action: '/app/campaigns',
+    });
+  });
+});
+
+describe('a11y markup: import file wiring', () => {
+  it('starts neutral and only marks the file invalid for a server rejection', async () => {
+    const response = await agent.get('/app/import');
+    expect(response.status).toBe(200);
+    const file = /<input\b[^>]*id="import-file"[^>]*>/.exec(response.text)?.[0] ?? '';
+    expect(file).toBeTruthy();
+    expect(file).not.toContain('aria-invalid');
+    expect(response.text).toContain('id="import-status"');
+
+    const script = readFileSync(
+      fileURLToPath(new URL('../../public/js/upload-form.js', import.meta.url)),
+      'utf8',
+    );
+    // A refused file (400/422) is the field's fault; a network error or 5xx is not and must not mark it invalid.
+    expect(script).toMatch(/response\.status === 400 \|\| response\.status === 422/);
+    expect(script).toMatch(/renderFailure\([\s\S]{0,160}rejectedFile/);
+  });
+});
+
+describe('a11y markup: saved pages', () => {
+  it('passes the page contract on an import batch with row errors', async () => {
+    const { rows: users } = await pool.query('SELECT id::text AS id FROM users WHERE email = $1', [ADMIN]);
+    const { rows } = await pool.query(
+      `INSERT INTO import_batches
+         (kind, filename, created_by, rows_total, rows_ok, rows_duplicate, rows_failed, committed, errors)
+       VALUES ('daily_stats', 'a11y-batch.csv', $1::bigint, 3, 1, 0, 2, false,
+               '[{"row":2,"field":"spend","message":"Сумма не число"}]'::jsonb)
+       RETURNING id::text AS id`,
+      [users[0].id],
+    );
+    const batchId = rows[0].id;
+    const response = await agent.get(`/app/import/batches/${batchId}`);
+
+    expect(response.status).toBe(200);
+    expectPageContract(response.text);
+    expect(response.text).toContain('Ошибки по строкам пакета импорта');
+    await pool.query('DELETE FROM import_batches WHERE id = $1::bigint', [batchId]);
+  });
+
+  it('passes the page contract on a saved scenario snapshot', async () => {
+    const csrf = await getAppCsrf(agent, '/app/scenarios');
+    const saved = await agent
+      .post('/app/scenarios')
+      .type('form')
+      .send({ _csrf: csrf, name: 'A11y snapshot', budgetByn: '1000' });
+
+    expect(saved.status).toBe(302);
+    const location = String(saved.headers.location ?? '');
+    const match = /\/app\/scenarios\/(\d+)$/.exec(location);
+    expect(match, `redirect after save was ${location}`).toBeTruthy();
+    const scenarioId = match[1];
+
+    const response = await agent.get(`/app/scenarios/${scenarioId}`);
+    expect(response.status).toBe(200);
+    expectPageContract(response.text);
+    expect(response.text).toContain('data-island="scenarios"');
+    await pool.query('DELETE FROM scenarios WHERE id = $1::bigint', [scenarioId]);
+  });
+
+  it('keeps aria-current on the active cohort horizon switch', async () => {
+    const response = await agent.get('/app/cohorts');
+    expect(response.status).toBe(200);
+    const nav = /<nav class="segmented" aria-label="Горизонт когорт">([\s\S]*?)<\/nav>/.exec(response.text)?.[1] ?? '';
+    expect(nav).toContain('is-active');
+    expect(nav).toMatch(/<a\b[^>]*is-active[^>]*\saria-current="page"/);
+  });
+
+  it('keeps aria-current on the active scenario budget preset', async () => {
+    const response = await agent.get('/app/scenarios');
+    expect(response.status).toBe(200);
+    const presets =
+      /<div class="cluster" aria-label="Пресеты недельного бюджета">([\s\S]*?)<\/div>/.exec(response.text)?.[1] ?? '';
+    expect(presets, 'default builder must render a preset).').toContain('Как сейчас');
+    // The preset fragment is emitted raw; escaped output would turn the quotes into `&#34;` and fail this match.
+    expect(presets).toMatch(/<a\b[^>]*\saria-current="true"/);
   });
 });
 

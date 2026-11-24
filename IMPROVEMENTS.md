@@ -48,10 +48,9 @@ Non-critical findings recorded during implementation. Priority is decided by the
 
 ## Design system
 
-- **The headline highlight span is 2.28:1 (`#3398e1` on `#c1e1f7`), below WCAG AA for normal text.** This is the
+- **The headline highlight span is 2.29:1 (`#3398e1` on `#c1e1f7`), below WCAG AA for normal text.** This is the
   accepted brand ruling: the element is fixed by the supplied style reference and AGENTS §6, and changing the hue
-  would break the design contract. Recorded for the defence, not a bug to fix; revisit only if the owner changes the
-  brand.
+  would break the design contract. Decision recorded 24.11.2026; revisit only if the owner changes the brand.
 - **`--shadow-subtle` is unused and `--shadow-preview` only serves the landing preview.** Shipped shadows should be
   the ones components actually use; either apply them in M2 or remove them so the token list stays honest.
 - **Public components use unprefixed global class names** (`.card`, `.btn`, `.field`, `.table`, `.badge`), while the

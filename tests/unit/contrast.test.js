@@ -162,6 +162,22 @@ describe('contrast tokens', () => {
     expect(badge.body).toContain('var(--color-warm-gray)');
   });
 
+  it('keeps compact interactive targets at least 24 px', () => {
+    const rule = (selector) => rules(css).find((entry) => entry.selector === selector);
+
+    // A `<summary>` measured 23.67 px with 2 px padding; the explicit floor is what the browser audit checks.
+    expect(rule('.chart__table summary')?.body).toMatch(/min-height:\s*24px/);
+    expect(rule('.chart__table summary')?.body).toMatch(/padding-block:\s*3px/);
+    expect(rule('.table__channel')?.body).toMatch(/min-height:\s*24px/);
+    expect(rule('.range')?.body).toMatch(/min-height:\s*24px/);
+    expect(rule('.choice')?.body).toMatch(/min-height:\s*28px/);
+    expect(rule('.btn--sm')?.body).toMatch(/min-height:\s*28px/);
+
+    // Dense row links get padding, but not the block channel link: 10 px there grew every row.
+    const dense = rules(css).find((entry) => entry.selector.includes('.table td a:not(.btn)'));
+    expect(dense?.selector).toContain(':not(.table__channel)');
+  });
+
   it('keeps the reduced-motion override global', () => {
     const reduced = /@media \(prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
     expect(reduced).toContain('animation-duration: 0.01ms !important');

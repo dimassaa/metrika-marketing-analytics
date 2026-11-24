@@ -171,13 +171,13 @@
 
   /**
    * @param {string} message
+   * @param {boolean} [invalid] True only when the server rejected the submitted file. A network failure or a 5xx is
+   *   not the file's fault, so marking the control invalid there would send the person to fix an innocent field.
    */
-  function renderFailure(message) {
+  function renderFailure(message, invalid = false) {
     clear(status);
     setState('error');
-    // The response rejected the submission itself, so the file control is the field to correct. The status region
-    // already carries the text, which keeps the pointer honest without inventing a second live message.
-    if (fileInput) {
+    if (fileInput && invalid) {
       fileInput.setAttribute('aria-invalid', 'true');
       fileInput.setAttribute('aria-describedby', 'import-status');
     }
@@ -209,7 +209,11 @@
       const payload = await response.json().catch(() => null);
 
       if (!response.ok || !payload || payload.error) {
-        renderFailure(payload?.error?.message ?? 'Сервер вернул неожиданный ответ. Попробуйте ещё раз.');
+        const rejectedFile = response.status === 400 || response.status === 422;
+        renderFailure(
+          payload?.error?.message ?? 'Сервер вернул неожиданный ответ. Попробуйте ещё раз.',
+          rejectedFile,
+        );
         return;
       }
       renderReport(payload);

@@ -2166,8 +2166,10 @@ input[type='file'] {
 }
 
 .chart__table summary {
-  /* 20 px of text is under the 24 px target floor; vertical padding grows the hit area without moving the card. */
-  padding-block: 2px;
+  /* 20 px of text is under the 24 px target floor; 3 px of padding plus an explicit floor measures 24 px in Chromium
+     (2 px landed on 23.67 px because of the font's line box). */
+  min-height: 24px;
+  padding-block: 3px;
   color: var(--color-warm-gray);
   cursor: pointer;
   font-size: 12px;
@@ -2406,7 +2408,10 @@ input[type='file'] {
 }
 
 .table__channel {
-  display: block;
+  /* Inline-flex keeps the 24 px target without the 10 px block-link padding the dense-table rule below would add. */
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
   color: var(--color-ink-black);
   font-weight: 500;
   text-decoration: none;
@@ -2523,10 +2528,10 @@ input[type='file'] {
 
 /* Dense tables put text links in every row. Vertical padding gives each link a 24 px hit area without changing the
    row height or the typography; the generic rule skips pill buttons, which already carry their own padding. */
-.table th a:not(.btn),
-.table td a:not(.btn),
+.table th a:not(.btn):not(.table__channel),
+.table td a:not(.btn):not(.table__channel),
 .excluded__row .table__channel {
-  padding-block: 5px;
+  padding-block: 3px;
 }
 
 /* Choice rows expose the whole label as the target. The native box stays small so the text keeps its rhythm, while
