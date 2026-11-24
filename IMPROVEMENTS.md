@@ -986,13 +986,13 @@ Still open:
 
 ## M6 Task 6 — E2E-матрица, ошибки и кросс-ролевая проверка
 
-- **Page query budget does not count statements on a checked-out client (priority: medium).**
-  `tests/integration/page-queries.test.js` passes `pool.connect` straight through, so the `BEGIN` / snapshot /
-  `COMMIT` statements of `cohortsRepository.withSnapshot` are invisible. The live probe from Task 6 wrapped the
-  client too: `/app/channels/1` runs 27 round trips, of which 3 are transaction control, while the test's ceiling is
-  24 and its wrapper reports 24. The test therefore measures "pool statements", not "statements sent to PostgreSQL"
-  as its docstring says. Either wrap `client.query` and raise the channel-detail ceiling to 27, or state the
-  narrower contract in the test. Not changed in Task 6 because it would move a budget mid-delivery.
+- **Page query budget now measures the real snapshot path (resolved in the Task 6 review follow-up).** The old
+  wrapper omitted `totalCount`, so `cohortsRepository.withSnapshot` took the "already inside a transaction" branch
+  and its four `BEGIN`/`COMMIT` statements never reached the counter; the snapshot reads still ran through the pool.
+  `/app/channels/1` therefore measured 23 instead of 27. The wrapper now forwards `totalCount` and wraps
+  `client.query`, so the page is counted as 17 non-snapshot statements plus two LTV snapshots × [BEGIN + three
+  reads + COMMIT], and the ceiling is 27. Transaction control stays out of the duplicate-read check because it
+  repeats once per snapshot by design.
 - **A CSRF rejection on a page POST answers `text/plain` (priority: low).** `POST /app/channels` without
   `X-CSRF-Token` returns `403 text/plain "CSRF token mismatch"`, while the same POST with a token but a missing
   permission returns the styled `errors/403` page. The split is deliberate in `errorHandler` (4xx page errors keep

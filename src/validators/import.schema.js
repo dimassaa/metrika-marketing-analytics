@@ -280,9 +280,9 @@ export function parseImportFile(kind, input) {
 /**
  * MIME types that a browser or an office suite reports for a CSV attachment.
  *
- * Windows Chrome sends `application/vnd.ms-excel` for `.csv`; Firefox and Chromium on Linux send `text/csv`. The
- * list stays closed: the upload is parsed as UTF-8 CSV, so an image or an XLSX is rejected before the parser turns
- * its bytes into confusing column errors.
+ * Windows Chrome sends `application/vnd.ms-excel` for `.csv`; Firefox and Chromium on Linux send `text/csv`, and a
+ * browser may append a charset parameter. The list stays closed so an image or an XLSX is answered with a file-type
+ * message instead of a column report.
  */
 const CSV_UPLOAD_MIME_TYPES = Object.freeze([
   'text/csv',
@@ -294,9 +294,10 @@ const CSV_UPLOAD_MIME_TYPES = Object.freeze([
 /**
  * Checks the uploaded file's extension and declared type before the buffer is parsed.
  *
- * The declared MIME comes from the client and can be spoofed; it is not a security boundary. The extension and the
- * content check (the CSV parser rejects binary garbage) are what keep a wrong file from producing a misleading
- * "missing columns" report. Together they satisfy the design spec's MIME/extension requirement.
+ * The declared MIME comes from the client and can be spoofed; it is not a security boundary. Safety does not depend
+ * on this check: the CSV parser rejects unreadable input, and a well-formed but wrong text file still ends up as
+ * "missing required columns" or as per-row errors. The check exists for the message — an image or an XLSX should not
+ * be told that its columns are wrong. Extension and type must agree, which is the design spec's MIME/extension rule.
  *
  * @param {{ originalname?: unknown, mimetype?: unknown }} file Multer file object.
  * @throws {ValidationError} When the name does not end in `.csv` or the type is not a CSV type.

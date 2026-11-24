@@ -362,9 +362,11 @@ Scratch-базы `metrika_restore_check`, `metrika_copy_check`, `metrika_tamper_
 PGPASSWORD_UNSET
 --version
 PGPASSWORD_SET
---format=custom --no-owner --no-acl --dbname postgres://dimass@localhost:5432/metrika_dev
+--format=custom --no-owner --no-acl --dbname postgres://metrika@localhost:5432/metrika_dev
 no password in argv
 ```
+
+  Имя роли в примере обезличено; команда и вывод остальные.
 
   Интеграционный тест дополнительно проверяет, что `review-secret` из `DATABASE_URL` не встречается ни в одном
   залогированном argv и что дочерний процесс видит `PGPASSWORD`.
@@ -576,7 +578,7 @@ Test Files 1 passed (1), Tests 10 passed (10)
 $ npm test
 Test Files  105 passed (105)
 Tests       1374 passed (1374)
-Duration    103.25s
+Duration    103.25s      (полный прогон Task 6; follow-up ревью добавил два теста — см. §7)
 ```
 
 `error-pages.test.js` собирает мини-приложение из `notFoundPage`, `requirePermission`, `notFound` и
@@ -706,7 +708,7 @@ If-None-Match: <etag> → 304, 0 bytes
 |---|---:|---:|
 | `/app/dashboard` | 17 | 18 |
 | `/app/channels` | 15 | 16 |
-| `/app/channels/1` | 27 | 24 |
+| `/app/channels/1` | 27 | 27 |
 | `/app/campaigns` | 5 | — |
 | `/app/cohorts` | 8 | 9 |
 | `/app/attribution` | 7 | 8 |
@@ -718,9 +720,14 @@ If-None-Match: <etag> → 304, 0 bytes
 | `/api/v1/alerts` | 9 | 12 |
 | `/api/v1/scenarios` | 12 | 12 |
 
-Единственное расхождение — паспорт канала: 27 против тестового потолка 24. Разница ровно в трёх
-транзакционных операторах, которые `page-queries.test.js` не видит, потому что передаёт `pool.connect`
-напрямую. Тест зелёный, продукт не менялся; пробел записан в `IMPROVEMENTS.md`.
+По итогам ревью `page-queries.test.js` исправлен: он больше не передаёт `pool.connect` напрямую, а форвардит
+`totalCount` и оборачивает `client.query`. Поэтому `withSnapshot` идёт по production-ветке, и паспорт канала
+честно считается как 17 запросов вне снапшотов + два LTV-снапшота × [BEGIN + три чтения + COMMIT] = 27.
+Потолок поднят до 27, точное число и наличие двух `BEGIN … READ ONLY` закреплены отдельным тестом — обёртка,
+потерявшая `totalCount`, снова покажет 23 и упадёт. Транзакционные операторы исключены из проверки дублей
+(они повторяются по одному на снапшот), а чтения внутри пишущей транзакции — из неё тоже: пересчёт алертов
+законно читает затронутые строки до и после записи. Фокусный прогон после правки: 11 page-queries + 26 import,
+37/37.
 
 Сжатие (`Accept-Encoding: gzip`, авторизованная сессия):
 
@@ -793,3 +800,29 @@ If-None-Match: <etag> → 304, 0 bytes
 105 файлов / 1374 теста. Найдены и закрыты два дефекта (MIME/расширение импорта, OG-заглушка в сиде) с
 регрессионными тестами. Firefox, Opera/Yandex, Windows 10, Docker Desktop и TLS остаются за владельцем и здесь
 не заявляются.
+
+## Task 7 — снимки для руководства пользователя
+
+Дата съёмки: 24.11.2026. База: `6eb69cb` + рабочее дерево Task 7 (менялись только документация и снимки).
+Стенд — native Linux, Node.js на хосте, PostgreSQL 18, отдельный процесс на `127.0.0.1:3100`, браузер Chromium
+через `agent-browser`, ширина 1440×1000 (мобильный снимок — 390×844). Перед съёмкой БД `metrika_dev` пересижена:
+data anchor `2026-11-23`, 8 каналов, 32 кампании, 3 пользователя. Все снимки сняты после гидратации островов;
+`agent-browser console` и `agent-browser errors` на каждом экране пусты.
+
+| Файл | Что на снимке |
+|---|---|
+| `guide/landing.png` | лендинг, первый экран, 1440×1000 |
+| `guide/landing-mobile.png` | лендинг на 390×844 |
+| `guide/dashboard-admin.png` | дашборд под администратором: KPI, вердикт, CAC по неделям |
+| `guide/channel.png` | паспорт канала Instagram: метрики, цели канала |
+| `guide/campaigns.png` | кампании: фильтры, итоги, форма новой кампании, таблица |
+| `guide/goals.png` | цели: фильтры, форма новой цели, список планов |
+| `guide/profile.png` | профиль: учётная запись, аватар, смена пароля |
+| `guide/import.png` | импорт CSV: форма, форматы и шаблоны |
+| `guide/import-dry-run.png` | dry-run: «Проверка пройдена», 1 строка, 0 ошибок |
+| `guide/import-success.png` | боевой импорт: «Импорт сохранён», ссылка на отчёт пакета |
+
+Снимки `login.png`, `dashboard-analyst.png`, `channels-analyst.png`, `cohorts.png`, `attribution.png`,
+`alerts.png`, `scenarios.png`, `admin-users.png`, `audit.png`, `import-error.png`, `403-viewer.png`, `404.png`,
+`500.png` и `mobile-390.png` из Task 4/6 переиспользованы в руководстве: они сняты на том же HEAD и показывают
+те же экраны. Новые снимки не подменяют доказательства Task 6 и не добавляют состояний, которых нет в продукте.

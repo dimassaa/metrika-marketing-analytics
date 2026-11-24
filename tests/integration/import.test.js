@@ -615,6 +615,48 @@ describe('file-level rejections', () => {
     expect(wrongExtension.status).toBe(400);
   });
 
+  it('accepts the CSV MIME spellings browsers send and rejects look-alikes', async () => {
+    const agent = await signedIn(ANALYST);
+    const token = await getAppCsrf(agent);
+
+    const upload = (contentType) =>
+      agent
+        .post('/api/v1/import')
+        .set('X-CSRF-Token', token)
+        .field('kind', 'daily_stats')
+        .field('dryRun', 'true')
+        .attach('file', Buffer.from([DAILY_HEADER, 'instagram_retarget;2024-08-06;1;1;0;1,00'].join('\n')), {
+          filename: 'import.csv',
+          contentType,
+        });
+
+    // Browsers and office suites disagree on the type of the same .csv: Windows Chrome says vnd.ms-excel, Linux
+    // browsers say text/csv and may append a charset parameter. A dry run keeps these checks from writing data.
+    for (const contentType of [
+      'text/csv',
+      'application/csv',
+      'text/plain',
+      'application/vnd.ms-excel',
+      'text/csv;charset=utf-8',
+    ]) {
+      const res = await upload(contentType);
+      expect(res.status, contentType).toBe(200);
+      expect(res.body, contentType).toMatchObject({
+        committed: false,
+        rowsOk: 1,
+        rowsFailed: 0,
+        wouldCommit: true,
+      });
+    }
+
+    // Close-looking types are still refused: a client must not smuggle a generic binary stream through the gate.
+    for (const contentType of ['text/x-csv', 'application/octet-stream']) {
+      const res = await upload(contentType);
+      expect(res.status, contentType).toBe(400);
+      expect(res.body.error, contentType).toMatchObject({ code: 'VALIDATION_ERROR' });
+    }
+  });
+
   it('stores only the base name of the uploaded file', async () => {
     const agent = await signedIn(ANALYST);
     const token = await getAppCsrf(agent);
