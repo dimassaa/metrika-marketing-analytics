@@ -260,8 +260,8 @@ React + Recharts кэшируется между страницами, поэт�
 восстанавливается из committed `public/img/og-cover.png`. **Никогда не запускайте `npm run seed` на живом стенде**;
 он нужен только для чистой демонстрационной базы.
 
-Проверка: `http://localhost:3000/health` возвращает `{"status":"ok","db":"up","version":"0.1.0"}`. При недоступной
-БД тот же маршрут отвечает `503` с `{"status":"error","db":"down","version":"0.1.0"}`; Compose-контейнер становится
+Проверка: `http://localhost:3000/health` возвращает `{"status":"ok","db":"up","version":"1.0.0"}`. При недоступной
+БД тот же маршрут отвечает `503` с `{"status":"error","db":"down","version":"1.0.0"}`; Compose-контейнер становится
 `unhealthy`.
 
 ## Демо-аккаунты
@@ -329,6 +329,7 @@ React + Recharts кэшируется между страницами, поэт�
 | `npm run backup` | `pg_dump -Fc` + AES-256-GCM в `metrika-*.dump.enc`; retention и ключ — `docs/deployment.md` |
 | `npm run restore -- --file …` | расшифровка и `pg_restore` в scratch-базу; `--verify` сравнивает row-count + key checksum |
 | `npm test` | Vitest: юнит- и интеграционные тесты на `TEST_DATABASE_URL` |
+| `npm run check:fresh` | чистый клон от коммита: `npm ci`, `.env` из шаблона, временная БД, migrate/seed/build/start, `/`, `/login`, `/health` и вход admin; каталог и БД удаляются |
 | `npm run test:watch` | Vitest в режиме наблюдения |
 
 Тесты работают только с базой из `TEST_DATABASE_URL` и требуют имя, оканчивающееся на `_test`; рабочую базу они

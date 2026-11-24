@@ -1022,3 +1022,104 @@ Still open:
 - **Guide screenshots reuse Task 4/6 captures (priority: low, process).** The user guide references earlier M6
   screenshots for screens that did not change. They were taken on the same UI; if a later change touches those
   screens, the guide must be recaptured together with the new E2E evidence, not left on old images.
+
+## Финальный triage M6 (Task 8)
+
+Закрывающий проход по всему файлу. История M1–M5 не удалена и не переписана: ниже — только статус каждого пункта.
+
+Легенда:
+
+- **fixed** — закрыто кодом или тестом; рядом файл/тест, которым это проверяется.
+- **deferred** — не входит в M6; указан триггер пересмотра, а не «потом».
+- **rejected** — не дефект либо решение уже принято и записано в спеке/документе.
+
+Строка таблицы покрывает **все** пункты раздела; исключения названы поимённо. Где написано «остальные —
+deferred», это значит, что каждый пункт раздела остаётся открытым по причинам, записанным в самом пункте, и
+получит отдельную задачу только по указанному триггеру.
+
+| Раздел | Пунктов | Статус | Закрыто / причина и триггер |
+|---|---|---|---|
+| Tooling | 3 | deferred | Vitest 5 — триггер: плановое обновление тестового стека; `fileParallelism` — триггер: per-schema изоляция тестов; `express-ejs-layouts@^4` — правка текста плана, код уже на 2.5.1 |
+| Database and migrations | 11 | rejected 1, остальные deferred | **rejected:** контрольные суммы применённых миграций — действует правило «`001` не редактируется, любое изменение — новой миграцией», поэтому проверять нечего. Остальные — триггер: следующее изменение миграционного раннера (`db/migrate.js`), `tests/helpers/db.js` или `src/config/env.js` |
+| Design system | 8 | fixed 2, rejected 1, deferred 5 | **fixed:** `.u-numeric` больше не выравнивает вправо (`public/css/app.css`, `.u-right` отделён); OG-текст растрирован в PNG. **rejected:** контраст highlight-span 2.29:1 — принятое брендовое решение от 24.11.2026. Остальные — триггер: следующий проход по токенам/лендингу |
+| Public landing | 5 | fixed 1, deferred 4 | **fixed:** OG-обложка — PNG 1200×630 (`public/img/og-cover.png`, `tests/integration/landing.test.js`). Остальные — триггер: следующий текст/вёрстка лендинга |
+| Runtime | 2 | fixed 1, deferred 1 | **fixed:** политика кэширования — `/assets` immutable на год, `app.css` и обложка на revalidation, приватные ответы `no-store` (`src/app.js`, `tests/integration/cache-headers.test.js`). Остальное — триггер: частичная деградация в `/health` |
+| Seed and demo data | 10 | rejected 1, остальные deferred | **rejected:** `countRows()` — helper удалён из `db/seed/seed.js`, интерполяции имён таблиц больше нет. Остальные — триггер: следующее изменение сида или `src/lib/dates.js` |
+| App shell | 13 | fixed 4, deferred 9 | **fixed:** все `/app`-маршруты несут `requirePermission` (`src/routes/app.routes.js`); колонка «Почта» (`admin-users.ejs`); десять заглушек заменены экранами M2–M5; present-tense копия про импорт удалена вместе с заглушкой. Остальные — триггер: следующий проход по оболочке |
+| Errors and access | 2 | deferred | 4xx-контракт `text/plain` для page-POST и копия 404 без ветки — решение владельца; триггер: следующий проход по error-middleware |
+| Auth and sessions | 8 | fixed 2, deferred 6 | **fixed:** `TRUST_PROXY` (`src/config/env.js`, `tests/unit/config-env.test.js`); деактивация удаляет сессии (`users.service.toggleUserActive` → `deleteUserSessions`). Per-IP bucket добавлен в M6 T3 (`src/routes/auth.routes.js`), но store остаётся в памяти → пункт остаётся deferred вместе с R3. Остальные — триггер: следующий проход по auth |
+| Code quality | 1 | deferred | Три копии API-vs-page предиката; триггер: следующее изменение `src/app.js` или auth-middleware |
+| Data formatting | 3 | fixed 1, deferred 2 | **fixed:** политика BIGINT — id только через `parseBigIntId` (`src/lib/ids.js`), деньги — BigInt-математика, строки не доходят до шаблонов. Остальные — триггер: следующий проход по `src/lib/format.js` |
+| Tests | 3 | fixed 1, deferred 2 | **fixed:** styled 500 закрыт `tests/integration/error-pages.test.js`. Остальные — триггер: следующее изменение error-middleware или `withTransaction` |
+| M2 channels | 3 | fixed 1, deferred 2 | **fixed:** `.pager` используется (`campaigns.ejs`, `audit.ejs`). Остальные — триггер: следующая правка форм каналов |
+| M2 campaigns | 7 | deferred | Продуктовые доработки (flash-уведомления, пагинация, общий `withTransaction` с аудитом); триггер: следующий проход по CRUD-экранам |
+| M2 goals | 8 | deferred | Смешанные единицы `target_value` — принятая компенсация; остальное — триггер: следующее изменение целей |
+| M2 users, profile and audit | 10 | deferred | Все пункты — продуктовые/архитектурные доработки; триггер: следующий проход по админке |
+| M2 CSV import | 3 | deferred | Пакетные вставки и самодостаточные шаблоны; триггер: реальный импорт больше 10 000 строк |
+| M2 CSV export | 8 | rejected 1, остальные deferred | **rejected:** расхождение с текстом плана — план исправлен, контрактом считается код (`docs/superpowers/plans/2026-11-21-metrika-m2-data.md`). Остальные — триггер: следующая ревизия формата экспорта (alias map `revenue`/`margin` — первый кандидат) |
+| M2 media assets | 6 | deferred | OG-обложка из БД: M6 T5 оставил статический PNG осознанно; триггер — загрузка другой обложки администратором. Остальные — триггер: следующий проход по медиа |
+| M3 cleanups (agreed priority) | 3 | deferred | Alias map импорта, консолидация vocabulary и cap/pager целей/пользователей; триггер: M6+ продуктовая задача |
+| Resolved during the M1 final fix wave | 6 | fixed (M1) | Исторический раздел: все шесть закрыты тестами M1, ничего не переоткрыто |
+| Финальное ревью M1 — остаточные находки | 3 | deferred | `req.path` в `buildSeo` для 404, поля `err`-сериализатора, валидация `imagePath`; триггер: следующее изменение `public.controller.js`/`logger.js`/`seo.js` |
+| Metrics engine (M3) | 41 | fixed 5 (M3), остальные deferred/rejected | **fixed:** пять пунктов волны M3 (goal progress без display-rounded фактов, `formatRomi`, `watchRatio`/`romiRiskBelow`, half-open границы суток). **rejected (решения записаны):** free channels `no_data`, контракт golden numbers, consistency-check ранжирования, направленный `deviation.abs` + монотонность воронки как свойство данных, фиксированные недельные бакеты, примеры плана (`payback 12 → healthy`, `formatCompactCents`, «пустая серия»), честные потолки запросов и индекс CAC. Остальные — триггер: следующий проход по метрик-движку (кампанийный scope, снапшот health, точность guard-значений) |
+| M4 Task 3 — channels table | 2 | deferred | Archive в списке и SVG-тест спарклайна; триггер: следующий проход по списку каналов или DOM-окружение в тестах |
+| M4 Task 4 — channel passport | 5 | deferred | Две таблицы кампаний, третий график, бюджет запросов, узкий retention payload, cap кампаний; триггер: следующий проход по паспорту |
+| M4 Task 5 — cohorts | 4 | deferred | Пикер канала, дублирование `table`/`cohorts`, неотрисованный `channelLtv`, `KNOWN_ENTRIES`; триггер: следующий проход по когортам |
+| M4 Task 6 — attribution | 5 | deferred | Инвариантность итогов, имена каналов, округление дельты, GET-переключатель моделей, отсутствие campaign scope; триггер: продуктовое решение по кампаниям |
+| M4 Task 7 — shared states/a11y/budget | 11 | fixed 1 (M4), deferred 10 | **fixed:** «рубл» заменён на BYN, `tests/unit/currency-copy.test.js` сканирует views и client. Остальные — принятые решения/ограничения; триггер: следующий проход по островам и графикам |
+| M4 Task 8 — E2E/build provenance | 4 | rejected 1, остальные deferred | **rejected:** заметка про unattributed revenue — инвариант схемы (`first_channel_id NOT NULL`), а не пробел E2E. Остальные — триггер: следующий build-шаг или проход по scroll-контейнерам (часть закрыта: `table-wrap` получил `role="region"`/`tabindex="0"` в `channel-detail.ejs`) |
+| M5 Task 1 — decision config | 1 | fixed (M5) | `warnBudgetMultiplier` используется (`scenarios.service.js`, `screen-models.js`), второго литерала 2× нет |
+| M5 Task 5 — alert recalculation cost | 1 | deferred | Три модели атрибуции на пересчёт; триггер: приближение к потолку 32 запросов |
+| M5 Task 3 — kopeck rounding | 1 | rejected | Один копеечный допуск вместо house-monotonicity — записано в спеке §6.2 и покрыто sweep-тестом |
+| M5 Task 6 — decisions HTTP layer | 2 | deferred | Таблица алертов на сервере, JSON-формы мутаций без потребителя; триггер: появление второго клиента |
+| M5 Task 7 — decisions screens/charts | 6 | deferred | Бары прироста вместо waterfall, 12-недельный CAC-график, серверная таблица, пустой builder, выбор кривой, `aria-valuenow` — решения записаны; триггер: следующий проход по решениям |
+| M5 Task 8 — final E2E evidence | 13 | fixed 3 (M5), остальные deferred/rejected | **fixed:** минимальный бюджет слайдера (`budget.minInput`), styled-ошибка builder'а, параграф §6.2 про линейную кривую. **rejected:** отсутствие waterfall и синтетическая пагинация алертов — записанные решения. Остальные — триггер: M6+ |
+| M5 deferrals — recorded | 5 | deferred (M6+) | Per-channel caps, edit/delete сценариев, per-user throttle, `first_detected_at`, экспорт сценариев/алертов — продуктовые задачи M6+; триггер: решение владельца |
+| M6 Task 1 — Docker image | 4 | deferred | Размер образа, URL-encoding `POSTGRES_PASSWORD`, таймаут `/health` при мёртвой БД, `COPY --chmod`; триггер: следующий проход по образу |
+| M6 Task 2 — backups | 3 | deferred | Seed TOCTOU при `--scale`, retention по mtime, `--verify` против живой БД; триггер: масштабирование или изменение формата бэкапа |
+| M6 Task 3 — headers/limits/audit | 5 | deferred | R1 (лимит медиа), R2 (аудит пересчёта), R3 (store лимитера), R5 (`anon` в slow-query — верное чтение, оставлено), HSTS-шов; триггер: публичный стенд |
+| M6 Task 4 — a11y/mobile | 2 | deferred | Полевые ошибки форм и focus-token — второй пункт является записанным решением; триггер: следующий проход по формам |
+| M6 Task 5 — SEO/OG/perf | 3 | deferred | OG из БД, фиксированные размеры 1200×630, валидация `imagePath`; триггер: загрузка обложки администратором или второй размер |
+| M6 Task 6 — E2E matrix | 3 | fixed 2, deferred 1 | **fixed:** бюджет запросов считает snapshot-путь (`page-queries`), ожидание гидратации острова перед снимком. **deferred:** CSRF-отказ 4xx остаётся `text/plain` — решение владельца |
+| M6 Task 7 — guides/README | 4 | fixed 1, deferred 3 | **fixed:** лендинг больше не обещает список демо-аккаунтов на `/login` (`17a4f12`). Остальные — Windows/Firefox/Docker Desktop/TLS (владелец), ограничения `docs-links.test.js` (триггер: проверка внешних ссылок), переиспользование снимков (триггер: изменение экрана) |
+
+### Закрыто в M6 — с проверкой
+
+- **OG-обложка растрирована.** `public/img/og-cover.png` (1200×630, 35 656 байт) — `og:image` лендинга
+  (`src/lib/seo.js`) и тот же файл сид кладёт в `media_assets` (`db/seed/seed.js`), поэтому заглушки 1×1 и
+  расхождения `/media/slug/og-cover` со статическим файлом больше нет. Тесты: `tests/integration/landing.test.js`,
+  `tests/integration/media.test.js`.
+- **Кэширование статики.** `/assets` — `public, max-age=31536000, immutable`; `app.css` и обложка — revalidation;
+  приватные страницы — `no-store` (`src/app.js`, `tests/integration/cache-headers.test.js`).
+- **`TRUST_PROXY`** вместо безусловного `trust proxy: 1` (`src/config/env.js`, `tests/unit/config-env.test.js`).
+- **Второй bucket лимитера входа** по адресу (`src/routes/auth.routes.js`); store по-прежнему в памяти — R3.
+- **Сессии удаляются при деактивации и смене роли** (`src/services/users.service.js` → `users.repo.deleteUserSessions`).
+- **Все `/app`-маршруты защищены `requirePermission`**, расхождение с сайдбаром закрыто (`src/routes/app.routes.js`).
+- **Десять заглушек M1 заменены экранами**; в `src/views` не осталось «Раздел появится на следующем этапе».
+- **`tests/integration/error-pages.test.js`** покрывает 403/404/500, включая styled 500 при отказе БД.
+- **Гигиена и публикация** — `tests/unit/repo-hygiene.test.js`, `tests/unit/publication.test.js`,
+  `scripts/fresh-clone-check.js`, `docs/publication.md`.
+
+### Отклонено — почему
+
+- **Контраст highlight-span** — фиксированный элемент бренд-референса, решение владельца записано 24.11.2026.
+- **Контрольные суммы применённых миграций** — правило «`001` неизменяем, изменения только новой миграцией»
+  делает проверку ненужной; при нарушении правила появится отдельная задача.
+- **Free channels `no_data`** — буквальное правило метрик-спеки; изменение требует решения владельца, не правки теста.
+- **Golden numbers** — контракт перезаписи фикстуры в том же коммите, что и изменение сида, а не допуск.
+- **Один delta в таблице атрибуции, отсутствие waterfall, серверная таблица алертов, `aria-valuenow`** — записанные
+  решения M4/M5; альтернативы отвергнуты по причинам в тексте пунктов.
+- **Заметка про unattributed revenue** — инвариант схемы, ветка покрыта `screen-models.test.js`/island-тестами.
+- **Расхождения с текстом плана** (`002_m2_data.sql`, подпись `exportDataset`, примеры payback/`formatCompactCents`) —
+  дефекты плана, а не кода; контрактом считаются код и тесты.
+
+### Остаётся открытым (deferred) — сводные триггеры
+
+- **Продуктовые фичи M6+:** per-channel caps и water-filling, edit/delete сценариев, `first_detected_at`,
+  экспорт алертов/сценариев, campaign scope в атрибуции/алертах/сценариях, пагинация целей и пользователей.
+- **Эксплуатация:** WAL/PITR и retention по имени файла, seed TOCTOU при нескольких репликах, общий store
+  лимитеров, таймаут `/health` при мёртвой БД, размер образа.
+- **Документация и UX:** мобильная навигация лендинга, поле-уровневые ошибки форм, 4xx-страницы в стиле приложения,
+  OG-обложка из БД.
+- **Владелец:** лицензия, Firefox, Windows 10, Docker Desktop, публичный TLS-стенд, push и тег `v1.0.0` —
+  см. `docs/publication.md` §8.

@@ -826,3 +826,29 @@ data anchor `2026-11-23`, 8 каналов, 32 кампании, 3 пользо�
 `alerts.png`, `scenarios.png`, `admin-users.png`, `audit.png`, `import-error.png`, `403-viewer.png`, `404.png`,
 `500.png` и `mobile-390.png` из Task 4/6 переиспользованы в руководстве: они сняты на том же HEAD и показывают
 те же экраны. Новые снимки не подменяют доказательства Task 6 и не добавляют состояний, которых нет в продукте.
+
+## Task 8 — публикационные ворота и чистый клон
+
+Дата: 24.11.2026. Ветка `main`, Linux (CachyOS), Node.js на хосте `v26.13.0`, npm `12.2.1`, PostgreSQL `18.6`.
+Проверялось дерево задачи T8: версия `1.0.0`, `LICENSE`-плейсхолдер, `docs/publication.md`,
+`scripts/fresh-clone-check.js`, `tests/unit/repo-hygiene.test.js`, `tests/unit/publication.test.js`,
+triage `IMPROVEMENTS.md`.
+
+### 1. Предкоммитные ворота
+
+| Проверка | Команда | Результат |
+|---|---|---|
+| Полный набор тестов | `npm test` | **108 файлов / 1406 тестов, все зелёные**, два прогона: 99,85 с и 100,82 с |
+| Production-сборка | `npm run build` | `✓ built in 1.50s`; единственное предупреждение — известный чанк `ChartTooltip` 642,06 кБ / 193,70 кБ gzip |
+| Конфигурация Compose | `docker compose config` | exit `0`, 94 строки, stderr пуст (Compose v5.8.0, Engine 29.9.2) |
+| Гигиена индекса | `npx vitest run tests/unit/repo-hygiene.test.js` | 9 тестов: нет `.env`, `public/assets`, `node_modules`, логов, бэкапов, файлов > 5 МБ и домашних путей; `.env.example` полон; `src/` без `console.log` |
+| Публикационный пакет | `npx vitest run tests/unit/publication.test.js` | 16 тестов: `LICENSE`, описания ≤ 160/≤ 350, 11 тем, OG-PNG, тег и блокеры, версия и `/health`, helper'ы `check:fresh` |
+
+Версия и `/health` проверяются не только юнит-тестом: чистый клон ниже сравнивает `version` из `package.json` с
+ответом запущенного сервера.
+
+### 2. Чистый клон
+
+Заполняется результатом `npm run check:fresh` **после** коммита задачи T8: скрипт берёт зафиксированный SHA, а не
+рабочее дерево, поэтому его нельзя запускать до коммита. Итог (SHA, длительность, URL, удаление БД и каталога)
+записан отдельным `docs:`-коммитом — без правки задним числом.
