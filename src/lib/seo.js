@@ -1,6 +1,12 @@
 import { env } from '../config/env.js';
 
-const DEFAULT_OG_IMAGE = '/img/og-cover.svg';
+const DEFAULT_OG_IMAGE = '/img/og-cover.png';
+
+/**
+ * Social crawlers fetch `og:image` with no page context, so an SVG cannot load the app's WOFF2 and falls back to a
+ * system face. The committed PNG is the rasterized cover; the SVG stays next to it as the editable source.
+ */
+const DEFAULT_OG_IMAGE_ALT = 'Метрика — аналитика CAC, LTV и ROMI по маркетинговым каналам';
 
 /**
  * Normalizes a site-relative path before it reaches `new URL`.
@@ -52,13 +58,28 @@ export function serializeJsonLd(value) {
  * @param {string} input.description Meta description, at most 160 characters.
  * @param {string} [input.path] Site-relative path used for the canonical URL.
  * @param {string} [input.imagePath] Site-relative or absolute Open Graph image.
+ * @param {string} [input.imageAlt] Alt text for the social card; defaults to the cover description.
  * @param {boolean} [input.noindex] Adds `noindex, nofollow`; used for error pages and the private app.
- * @returns {{ title: string, description: string, canonical: string, ogImage: string, robots: string, jsonLd: string }}
+ * @returns {{
+ *   title: string, description: string, canonical: string, ogImage: string,
+ *   ogImageAlt: string, ogImageType: string, ogImageWidth: number, ogImageHeight: number,
+ *   robots: string, jsonLd: string,
+ * }}
  * @throws {TypeError} When title or description is missing, or when the path cannot be resolved against APP_URL.
  */
-export function buildSeo({ title, description, path = '/', imagePath = DEFAULT_OG_IMAGE, noindex = false } = {}) {
+export function buildSeo({
+  title,
+  description,
+  path = '/',
+  imagePath = DEFAULT_OG_IMAGE,
+  imageAlt = DEFAULT_OG_IMAGE_ALT,
+  noindex = false,
+} = {}) {
   if (!title || !description) {
     throw new TypeError('buildSeo requires title and description');
+  }
+  if (typeof imageAlt !== 'string' || imageAlt.trim() === '') {
+    throw new TypeError('buildSeo requires a non-empty imageAlt');
   }
 
   const canonical = new URL(normalizeCanonicalPath(path), env.appUrl).toString();
@@ -95,6 +116,12 @@ export function buildSeo({ title, description, path = '/', imagePath = DEFAULT_O
     description,
     canonical,
     ogImage,
+    ogImageAlt: imageAlt,
+    // The defaults describe the shipped cover; `imagePath` is the only caller-controlled part today. A future
+    // database-backed cover with different dimensions must pass them instead of inheriting the 1200×630 contract.
+    ogImageType: 'image/png',
+    ogImageWidth: 1200,
+    ogImageHeight: 630,
     robots: noindex ? 'noindex, nofollow' : 'index, follow',
     jsonLd: serializeJsonLd(jsonLd),
   };

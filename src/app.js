@@ -64,6 +64,7 @@ const publicDir = fileURLToPath(new URL('../public', import.meta.url));
  *   trustProxy?: false | true | number | string,
  *   hsts?: boolean,
  *   assets?: { assets: (entryNames: string | string[]) => { scripts: string[], preloads: string[] } },
+ *   assetsDir?: string,
  * }} deps `db.connect` backs `withTransaction`: the import writes data, its batch and its audit row in one
  *   transaction. Integration tests pass a pool pointed at the test database, never the shared one.
  *   `trustProxy` defaults to `TRUST_PROXY`; tests inject it to exercise the forged `X-Forwarded-For` path.
@@ -71,6 +72,8 @@ const publicDir = fileURLToPath(new URL('../public', import.meta.url));
  *   to assert the production header without building a TLS proxy.
  *   `assets` is a ready asset manifest; tests inject a stub so a missing `public/assets` directory does not change
  *   what the page renders.
+ *   `assetsDir` overrides the fingerprinted-asset root. The cache-header test mounts a temporary hashed fixture, so
+ *   the immutable policy is asserted on a clean clone that has not run `npm run build`.
  * @returns {import('express').Express}
  */
 export function createApp({
@@ -79,6 +82,7 @@ export function createApp({
   trustProxy = env.trustProxy,
   hsts = env.cookieSecure,
   assets,
+  assetsDir = ASSETS_DIR,
 } = {}) {
   if (!database || typeof database.query !== 'function') {
     throw new TypeError('createApp requires a db object with a query(text, params) method');
@@ -192,7 +196,7 @@ export function createApp({
 
   // Fingerprinted island files never change under a given name, so they are immutable for a year. The mount sits
   // before the public tree: `app.css` has no hash and must keep the default revalidation behaviour.
-  app.use('/assets', express.static(ASSETS_DIR, { immutable: true, maxAge: '1y' }));
+  app.use('/assets', express.static(assetsDir, { immutable: true, maxAge: '1y' }));
   // Fonts, the single stylesheet and SVG assets live here.
   app.use(express.static(publicDir));
 

@@ -358,6 +358,30 @@ curl -sSI https://metrika.example.by/app/dashboard | grep -Ei 'x-robots-tag|cach
 Публичный стенд без HTTPS — ошибка развёртывания, даже если приложение technically отвечает по HTTP на loopback.
 
 
+### 6.3. Политика кэширования
+
+Приложение уже отправляет правильные заголовки; задача эксплуатации — не переопределить их на прокси.
+
+| Путь | Ожидаемый `Cache-Control` | Что это значит |
+|---|---|---|
+| `/assets/*` | `public, max-age=31536000, immutable` | хешированные острова; имя меняется вместе с содержимым |
+| `/css/app.css`, `/fonts/*`, `/img/*` | `public, max-age=0` + `ETag` | имя не хешировано, браузер ревалидирует и получает 304 |
+| `/` и `/login` (HTML) | без долгого TTL | документ называет текущий хеш бандла |
+| `/app/*` | `no-store`, `X-Robots-Tag: noindex, nofollow` | приватные данные и сессия |
+| `/api/*` | `no-store`, `X-Robots-Tag: noindex, nofollow` | ответ зависит от пользователя |
+| `/health` | `no-store` | состояние стенда нельзя кэшировать |
+
+Не добавляйте в Caddy/nginx `expires`, `immutable` или `proxy_cache` для HTML: после деплоя страница со старым
+хешем сошлётся на удалённый файл. Не переопределяйте `no-store` на `/app` и `/api`. Проверка:
+
+```bash
+curl -sSI https://metrika.example.by/assets/<hashed>.js | grep -i cache-control
+curl -sSI https://metrika.example.by/css/app.css | grep -i cache-control
+curl -sSI https://metrika.example.by/app/dashboard | grep -Ei 'cache-control|x-robots-tag'
+```
+
+Регрессионный тест политики — `tests/integration/cache-headers.test.js`; он не зависит от локальной сборки.
+
 ## 7. Резервные копии
 
 ### 7.1. Формат и ключ

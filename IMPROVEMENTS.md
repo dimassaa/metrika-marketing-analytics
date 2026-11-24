@@ -967,3 +967,19 @@ Still open:
   replaces `--color-cyan-edge` on outlines because the brand cyan measures 2.99:1 on the stone canvas (3.13:1 on
   white), below the 3:1 non-text floor. The deviation from the token list in `AGENTS.md` is deliberate and measured in
   `docs/screenshots/m6/README.md`; chart lines and borders keep the brand cyan.
+
+## M6 Task 5 — SEO, OG-PNG и измеренная производительность
+
+- **OG-обложка из БД отложена (deferred, priority: low).** `buildSeo` по умолчанию отдаёт статический
+  `public/img/og-cover.png` (1200×630), а не `/media/slug/og-cover`. Причина: в сиде лежит заглушка 1×1, и отдавать
+  её как social preview хуже, чем настоящий PNG; публичный контроллер лендинга синхронный и статичный, а
+  `media_assets` уже хранит рабочий slug. Триггер пересмотра: появление реального медиа-ассета 1200×630, который
+  администратор загружает через `/api/v1/admin/media/og-cover`. Тогда `homePage` должен стать асинхронным (или
+  получить обложку из отдельного загрузчика), передать `imagePath: '/media/slug/og-cover'`, размеры из метаданных
+  загрузки и fallback на статический PNG при отсутствии строки.
+- **`buildSeo` публикует фиксированные 1200×630.** `ogImageType/Width/Height` — контракт текущего статического
+  файла. Если появится второй размер (квадрат для некоторых сетей) или обложка из БД, размеры должны приходить
+  параметрами, иначе метатеги разойдутся с картинкой.
+- **`imagePath` в `buildSeo` по-прежнему не валидируется.** Пункт из финального ревью M1 остаётся: вызывающий код
+  может передать внешний `og:image`. Сегодня единственный вызывающий — публичный контроллер без `imagePath`;
+  нормализацию стоит добавить вместе с подключением обложки из БД, чтобы не менять контракт дважды.

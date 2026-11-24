@@ -55,10 +55,18 @@ describe('public landing', () => {
     expect(description.length).toBeLessThanOrEqual(160);
 
     expect(res.text).toContain(`<link rel="canonical" href="${HOME_URL}">`);
+    // Exactly one canonical: a second link with another href lets a crawler pick the wrong page.
+    expect(res.text.match(/<link rel="canonical"/g)).toHaveLength(1);
     expect(res.text).toContain(`<meta property="og:url" content="${HOME_URL}">`);
     expect(res.text).toContain(
-      `<meta property="og:image" content="${new URL('/img/og-cover.svg', env.appUrl).toString()}">`,
+      `<meta property="og:image" content="${new URL('/img/og-cover.png', env.appUrl).toString()}">`,
     );
+    expect(res.text).toContain('<meta property="og:image:type" content="image/png">');
+    expect(res.text).toContain('<meta property="og:image:width" content="1200">');
+    expect(res.text).toContain('<meta property="og:image:height" content="630">');
+    expect(res.text).toMatch(/<meta property="og:image:alt" content="[^"]{20,}">/);
+    expect(res.text).toContain('<meta name="twitter:card" content="summary_large_image">');
+    expect(res.text).toMatch(/<meta name="twitter:image:alt" content="[^"]{20,}">/);
     expect(res.text).toMatch(/<meta name="robots" content="index, follow">/);
 
     const jsonLd = extractJsonLd(res.text);
@@ -96,6 +104,15 @@ describe('public landing', () => {
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toMatch(/xml/);
     expect(res.text).toContain(`<loc>${HOME_URL}</loc>`);
+  });
+
+  it('serves the Open Graph cover as a real PNG from the public tree', async () => {
+    const res = await request(app).get('/img/og-cover.png');
+
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/^image\/png/);
+    // A meta tag pointing at a 404 is the classic OG regression; the body must be the committed screenshot.
+    expect(res.body.length).toBeGreaterThan(1024);
   });
 
   it('answers unknown pages with an HTML 404 view, not JSON', async () => {
