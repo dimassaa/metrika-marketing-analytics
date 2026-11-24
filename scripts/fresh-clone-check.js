@@ -539,8 +539,9 @@ async function check(options) {
     );
     await step('database create (db:setup)', async () => {
       await dropCloneDatabase(adminUrl);
-      await run(NPM, ['run', 'db:setup'], { ...npmOptions, label: 'db:setup' });
+      // The database can exist even when db:setup fails after creating it, so cleanup must still try to drop it.
       databaseCreated = true;
+      await run(NPM, ['run', 'db:setup'], { ...npmOptions, label: 'db:setup' });
     });
     await step('npm run migrate', () => run(NPM, ['run', 'migrate'], { ...npmOptions, label: 'migrate' }));
     await step('npm run seed', () => run(NPM, ['run', 'seed'], { ...npmOptions, label: 'seed' }));

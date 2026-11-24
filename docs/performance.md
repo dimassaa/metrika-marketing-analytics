@@ -74,7 +74,7 @@ Seq Scan на `channels` (8 строк), `campaigns` (32 строки) и `custo
 |---|---:|
 | `/app/dashboard` | 18 |
 | `/app/channels` | 16 |
-| `/app/channels/1` | 24 |
+| `/app/channels/1` | 27 |
 | `/app/cohorts` | 9 |
 | `/app/attribution` | 8 |
 | `/app/alerts` | 32 (первый GET пересчитывает окна) |
@@ -84,6 +84,10 @@ Seq Scan на `channels` (8 строк), `campaigns` (32 строки) и `custo
 
 Потолки не растут с числом каналов: агрегаты группируют в SQL, а не циклятся по строкам. Запись (`import`) в эти
 бюджеты не входит и остаётся построчной по контракту задачи M2.
+
+`/app/channels/1` — **27, а не 24**: прежняя цифра не учитывала `BEGIN`/`COMMIT` двух LTV-снапшотов. Измеренный
+путь — 17 обычных statement плюс 2 × (`BEGIN` + три чтения + `COMMIT`) = 27; потолок закреплён
+`tests/integration/page-queries.test.js` (11 тестов).
 
 ## 4. Индексы: не добавлены
 

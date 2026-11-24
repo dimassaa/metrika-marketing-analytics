@@ -94,8 +94,18 @@ docker compose stop db          # приложение отвечает /health 
 docker compose start db         # снова healthy
 docker compose down             # контейнеры удалены, named volumes сохранены
 docker compose up -d            # данные и сессии на месте
-docker compose down -v          # полный сброс: БД, секрет сессии, бэкапы
+docker compose down -v          # полный сброс: БД, секрет сессии, бэкапы и ключ в app_data
 ```
+
+`down -v` удаляет и ключ `/app/data/backup.key` из тома `app_data`: без копии на хосте старые бэкапы больше не
+расшифровать. Перед сбросом скопируйте ключ на хост и закройте права:
+
+```bash
+docker compose cp app:/app/data/backup.key ./backup.key.offline
+chmod 600 ./backup.key.offline
+```
+
+Порядок хранения и ротации ключа — §7.6.
 
 Порт PostgreSQL наружу не публикуется. Порт приложения привязан к `127.0.0.1`; для публичного доступа нужен
 reverse proxy с TLS (раздел 6) и `COOKIE_SECURE=true`.
@@ -276,7 +286,9 @@ COOKIE_SECURE=false
 BACKUP_KEY_FILE=C:\ProgramData\Metrika\backup.key
 BACKUP_DIR=C:\MetrikaBackups
 BACKUP_RETENTION_DAYS=7
-RESTORE_TMP_DIR=C:\Metrika\tmp
+# В .env переменные %LOCALAPPDATA% не раскрываются: укажите полный путь, который печатает $env:LOCALAPPDATA.
+# Не используйте C:\Metrika\tmp: расшифрованный дамп не должен быть доступен другим локальным учётным записям.
+RESTORE_TMP_DIR=C:\Users\<профиль>\AppData\Local\Temp\Metrika
 PG_DUMP=C:\Program Files\PostgreSQL\18\bin\pg_dump.exe
 PG_RESTORE=C:\Program Files\PostgreSQL\18\bin\pg_restore.exe
 ```
@@ -337,8 +349,10 @@ Invoke-RestMethod http://127.0.0.1:3000/health
 ```
 
 Compose-путь не требует `.env`: логин, пароль БД и секрет сессии создаются внутри контейнера. Для сброса стенда
-используйте `docker compose down -v` (удаляет БД, секрет и бэкапы). **Сначала создайте ключ по §7.5** — без него
-`backup.js` завершится ошибкой `BACKUP_KEY_FILE`. После этого бэкап запускается внутри контейнера:
+используйте `docker compose down -v` (удаляет БД, секрет, бэкапы и ключ в `app_data`). **Сначала создайте ключ по
+§7.5** — без него `backup.js` завершится ошибкой `BACKUP_KEY_FILE`. Перед `down -v` скопируйте ключ на хост:
+`docker compose cp app:/app/data/backup.key .\backup.key.offline` (§7.6). После этого бэкап запускается внутри
+контейнера:
 
 ```powershell
 docker compose exec -T app node scripts/backup.js
@@ -350,15 +364,26 @@ Docker Desktop не установлен, native-путь выше полнос�
 
 ### 5.6. Ключ бэкапа и ACL
 
-Ключ создаётся один раз, в PowerShell 5.1:
+Ключ создаётся один раз, в PowerShell 5.1. `CreateNew` отказывается перезаписывать существующий файл: новый ключ
+сделал бы все прежние бэкапы нечитаемыми, поэтому ошибка «файл уже существует» — это защита, а не помеха.
 
 ```powershell
 New-Item -ItemType Directory -Force 'C:\ProgramData\Metrika' | Out-Null
+$path = 'C:\ProgramData\Metrika\backup.key'
 $bytes = New-Object byte[] 32
 [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
 $hex = -join ($bytes | ForEach-Object { $_.ToString('x2') })
-[IO.File]::WriteAllText('C:\ProgramData\Metrika\backup.key', $hex)
+$stream = [IO.File]::Open($path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+try {
+  $out = [Text.Encoding]::ASCII.GetBytes($hex)
+  $stream.Write($out, 0, $out.Length)
+} finally {
+  $stream.Dispose()
+}
 ```
+
+Если файл уже есть, команда падает с `The file already exists` — это ожидаемо. Не удаляйте ключ ради повторного
+запуска: сначала заархивируйте его вместе с бэкапами (§7.6).
 
 ACL: наследование снимается, читать могут только SYSTEM и администраторы; служебному пользователю задачи
 добавляется только чтение. SID надёжнее локализованных имён групп:
@@ -570,9 +595,13 @@ Linux/macOS, один раз. Сначала создайте ключ, зате
 
 ```bash
 install -d -m 700 backups
-node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))" > backups/backup.key
+node -e "require('node:fs').writeFileSync('backups/backup.key', require('node:crypto').randomBytes(32).toString('hex') + '\n', { mode: 0o600, flag: 'wx' })"
 chmod 600 backups/backup.key
 ```
+
+`flag: 'wx'` отказывается перезаписывать существующий файл (`EEXIST`): новый ключ сделал бы все прежние бэкапы
+нечитаемыми. Если команда упала с `EEXIST`, ничего не удаляйте — сначала заархивируйте ключ вместе с бэкапами
+(§7.6).
 
 ```dotenv
 BACKUP_KEY_FILE=./backups/backup.key
@@ -635,6 +664,23 @@ npm run restore -- --file ./backups/<file>.dump.enc --database metrika_restore_c
   `pg_restore --clean --if-exists --no-owner --no-acl`, затем временный каталог удаляется в `finally` даже при
   ошибке. Каталоги `metrika-restore-*` старше 24 часов, оставшиеся после kill/power loss, удаляются при старте;
   активный concurrent-restore моложе порога не затрагивается.
+- **Если удалить временный каталог не удалось, команда завершается кодом `1`,** а не предупреждением: в каталоге
+  лежит расшифрованный дамп, который читается без ключа. Скрипт делает одну повторную попытку (антивирус или
+  индексатор могут держать файл), затем печатает путь и требует удалить его вручную.
+- **Windows: `RESTORE_TMP_DIR` — только каталог в профиле пользователя.** Путь `C:\Metrika\tmp` наследует ACL
+  корня репозитория и может быть доступен другим локальным учётным записям; plaintext-дамп это не допускает.
+  Укажите полный путь (`$env:LOCALAPPDATA\Temp\Metrika`, в `.env` — без `%…%`, они не раскрываются) и ограничьте
+  ACL:
+
+  ```powershell
+  New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\Temp\Metrika" | Out-Null
+  icacls "$env:LOCALAPPDATA\Temp\Metrika" /inheritance:r
+  icacls "$env:LOCALAPPDATA\Temp\Metrika" /grant:r "$env:USERNAME:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F'
+  ```
+
+  Каталог `%LOCALAPPDATA%\Temp` уже привязан к профилю, но явный `/inheritance:r` закрывает доступ `Users`, если
+  профиль когда-либо получил широкое наследование. `os.tmpdir()` на Windows обычно указывает сюда же — это
+  безопасный дефолт; переопределяйте его только на путь с таким же ACL.
 - `--verify` сравнивает **row-count + key checksum**: `count(*)` и
   `md5(string_agg(id::text, ',' ORDER BY id))` по `users`, `channels`, `campaigns`, `customers`, `orders`,
   `daily_stats`, `audit_log`. Печатается таблица, при любом расхождении код выхода `1`. Это не побайтовое и не
@@ -680,16 +726,22 @@ npm run restore -- --file ./backups/<file>.dump.enc --database <имя_базы_
 
 В Compose уже заданы `BACKUP_KEY_FILE=/app/data/backup.key`, `BACKUP_DIR=/backup`,
 `RESTORE_TMP_DIR=/app/data/tmp`; `BACKUP_KEY` в окружении отсутствует. Сначала ключ, потом бэкап: без файла ключа
-`scripts/backup.js` откажется работать. Ключ создаётся один раз внутри контейнера (файл в volume `app_data`, не в
-образе):
+`scripts/backup.js` откажется работать. Ключ создаётся один раз внутри контейнера, в томе `app_data` (не в образе),
+с `flag: 'wx'`, чтобы не перезаписать существующий:
 
 ```bash
-docker compose exec -T app node -e "require('node:fs').writeFileSync('/app/data/backup.key', require('node:crypto').randomBytes(32).toString('hex')+'\n', {mode:0o600})"
+docker compose exec -T app node -e "require('node:fs').writeFileSync('/app/data/backup.key', require('node:crypto').randomBytes(32).toString('hex')+'\n', {mode:0o600, flag:'wx'})"
 docker compose exec -T app stat -c '%a %n' /app/data/backup.key   # 600
+docker compose cp app:/app/data/backup.key ./backup.key.offline   # копия вне тома, для down -v
+chmod 600 ./backup.key.offline
 docker compose exec -T app node scripts/backup.js
 docker compose exec -T app ls -l /backup
 docker compose cp app:/backup/<file>.dump.enc .
 ```
+
+Повторный запуск `wx` падает с `EEXIST` — это защита: ключ, перезаписанный ради «чистого» запуска, делает все
+прежние `*.dump.enc` нечитаемыми. `app_data` удаляется командой `down -v`, поэтому `backup.key.offline` на хосте —
+не резервная копия «на всякий случай», а обязательная часть архива. Ротация и архив — §7.6.
 
 Восстановление внутри контейнера требует `ADMIN_DATABASE_URL`, указывающего на сервис `db`, а не на `localhost`:
 
@@ -703,6 +755,39 @@ docker compose exec -T db psql -U postgres -d postgres -c 'DROP DATABASE metrika
 `/tmp` в контейнере — tmpfs 256 MB; крупный дамп туда не поместится, поэтому `RESTORE_TMP_DIR` указывает на
 `/app/data/tmp` в volume. Не меняйте его на `/tmp` без увеличения tmpfs. Забирать бэкап с контейнера — только
 `docker compose cp`; bind-mount `./backups` оставляет файлы принадлежащими хосту и может быть недоступен uid 1000.
+
+### 7.6. Ротация и архив ключа
+
+Ключ шифрует бэкапы, а не базу: **старые копии остаются зашифрованы старым ключом**, поэтому ротация — это новый
+ключ для новых копий плюс архив старого ключа рядом с теми копиями, которые он открывает.
+
+1. **Архив перед ротацией.** Скопируйте текущий ключ под именем с датой и закройте права; положите его в то же
+   защищённое хранилище, где лежат бэкапы этого периода (не в репозиторий, не в `.env`, не в Compose):
+
+   ```bash
+   # native
+   cp -p backups/backup.key "backups/backup.key.$(date -u +%Y%m%d)"
+   chmod 600 "backups/backup.key.$(date -u +%Y%m%d)"
+   # Docker: ключ живёт в app_data, поэтому сначала на хост
+   docker compose cp app:/app/data/backup.key "./backup.key.$(date -u +%Y%m%d).offline"
+   chmod 600 "./backup.key.$(date -u +%Y%m%d).offline"
+   ```
+
+2. **Новый ключ.** Уберите текущий файл из рабочего места (`mv backups/backup.key …` для native; для Docker —
+   скопируйте его на хост и удалите внутри контейнера `rm /app/data/backup.key`), затем создайте ключ заново по
+   §7.1 или §7.5. `flag: 'wx'` не даст перезаписать файл, если предыдущий шаг забыт.
+
+3. **Проверка.** Сделайте новую копию и восстановите её в scratch-базу (`restore --create --verify`). Отдельно
+   проверьте, что архивная копия со старым ключом всё ещё открывается: `BACKUP_KEY_FILE=<архив> npm run restore --
+   --file <старый>.dump.enc --database metrika_restore_check --create --verify`.
+
+4. **Что нельзя делать.** Держать единственную копию ключа только в `app_data` (`down -v` её удалит); хранить ключ
+   в репозитории, `.env` или аргументах командной строки; «пересоздавать» ключ поверх существующего; удалять старый
+   ключ, пока существуют зашифрованные им копии. Ротация не перешифровывает старые дампы — это осознанно: иначе
+   понадобился бы доступ ко всем ключам сразу.
+
+5. **Когда ротировать.** При подозрении на утечку ключа, при смене ответственного за стенд и при переезде на другой
+   хост. Для демо-стенда достаточно одного ключа на весь срок; ротация — часть эксплуатации, а не проверка M6.
 
 ## 8. Обновление стенда
 

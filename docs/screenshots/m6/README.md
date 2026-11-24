@@ -845,6 +845,9 @@ triage `IMPROVEMENTS.md`.
 | Гигиена индекса | `npx vitest run tests/unit/repo-hygiene.test.js` | 9 тестов: нет `.env`, `public/assets`, `node_modules`, логов, бэкапов, файлов > 5 МБ и домашних путей; `.env.example` полон; `src/` без `console.log` |
 | Публикационный пакет | `npx vitest run tests/unit/publication.test.js` | 16 тестов: `LICENSE`, описания ≤ 160/≤ 350, 11 тем, OG-PNG, тег и блокеры, версия и `/health`, helper'ы `check:fresh` |
 
+Числа в этой таблице — состояние `be91b0d`; после финального ревью (девять правок, включая лицензию в двух
+состояниях и cleanup restore) итог другой: см. §3 ниже.
+
 Версия и `/health` проверяются не только юнит-тестом: чистый клон ниже сравнивает `version` из `package.json` с
 ответом запущенного сервера.
 
@@ -906,3 +909,18 @@ $ curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:41777/login
 
 Итог: оба пути — native и Docker — поднимаются с зафиксированного коммита без локальных файлов; версия в `/health`
 равна `1.0.0`. Результаты записаны этим `docs:`-коммитом, а не правкой предыдущего.
+
+### 3. Финальные ворота после ревью
+
+| Проверка | Результат |
+|---|---|
+| Полный `npm test` | **109 файлов / 1415 тестов, все зелёные**, 98,38 с |
+| `tests/unit/repo-hygiene.test.js` | 11 тестов: индекс, размеры, домашние пути, вложенные `.env*`, `console.info/debug` и вычисляемые формы |
+| `tests/unit/publication.test.js` | 20 тестов: плейсхолдер **и** MIT, версия lock-файла, описания, темы, OG, тег, `/health`, helper'ы `check:fresh` |
+| `tests/unit/docs-links.test.js` | 5 тестов |
+| `tests/integration/page-queries.test.js` | 11 тестов; `/app/channels/1` — 27 statement, включая `BEGIN`/`COMMIT` двух LTV-снапшотов |
+| `npm run build` | `✓ built in 1.45s`, единственное предупреждение — известный чанк `ChartTooltip` |
+| `npm run check:fresh` | **PASS** на `e16e802` за 4,5 с, `database: metrika_clone_check — dropped` |
+
+Числа в §1 (1406 тестов, 9 hygiene, 16 publication) оставлены как историческое доказательство коммита
+`be91b0d`; актуальные значения — в этой таблице.

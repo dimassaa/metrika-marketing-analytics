@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import pg from 'pg';
 import {
   BackupError,
@@ -432,23 +433,58 @@ async function main() {
       console.log(`Scratch-база оставлена для проверки; удалить: dropdb ${targetDatabase}`);
     }
   } finally {
-    await rm(workDir, { recursive: true, force: true }).catch((error) => {
-      // The decrypted dump is the one artefact that must not survive; say so loudly if cleanup fails.
-      console.warn(`Внимание: не удалось удалить временный каталог ${workDir}: ${error.message}`);
-    });
+    const cleanup = await removeRestoreDirectory(workDir);
+    if (!cleanup.removed) {
+      // Fail the command: the decrypted dump is readable without the key until someone removes it by hand.
+      console.error(
+        `ОШИБКА: расшифрованный дамп не удалён: ${workDir} (${cleanup.error}).\n` +
+          'Удалите каталог вручную: пока он существует, дамп читается без ключа.',
+      );
+      process.exitCode = 1;
+    }
   }
 }
 
-try {
-  await main();
-} catch (error) {
-  const databaseUrl = process.env.DATABASE_URL ?? '';
-  const adminUrl = process.env.ADMIN_DATABASE_URL ?? '';
-  const message = redactConnectionString(
-    redactConnectionString(error.message, databaseUrl),
-    adminUrl,
-  );
-  console.error(`Восстановление не выполнено: ${message}`);
-  if (process.env.DEBUG) console.error(error.stack);
-  process.exitCode = 1;
+/**
+ * Removes the decrypted work directory, retrying once.
+ *
+ * A leftover plaintext dump is a security event, not a cosmetic warning: a transient lock (antivirus, indexer,
+ * backup agent) is worth one retry, and a second failure must fail the command even when the restore itself
+ * succeeded. The injection seam exists so the retry can be tested without making a directory undeletable.
+ *
+ * @param {string} directory Absolute work directory created by `mkdtemp`.
+ * @param {{
+ *   remove?: (path: string, options: { recursive: boolean, force: boolean }) => Promise<void>,
+ *   delayMs?: number,
+ * }} [options]
+ * @returns {Promise<{ removed: boolean, attempts: number, error?: string }>}
+ */
+export async function removeRestoreDirectory(directory, { remove = rm, delayMs = 200 } = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      await remove(directory, { recursive: true, force: true });
+      return { removed: true, attempts: attempt };
+    } catch (error) {
+      lastError = error;
+      if (attempt === 1) await new Promise((resolvePromise) => setTimeout(resolvePromise, delayMs));
+    }
+  }
+  return { removed: false, attempts: 2, error: lastError.message };
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    await main();
+  } catch (error) {
+    const databaseUrl = process.env.DATABASE_URL ?? '';
+    const adminUrl = process.env.ADMIN_DATABASE_URL ?? '';
+    const message = redactConnectionString(
+      redactConnectionString(error.message, databaseUrl),
+      adminUrl,
+    );
+    console.error(`Восстановление не выполнено: ${message}`);
+    if (process.env.DEBUG) console.error(error.stack);
+    process.exitCode = 1;
+  }
 }
